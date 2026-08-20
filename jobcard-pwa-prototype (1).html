@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>जॉब कार्ड - पल्वरायझर</title>
+<style>
+  :root{
+    --ink:#1c1b18; --ink-soft:#5c5a52; --line:#ddd8cc;
+    --paper:#fbfaf6; --panel:#ffffff; --clay:#b5581f; --clay-soft:#f3e3d6;
+    --ok:#2f6d3f; --ok-soft:#e4efe3; --warn:#a8391f; --warn-soft:#f7e2dc;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Segoe UI', system-ui, -apple-system, sans-serif;background:var(--paper);color:var(--ink);-webkit-tap-highlight-color:transparent;}
+  header{position:sticky;top:0;z-index:20;background:var(--ink);color:#f4f1ea;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;}
+  header .title{font-size:16px;font-weight:600;letter-spacing:.2px;}
+  header .sub{font-size:11px;color:#c8c2b3;margin-top:2px;}
+  .role-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:var(--clay);color:#fff;margin-top:3px;}
+  nav{display:flex;gap:0;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:56px;z-index:19;overflow-x:auto;}
+  nav button{flex:1;min-width:110px;border:none;background:none;padding:12px 8px;font-size:13px;font-weight:600;color:var(--ink-soft);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;}
+  nav button.active{color:var(--clay);border-bottom-color:var(--clay);}
+  main{max-width:640px;margin:0 auto;padding:16px 16px 100px;}
+  .view{display:none;}
+  .view.active{display:block;animation:fade .2s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+  .card h3{margin:0 0 12px;font-size:14px;color:var(--clay);text-transform:uppercase;letter-spacing:.5px;}
+  label{display:block;font-size:12px;color:var(--ink-soft);margin:10px 0 4px;font-weight:600;}
+  input[type=text], input[type=number], input[type=date], input[type=time], select, textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;background:#fff;color:var(--ink);font-family:inherit;
+  }
+  textarea{resize:vertical;min-height:56px;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .chip-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}
+  .chip{padding:8px 14px;border:1px solid var(--line);border-radius:20px;font-size:13px;cursor:pointer;background:#fff;color:var(--ink-soft);font-weight:600;}
+  .chip.selected{background:var(--clay);border-color:var(--clay);color:#fff;}
+  .checkline{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .checkline:last-child{border-bottom:none;}
+  .checkline input{width:20px;height:20px;flex-shrink:0;}
+  .checkline span{font-size:14px;}
+  .batch-block{border:1px dashed var(--line);border-radius:8px;padding:12px;margin-bottom:12px;position:relative;}
+  .batch-block .batch-label{font-size:12px;font-weight:700;color:var(--clay);margin-bottom:8px;display:block;}
+  .batch-remove{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--warn);font-size:12px;cursor:pointer;font-weight:600;}
+  .btn{width:100%;padding:14px;border-radius:8px;border:none;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;}
+  .btn-primary{background:var(--clay);color:#fff;}
+  .btn-secondary{background:var(--panel);color:var(--ink);border:1px solid var(--line);}
+  .btn-ghost{background:none;color:var(--ink-soft);border:1px dashed var(--line);}
+  .status-bar{position:fixed;bottom:0;left:0;right:0;background:var(--ink);color:#f4f1ea;padding:10px 16px;font-size:12px;display:flex;align-items:center;justify-content:space-between;z-index:30;}
+  .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;}
+  .status-dot.online{background:#5fbf6f;}
+  .status-dot.offline{background:#d98a3d;}
+  .toast{position:fixed;top:66px;left:50%;transform:translateX(-50%);background:var(--ok);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:50;opacity:0;pointer-events:none;transition:opacity .25s ease, top .25s ease;box-shadow:0 4px 12px rgba(0,0,0,.15);}
+  .toast.show{opacity:1;top:76px;}
+  .field-hint{font-size:11px;color:var(--ink-soft);margin-top:3px;}
+  .helper-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .helper-row .count{font-size:12px;color:var(--ink-soft);}
+  table.dash{width:100%;border-collapse:collapse;font-size:13px;}
+  table.dash th{text-align:left;font-size:11px;color:var(--ink-soft);padding:6px 8px;border-bottom:1px solid var(--line);text-transform:uppercase;}
+  table.dash td{padding:8px 8px;border-bottom:1px solid var(--line);}
+  .badge{padding:3px 8px;border-radius:12px;font-size:11px;font-weight:700;display:inline-block;margin:1px;}
+  .badge.ok{background:var(--ok-soft);color:var(--ok);}
+  .badge.warn{background:var(--warn-soft);color:var(--warn);}
+  .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+  .metric{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px;text-align:center;}
+  .metric .num{font-size:22px;font-weight:700;color:var(--ink);}
+  .metric .lbl{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+  .empty{text-align:center;color:var(--ink-soft);font-size:13px;padding:30px 10px;}
+  .sig-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .small-note{font-size:11px;color:var(--ink-soft);line-height:1.5;margin-top:4px;}
+  .pending-item{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;cursor:pointer;background:#fff;}
+  .pending-item:hover{border-color:var(--clay);}
+  .pending-item .pi-top{display:flex;justify-content:space-between;font-weight:700;font-size:14px;margin-bottom:4px;}
+  .pending-item .pi-sub{font-size:12px;color:var(--ink-soft);}
+  .back-link{background:none;border:none;color:var(--clay);font-size:13px;font-weight:600;cursor:pointer;padding:0 0 12px;}
+  .readonly-block{background:var(--clay-soft);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.6;color:var(--ink);}
+
+  #auth-view{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--paper);padding:24px 16px;}
+  .auth-card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px 20px;}
+  .auth-card h2{margin:0 0 4px;font-size:18px;color:var(--ink);}
+  .auth-card .auth-sub{font-size:12px;color:var(--ink-soft);margin-bottom:18px;}
+  .auth-error{background:var(--warn-soft);color:var(--warn);font-size:12px;padding:8px 10px;border-radius:6px;margin-bottom:10px;display:none;}
+  .auth-error.show{display:block;}
+  .auth-toggle{text-align:center;font-size:13px;color:var(--ink-soft);margin-top:14px;}
+  .auth-toggle a{color:var(--clay);font-weight:600;text-decoration:none;cursor:pointer;}
+  .app-shell{display:none;}
+  .app-shell.active{display:block;}
+  .user-badge{display:flex;align-items:center;gap:10px;}
+  .user-badge .who{font-size:11px;color:#c8c2b3;text-align:right;line-height:1.4;}
+  .user-badge .who b{color:#f4f1ea;display:block;font-size:12px;}
+  .logout-btn{background:none;border:1px solid #55534a;color:#f4f1ea;font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;}
+  .role-chip-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}
+  .role-chip{flex:1;min-width:90px;text-align:center;padding:10px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px;cursor:pointer;background:#fff;color:var(--ink-soft);font-weight:600;}
+  .role-chip.selected{background:var(--clay);border-color:var(--clay);color:#fff;}
+</style>
+</head>
+<body>
+
+<div id="auth-view">
+  <div class="auth-card">
+    <h2 id="auth-title">Sign in / लॉगिन</h2>
+    <div class="auth-sub">Job Card — Pulveriser / जॉब कार्ड — पल्वरायझर</div>
+    <div class="auth-error" id="auth-error"></div>
+    <label>Email / ईमेल</label>
+    <input type="text" id="auth-email" placeholder="name@company.com" autocomplete="username" />
+    <label>Password / पासवर्ड</label>
+    <input type="text" id="auth-password" placeholder="Password" autocomplete="current-password" />
+    <div id="auth-confirm-wrap" style="display:none;">
+      <label>Confirm password / पासवर्ड की पुष्टि करें</label>
+      <input type="text" id="auth-password2" placeholder="Confirm password" autocomplete="new-password" />
+      <label>Your role / आपकी भूमिका</label>
+      <div class="role-chip-group" id="role-chips">
+        <div class="role-chip" data-value="operator">Operator / ऑपरेटर</div>
+        <div class="role-chip" data-value="production">Production</div>
+        <div class="role-chip" data-value="lab">Lab / QC</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="auth-submit" type="button" style="margin-top:16px;">Sign in / लॉगिन करें</button>
+    <div class="auth-toggle" id="auth-toggle">New here? / नए हैं? <a id="auth-switch">Create an account / खाता बनाएं</a></div>
+    <div class="small-note" style="margin-top:14px;">Your role decides what part of the jobcard you fill and in which language the form shows.</div>
+  </div>
+</div>
+
+<div class="app-shell" id="app-shell">
+
+<header>
+  <div>
+    <div class="title" id="app-title">Job Card &mdash; Pulveriser</div>
+    <div class="sub">JSCI/PROD/02 &middot; Rev 02</div>
+  </div>
+  <div class="user-badge">
+    <div class="who"><b id="header-user">-</b><span class="role-pill" id="header-role">-</span></div>
+    <button class="logout-btn" id="logout-btn" type="button">Log out</button>
+  </div>
+</header>
+
+<nav>
+  <button class="active" data-view="entry" id="nav-entry">New entry</button>
+  <button data-view="records" id="nav-records">My submissions</button>
+  <button data-view="dashboard" id="nav-dashboard">Dashboard</button>
+</nav>
+
+<main>
+
+  <!-- ============ OPERATOR ENTRY FORM (Hindi) ============ -->
+  <div class="view active" id="view-entry">
+    <div id="operator-form">
+      <div class="card">
+        <h3>शिफ्ट विवरण</h3>
+        <div class="row2">
+          <div>
+            <label>मशीन नंबर</label>
+            <select id="f-machine">
+              <option value="M1">M1</option>
+              <option value="M2">M2</option>
+            </select>
+          </div>
+          <div>
+            <label>जॉब नंबर</label>
+            <input type="text" id="f-jobno" placeholder="जैसे JB-0451" />
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>ऑपरेटर</label>
+            <input type="text" id="f-operator" placeholder="ऑपरेटर का नाम" />
+          </div>
+          <div>
+            <label>तारीख</label>
+            <input type="date" id="f-date" />
+          </div>
+        </div>
+        <label>शिफ्ट</label>
+        <div class="chip-group" id="shift-chips">
+          <div class="chip" data-value="Day">दिन (सुबह 8 - रात 8)</div>
+          <div class="chip" data-value="Night">रात (रात 8 - सुबह 8)</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="helper-row">
+          <h3 style="margin:0;">बैच एन्ट्री</h3>
+          <span class="count" id="batch-count">0 / 4</span>
+        </div>
+        <div id="batch-list"></div>
+        <button class="btn btn-ghost" id="add-batch" type="button">+ बैच एन्ट्री जोड़ें</button>
+        <div class="small-note">इस शिफ्ट में इस्तेमाल हर माल/लॉट के लिए एक एन्ट्री जोड़ें (अधिकतम 4)।</div>
+      </div>
+
+      <div class="card">
+        <h3>दैनिक जाँच बिंदु</h3>
+        <div class="checkline"><input type="checkbox" id="chk-clean" /><span>मशीन की सफाई</span></div>
+        <div class="checkline"><input type="checkbox" id="chk-roller" /><span>रोलर की जाँच करना</span></div>
+        <div class="checkline"><input type="checkbox" id="chk-mesh" /><span>जाली के कपड़े की जाँच करना</span></div>
+      </div>
+
+      <div class="card">
+        <h3>तास रिडींग</h3>
+        <div class="row3">
+          <div>
+            <label>शुरू समय</label>
+            <input type="time" id="f-hrs-start" />
+          </div>
+          <div>
+            <label>बंद समय</label>
+            <input type="time" id="f-hrs-stop" />
+          </div>
+          <div>
+            <label>कुल घंटे (ऑटो)</label>
+            <input type="text" id="f-hrs-total" disabled placeholder="0.0" />
+          </div>
+        </div>
+        <div class="field-hint">कुल घंटे = बंद समय − शुरू समय, अपने आप गणना होती है।</div>
+      </div>
+
+      <div class="card">
+        <h3>हस्ताक्षर</h3>
+        <div class="sig-grid">
+          <div>
+            <label>ऑपरेटर</label>
+            <input type="text" id="s-operator" placeholder="नाम" />
+          </div>
+          <div>
+            <label>मेंटेनन्स इन्चार्ज</label>
+            <input type="text" id="s-maint" placeholder="नाम" />
+          </div>
+        </div>
+        <div class="field-hint">टाइप किया गया नाम और समय ही डिजिटल हस्ताक्षर के रूप में दर्ज होता है।</div>
+      </div>
+
+      <button class="btn btn-primary" id="submit-btn-operator" type="button">शिफ्ट एन्ट्री सबमिट करें</button>
+    </div>
+
+    <!-- ============ PRODUCTION: pending list + form ============ -->
+    <div id="production-form" style="display:none;">
+      <div id="production-pending-view">
+        <div class="card">
+          <h3>Shifts pending production input</h3>
+          <div id="production-pending-list"><div class="empty">Loading...</div></div>
+        </div>
+      </div>
+      <div id="production-fill-view" style="display:none;">
+        <button class="back-link" id="production-back">&larr; Back to list</button>
+        <div class="readonly-block" id="production-shift-summary"></div>
+        <div class="card">
+          <h3>Production details</h3>
+          <div class="row2">
+            <div>
+              <label>Planned production (bags)</label>
+              <input type="number" min="0" id="p-planned" placeholder="0" />
+            </div>
+            <div>
+              <label>Actual bags produced</label>
+              <input type="number" min="0" id="p-actual" placeholder="0" />
+            </div>
+          </div>
+          <div class="row2">
+            <div>
+              <label>Batch no.</label>
+              <input type="text" id="p-batchno" placeholder="Batch no." />
+            </div>
+            <div>
+              <label>Bags (final tally)</label>
+              <input type="number" min="0" id="p-bags" placeholder="0" />
+            </div>
+          </div>
+          <label>Reason for low production (if any)</label>
+          <select id="p-reason">
+            <option value="">-- None / target met --</option>
+            <option value="Jaali bharna">1. Mesh clogging</option>
+            <option value="Machine kharab">2. Machine breakdown</option>
+            <option value="Bijli band">3. Power failure</option>
+            <option value="Kacha maal">4. Raw material issue</option>
+            <option value="Roller jam">5. Roller jam</option>
+            <option value="Nitrogen unit">6. Nitrogen unit issue</option>
+          </select>
+          <label>Production incharge</label>
+          <input type="text" id="p-sig" placeholder="Name" />
+        </div>
+        <button class="btn btn-primary" id="submit-btn-production" type="button">Submit production details</button>
+      </div>
+    </div>
+
+    <!-- ============ LAB: pending list + form ============ -->
+    <div id="lab-form" style="display:none;">
+      <div id="lab-pending-view">
+        <div class="card">
+          <h3>Shifts pending lab / QC input</h3>
+          <div id="lab-pending-list"><div class="empty">Loading...</div></div>
+        </div>
+      </div>
+      <div id="lab-fill-view" style="display:none;">
+        <button class="back-link" id="lab-back">&larr; Back to list</button>
+        <div class="readonly-block" id="lab-shift-summary"></div>
+        <div id="lab-batch-list"></div>
+        <div class="card">
+          <h3>QC sign-off</h3>
+          <label>QC incharge</label>
+          <input type="text" id="l-sig" placeholder="Name" />
+        </div>
+        <button class="btn btn-primary" id="submit-btn-lab" type="button">Submit lab / QC details</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECORDS VIEW -->
+  <div class="view" id="view-records">
+    <div class="card">
+      <h3 id="records-heading">My submissions</h3>
+      <div id="records-list"><div class="empty">Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD VIEW -->
+  <div class="view" id="view-dashboard">
+    <div class="metric-grid">
+      <div class="metric"><div class="num" id="m-total">0</div><div class="lbl">Shifts logged</div></div>
+      <div class="metric"><div class="num" id="m-bags">0</div><div class="lbl">Total bags</div></div>
+      <div class="metric"><div class="num" id="m-flagged">0</div><div class="lbl">Below target</div></div>
+    </div>
+    <div class="card">
+      <h3>All shift records</h3>
+      <div style="overflow-x:auto;">
+        <table class="dash" id="dash-table">
+          <thead>
+            <tr><th>Date</th><th>Machine</th><th>Shift</th><th>Operator</th><th>Planned</th><th>Actual</th><th>Status</th></tr>
+          </thead>
+          <tbody id="dash-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="dash-empty">No records yet.</div>
+    </div>
+    <div class="small-note">Status shows Op / Prod / Lab completion for each shift.</div>
+  </div>
+
+</main>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="status-bar">
+  <span><span class="status-dot online" id="status-dot"></span><span id="status-text">Online</span></span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ====== SUPABASE CONFIG ======
+const SUPABASE_URL = 'https://ltryquhpncepdffkvhzq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0cnlxdWhwbmNlcGRmZmt2aHpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxMjU4MzUsImV4cCI6MjEwMjcwMTgzNX0.iMgh1XsznnQJ2M1JNLRDECrMkxhaklqZGRptsVDIVCU';
+// ==============================
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let batches = [];
+let batchSeq = 0;
+let isSignupMode = false;
+let selectedSignupRole = null;
+let currentUser = null;      // { id, email }
+let currentRole = null;      // 'operator' | 'production' | 'lab'
+let activeShiftId = null;    // shift currently open in production/lab fill views
+
+// ---------- AUTH ----------
+function setAuthError(msg){
+  const el = document.getElementById('auth-error');
+  if(!msg){ el.classList.remove('show'); el.textContent=''; return; }
+  el.textContent = msg; el.classList.add('show');
+}
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+document.getElementById('auth-switch').addEventListener('click', ()=>{
+  isSignupMode = !isSignupMode;
+  setAuthError('');
+  document.getElementById('auth-title').textContent = isSignupMode ? 'Create account / खाता बनाएं' : 'Sign in / लॉगिन';
+  document.getElementById('auth-submit').textContent = isSignupMode ? 'Create account / खाता बनाएं' : 'Sign in / लॉगिन करें';
+  document.getElementById('auth-confirm-wrap').style.display = isSignupMode ? 'block' : 'none';
+  document.getElementById('auth-toggle').innerHTML = isSignupMode
+    ? 'Already have an account? / पहले से खाता है? <a id="auth-switch2">Sign in / लॉगिन</a>'
+    : 'New here? / नए हैं? <a id="auth-switch2">Create an account / खाता बनाएं</a>';
+  document.getElementById('auth-switch2').addEventListener('click', ()=>document.getElementById('auth-switch').click());
+});
+
+document.querySelectorAll('#role-chips .role-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('#role-chips .role-chip').forEach(c=>c.classList.remove('selected'));
+    chip.classList.add('selected');
+    selectedSignupRole = chip.dataset.value;
+  });
+});
+
+document.getElementById('auth-submit').addEventListener('click', async ()=>{
+  setAuthError('');
+  const email = document.getElementById('auth-email').value.trim().toLowerCase();
+  const password = document.getElementById('auth-password').value;
+  const submitBtn = document.getElementById('auth-submit');
+
+  if(!isValidEmail(email)){ setAuthError('Enter a valid email address.'); return; }
+  if(password.length < 6){ setAuthError('Password must be at least 6 characters.'); return; }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = isSignupMode ? 'Creating...' : 'Signing in...';
+
+  try{
+    if(isSignupMode){
+      const confirm = document.getElementById('auth-password2').value;
+      if(password !== confirm){ setAuthError('Passwords do not match.'); submitBtn.disabled=false; submitBtn.textContent='Create account / खाता बनाएं'; return; }
+      if(!selectedSignupRole){ setAuthError('Please select your role.'); submitBtn.disabled=false; submitBtn.textContent='Create account / खाता बनाएं'; return; }
+
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if(error){ setAuthError(error.message); submitBtn.disabled=false; submitBtn.textContent='Create account / खाता बनाएं'; return; }
+
+      if(data.session){
+        const { error: profileError } = await sb.from('profiles').insert({ id: data.user.id, email, role: selectedSignupRole });
+        if(profileError){ setAuthError('Account created but role could not be saved: ' + profileError.message); submitBtn.disabled=false; submitBtn.textContent='Create account / खाता बनाएं'; return; }
+        await startSession(data.user);
+      } else {
+        setAuthError('Account created. If email confirmation is on in Supabase, check your inbox before signing in.');
+        submitBtn.disabled=false; submitBtn.textContent='Create account / खाता बनाएं';
+      }
+    } else {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if(error){ setAuthError(error.message); submitBtn.disabled=false; submitBtn.textContent='Sign in / लॉगिन करें'; return; }
+      await startSession(data.user);
+    }
+  } catch(e){
+    setAuthError('Could not reach the server. Check your internet connection.');
+    submitBtn.disabled=false; submitBtn.textContent = isSignupMode ? 'Create account / खाता बनाएं' : 'Sign in / लॉगिन करें';
+  }
+});
+
+document.getElementById('logout-btn').addEventListener('click', async ()=>{
+  await sb.auth.signOut();
+  currentUser = null; currentRole = null;
+  document.getElementById('app-shell').classList.remove('active');
+  document.getElementById('auth-view').style.display = 'flex';
+  document.getElementById('auth-email').value=''; document.getElementById('auth-password').value='';
+  const submitBtn = document.getElementById('auth-submit');
+  submitBtn.disabled = false; submitBtn.textContent = isSignupMode ? 'Create account / खाता बनाएं' : 'Sign in / लॉगिन करें';
+});
+
+async function startSession(user){
+  currentUser = user;
+  const { data: profile, error } = await sb.from('profiles').select('*').eq('id', user.id).single();
+  if(error || !profile){
+    setAuthError('No role found for this account. Please contact your admin or sign up again with a role.');
+    document.getElementById('auth-submit').disabled = false;
+    return;
+  }
+  currentRole = profile.role;
+  document.getElementById('auth-view').style.display = 'none';
+  document.getElementById('app-shell').classList.add('active');
+  document.getElementById('header-user').textContent = user.email;
+  document.getElementById('header-role').textContent = currentRole;
+  applyRoleUI();
+}
+
+(async function checkSession(){
+  const { data } = await sb.auth.getSession();
+  if(data.session){ await startSession(data.session.user); }
+})();
+
+// ---------- ROLE-BASED UI SWITCHING ----------
+function applyRoleUI(){
+  const opForm = document.getElementById('operator-form');
+  const prodForm = document.getElementById('production-form');
+  const labForm = document.getElementById('lab-form');
+  opForm.style.display = 'none'; prodForm.style.display = 'none'; labForm.style.display = 'none';
+
+  if(currentRole === 'operator'){
+    opForm.style.display = 'block';
+    document.getElementById('app-title').textContent = 'जॉब कार्ड — पल्वरायझर';
+    document.getElementById('nav-entry').textContent = 'नई एन्ट्री';
+    document.getElementById('nav-records').textContent = 'मेरी एन्ट्री';
+    document.getElementById('nav-dashboard').textContent = 'डैशबोर्ड';
+    document.getElementById('records-heading').textContent = 'मेरी सबमिट की गई एन्ट्री';
+  } else if(currentRole === 'production'){
+    prodForm.style.display = 'block';
+    document.getElementById('app-title').textContent = 'Job Card — Pulveriser';
+    document.getElementById('nav-entry').textContent = 'Pending shifts';
+    document.getElementById('nav-records').textContent = 'My submissions';
+    document.getElementById('nav-dashboard').textContent = 'Dashboard';
+    document.getElementById('records-heading').textContent = 'My submissions';
+    loadProductionPending();
+  } else if(currentRole === 'lab'){
+    labForm.style.display = 'block';
+    document.getElementById('app-title').textContent = 'Job Card — Pulveriser';
+    document.getElementById('nav-entry').textContent = 'Pending shifts';
+    document.getElementById('nav-records').textContent = 'My submissions';
+    document.getElementById('nav-dashboard').textContent = 'Dashboard';
+    document.getElementById('records-heading').textContent = 'My submissions';
+    loadLabPending();
+  }
+}
+
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+document.getElementById('f-date').value = todayISO();
+
+// nav
+document.querySelectorAll('nav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='entry'){
+      if(currentRole==='production') loadProductionPending();
+      if(currentRole==='lab') loadLabPending();
+    }
+    if(btn.dataset.view==='records') renderRecords();
+    if(btn.dataset.view==='dashboard') renderDashboard();
+  });
+});
+
+// shift chips (operator)
+document.querySelectorAll('#shift-chips .chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('#shift-chips .chip').forEach(c=>c.classList.remove('selected'));
+    chip.classList.add('selected');
+  });
+});
+
+// ---------- Hour meter: auto-calc from start/stop time ----------
+function calcHours(startStr, stopStr){
+  if(!startStr || !stopStr) return 0;
+  const [sh, sm] = startStr.split(':').map(Number);
+  const [eh, em] = stopStr.split(':').map(Number);
+  let startMin = sh*60+sm, stopMin = eh*60+em;
+  let diff = stopMin - startMin;
+  if(diff < 0) diff += 24*60; // overnight shift wrap
+  return diff/60;
+}
+function updateHoursTotal(){
+  const start = document.getElementById('f-hrs-start').value;
+  const stop = document.getElementById('f-hrs-stop').value;
+  document.getElementById('f-hrs-total').value = calcHours(start, stop).toFixed(1);
+}
+document.getElementById('f-hrs-start').addEventListener('input', updateHoursTotal);
+document.getElementById('f-hrs-stop').addEventListener('input', updateHoursTotal);
+
+// ---------- batch entries (operator) ----------
+function addBatch(){
+  if(batches.length>=4){ showToast('एक शिफ्ट में अधिकतम 4 बैच एन्ट्री', true); return; }
+  const id = 'b'+(batchSeq++);
+  batches.push({id, from:'', to:'', material:'', calcifier:'', blowerIn:'', blowerOut:'', work:''});
+  renderBatches();
+}
+function removeBatch(id){ batches = batches.filter(b=>b.id!==id); renderBatches(); }
+function renderBatches(){
+  const list = document.getElementById('batch-list');
+  list.innerHTML='';
+  batches.forEach((b, i)=>{
+    const el = document.createElement('div');
+    el.className='batch-block';
+    el.innerHTML = `
+      <button class="batch-remove" type="button" data-id="${b.id}">हटाएं</button>
+      <span class="batch-label">बैच एन्ट्री ${i+1}</span>
+      <div class="row2">
+        <div><label>से (समय)</label><input type="time" data-field="from" data-id="${b.id}" value="${b.from}"></div>
+        <div><label>तक (समय)</label><input type="time" data-field="to" data-id="${b.id}" value="${b.to}"></div>
+      </div>
+      <label>माल का कोड नंबर</label>
+      <input type="text" data-field="material" data-id="${b.id}" value="${b.material}" placeholder="माल का कोड नंबर">
+      <div class="row3">
+        <div><label>कॅल्सिफायर वि एफ डि</label><input type="text" data-field="calcifier" data-id="${b.id}" value="${b.calcifier}"></div>
+        <div><label>ब्लोवर इनलेट वाल्व</label><input type="text" data-field="blowerIn" data-id="${b.id}" value="${b.blowerIn}"></div>
+        <div><label>ब्लोवर आउटलेट वाल्व</label><input type="text" data-field="blowerOut" data-id="${b.id}" value="${b.blowerOut}"></div>
+      </div>
+      <label>काम का विवरण</label>
+      <textarea data-field="work" data-id="${b.id}">${b.work}</textarea>
+    `;
+    list.appendChild(el);
+  });
+  document.getElementById('batch-count').textContent = batches.length + ' / 4';
+  list.querySelectorAll('input,textarea').forEach(inp=>{
+    inp.addEventListener('input', e=>{
+      const b = batches.find(x=>x.id===e.target.dataset.id);
+      if(b) b[e.target.dataset.field] = e.target.value;
+    });
+  });
+  list.querySelectorAll('.batch-remove').forEach(btn=>{
+    btn.addEventListener('click', e=>removeBatch(e.target.dataset.id));
+  });
+}
+document.getElementById('add-batch').addEventListener('click', addBatch);
+addBatch();
+
+// ---------- toast / status ----------
+let toastTimer;
+function showToast(msg, isWarn){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = isWarn ? 'var(--warn)' : 'var(--ok)';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+function updateOnlineStatus(){
+  const dot = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  if(navigator.onLine){ dot.className='status-dot online'; text.textContent='Online'; }
+  else { dot.className='status-dot offline'; text.textContent='Offline'; }
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
+// ---------- OPERATOR SUBMIT ----------
+document.getElementById('submit-btn-operator').addEventListener('click', async ()=>{
+  if(!currentUser){ showToast('Session expired — sign in again', true); return; }
+  const shiftChip = document.querySelector('#shift-chips .chip.selected');
+  const machine = document.getElementById('f-machine').value;
+  const jobno = document.getElementById('f-jobno').value.trim();
+  const operator = document.getElementById('f-operator').value.trim();
+  const date = document.getElementById('f-date').value;
+
+  if(!shiftChip){ showToast('शिफ्ट चुनें (दिन/रात)', true); return; }
+  if(!operator){ showToast('ऑपरेटर का नाम डालें', true); return; }
+  if(batches.length===0){ showToast('कम से कम एक बैच एन्ट्री जोड़ें', true); return; }
+
+  const submitBtn = document.getElementById('submit-btn-operator');
+  submitBtn.disabled = true; submitBtn.textContent = 'सबमिट हो रहा है...';
+
+  const shiftRow = {
+    user_id: currentUser.id,
+    submitted_by_email: currentUser.email,
+    machine, jobno, operator, shift_date: date,
+    shift_type: shiftChip.dataset.value,
+    checkpoint_cleaning: document.getElementById('chk-clean').checked,
+    checkpoint_roller: document.getElementById('chk-roller').checked,
+    checkpoint_mesh: document.getElementById('chk-mesh').checked,
+    hours_running: calcHours(document.getElementById('f-hrs-start').value, document.getElementById('f-hrs-stop').value),
+    hours_off: 0,
+    hours_total: calcHours(document.getElementById('f-hrs-start').value, document.getElementById('f-hrs-stop').value),
+    sig_operator: document.getElementById('s-operator').value.trim(),
+    sig_maintenance: document.getElementById('s-maint').value.trim(),
+    production_submitted: false,
+    lab_submitted: false
+  };
+
+  try{
+    const { data: insertedShift, error: shiftError } = await sb.from('shifts').insert(shiftRow).select().single();
+    if(shiftError){ showToast('सबमिट नहीं हो सका: ' + shiftError.message, true); submitBtn.disabled=false; submitBtn.textContent='शिफ्ट एन्ट्री सबमिट करें'; return; }
+
+    const batchRows = batches.map((b, i) => ({
+      shift_id: insertedShift.id, seq: i+1,
+      from_time: b.from, to_time: b.to, material: b.material,
+      calcifier: b.calcifier, blower_in: b.blowerIn, blower_out: b.blowerOut, work: b.work
+    }));
+    const { error: batchError } = await sb.from('batch_entries').insert(batchRows);
+    if(batchError){ showToast('शिफ्ट सेव हुई, पर बैच विवरण सेव नहीं हुआ: ' + batchError.message, true); }
+    else { showToast('शिफ्ट एन्ट्री सबमिट हो गई'); }
+
+    resetOperatorForm();
+  } catch(e){
+    showToast('नेटवर्क में समस्या — फिर कोशिश करें।', true);
+  } finally {
+    submitBtn.disabled = false; submitBtn.textContent = 'शिफ्ट एन्ट्री सबमिट करें';
+  }
+});
+
+function resetOperatorForm(){
+  document.getElementById('f-jobno').value=''; document.getElementById('f-operator').value='';
+  document.querySelectorAll('#shift-chips .chip').forEach(c=>c.classList.remove('selected'));
+  batches=[]; renderBatches(); addBatch();
+  document.getElementById('chk-clean').checked=false;
+  document.getElementById('chk-roller').checked=false;
+  document.getElementById('chk-mesh').checked=false;
+  document.getElementById('f-hrs-start').value=''; document.getElementById('f-hrs-stop').value=''; document.getElementById('f-hrs-total').value='';
+  document.getElementById('s-operator').value=''; document.getElementById('s-maint').value='';
+}
+
+// ---------- PRODUCTION: pending list + fill ----------
+async function loadProductionPending(){
+  const el = document.getElementById('production-pending-list');
+  el.innerHTML = '<div class="empty">Loading...</div>';
+  const { data, error } = await sb.from('shifts').select('*').eq('production_submitted', false).order('created_at', {ascending:false});
+  if(error){ el.innerHTML = '<div class="empty">Could not load: '+error.message+'</div>'; return; }
+  if(!data || data.length===0){ el.innerHTML = '<div class="empty">No shifts pending production input.</div>'; return; }
+  el.innerHTML = data.map(s=>`
+    <div class="pending-item" data-id="${s.id}">
+      <div class="pi-top"><span>${s.machine} &middot; ${s.shift_date}</span><span>${s.shift_type}</span></div>
+      <div class="pi-sub">Operator: ${s.operator||'-'} &middot; Job: ${s.jobno||'-'}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.pending-item').forEach(item=>{
+    item.addEventListener('click', ()=>openProductionFill(item.dataset.id, data.find(s=>s.id===item.dataset.id)));
+  });
+}
+function openProductionFill(id, shift){
+  activeShiftId = id;
+  document.getElementById('production-pending-view').style.display = 'none';
+  document.getElementById('production-fill-view').style.display = 'block';
+  document.getElementById('production-shift-summary').innerHTML =
+    `<b>${shift.machine}</b> &middot; ${shift.shift_date} &middot; ${shift.shift_type} shift<br>Operator: ${shift.operator||'-'} &middot; Job: ${shift.jobno||'-'}`;
+  document.getElementById('p-planned').value=''; document.getElementById('p-actual').value='';
+  document.getElementById('p-batchno').value=''; document.getElementById('p-bags').value='';
+  document.getElementById('p-reason').value=''; document.getElementById('p-sig').value='';
+}
+document.getElementById('production-back').addEventListener('click', ()=>{
+  document.getElementById('production-fill-view').style.display='none';
+  document.getElementById('production-pending-view').style.display='block';
+  activeShiftId = null;
+});
+document.getElementById('submit-btn-production').addEventListener('click', async ()=>{
+  if(!activeShiftId || !currentUser) return;
+  const submitBtn = document.getElementById('submit-btn-production');
+  submitBtn.disabled = true; submitBtn.textContent = 'Submitting...';
+  const update = {
+    planned: parseFloat(document.getElementById('p-planned').value)||0,
+    actual: parseFloat(document.getElementById('p-actual').value)||0,
+    batch_no: document.getElementById('p-batchno').value.trim(),
+    bags: parseFloat(document.getElementById('p-bags').value)||0,
+    reason: document.getElementById('p-reason').value,
+    sig_production: document.getElementById('p-sig').value.trim(),
+    production_submitted: true,
+    production_user_id: currentUser.id
+  };
+  const { error } = await sb.from('shifts').update(update).eq('id', activeShiftId);
+  if(error){ showToast('Could not submit: ' + error.message, true); }
+  else { showToast('Production details submitted'); }
+  submitBtn.disabled = false; submitBtn.textContent = 'Submit production details';
+  document.getElementById('production-fill-view').style.display='none';
+  document.getElementById('production-pending-view').style.display='block';
+  activeShiftId = null;
+  loadProductionPending();
+});
+
+// ---------- LAB: pending list + fill ----------
+let labBatches = [];
+async function loadLabPending(){
+  const el = document.getElementById('lab-pending-list');
+  el.innerHTML = '<div class="empty">Loading...</div>';
+  const { data, error } = await sb.from('shifts').select('*').eq('lab_submitted', false).order('created_at', {ascending:false});
+  if(error){ el.innerHTML = '<div class="empty">Could not load: '+error.message+'</div>'; return; }
+  if(!data || data.length===0){ el.innerHTML = '<div class="empty">No shifts pending lab / QC input.</div>'; return; }
+  el.innerHTML = data.map(s=>`
+    <div class="pending-item" data-id="${s.id}">
+      <div class="pi-top"><span>${s.machine} &middot; ${s.shift_date}</span><span>${s.shift_type}</span></div>
+      <div class="pi-sub">Operator: ${s.operator||'-'} &middot; Job: ${s.jobno||'-'}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.pending-item').forEach(item=>{
+    item.addEventListener('click', ()=>openLabFill(item.dataset.id, data.find(s=>s.id===item.dataset.id)));
+  });
+}
+async function openLabFill(id, shift){
+  activeShiftId = id;
+  document.getElementById('lab-pending-view').style.display = 'none';
+  document.getElementById('lab-fill-view').style.display = 'block';
+  document.getElementById('lab-shift-summary').innerHTML =
+    `<b>${shift.machine}</b> &middot; ${shift.shift_date} &middot; ${shift.shift_type} shift<br>Operator: ${shift.operator||'-'} &middot; Job: ${shift.jobno||'-'}`;
+  document.getElementById('l-sig').value='';
+
+  const { data: rows, error } = await sb.from('batch_entries').select('*').eq('shift_id', id).order('seq');
+  const listEl = document.getElementById('lab-batch-list');
+  if(error || !rows){ listEl.innerHTML = '<div class="empty">Could not load batch entries.</div>'; return; }
+  labBatches = rows;
+  listEl.innerHTML = rows.map((r,i)=>`
+    <div class="card">
+      <h3>Batch ${i+1} &mdash; ${r.material||'material n/a'} (${r.from_time||'-'} to ${r.to_time||'-'})</h3>
+      <div class="row2">
+        <div><label>Sulphur supplier / lot / date</label><input type="text" class="lab-field" data-row="${r.id}" data-field="sulphur" value="${r.sulphur||''}"></div>
+        <div><label>Oil supplier / batch / qty</label><input type="text" class="lab-field" data-row="${r.id}" data-field="oil" value="${r.oil||''}"></div>
+      </div>
+      <div class="row2">
+        <div><label>Finished goods bag</label><input type="text" class="lab-field" data-row="${r.id}" data-field="bag" value="${r.bag||''}"></div>
+        <div><label>Packing size</label><input type="text" class="lab-field" data-row="${r.id}" data-field="packing" value="${r.packing||''}"></div>
+      </div>
+      <div class="row2">
+        <div><label>QC incharge</label><input type="text" class="lab-field" data-row="${r.id}" data-field="qc" value="${r.qc||''}"></div>
+        <div><label>Stores incharge</label><input type="text" class="lab-field" data-row="${r.id}" data-field="stores" value="${r.stores||''}"></div>
+      </div>
+    </div>
+  `).join('');
+}
+document.getElementById('lab-back').addEventListener('click', ()=>{
+  document.getElementById('lab-fill-view').style.display='none';
+  document.getElementById('lab-pending-view').style.display='block';
+  activeShiftId = null;
+});
+document.getElementById('submit-btn-lab').addEventListener('click', async ()=>{
+  if(!activeShiftId || !currentUser) return;
+  const submitBtn = document.getElementById('submit-btn-lab');
+  submitBtn.disabled = true; submitBtn.textContent = 'Submitting...';
+
+  try{
+    const fields = document.querySelectorAll('#lab-batch-list .lab-field');
+    const updatesByRow = {};
+    fields.forEach(inp=>{
+      const rowId = inp.dataset.row;
+      updatesByRow[rowId] = updatesByRow[rowId] || {};
+      updatesByRow[rowId][inp.dataset.field] = inp.value.trim();
+    });
+    for(const rowId of Object.keys(updatesByRow)){
+      const { error } = await sb.from('batch_entries').update(updatesByRow[rowId]).eq('id', rowId);
+      if(error) throw error;
+    }
+    const { error: shiftErr } = await sb.from('shifts').update({
+      sig_qc: document.getElementById('l-sig').value.trim(),
+      lab_submitted: true,
+      lab_user_id: currentUser.id
+    }).eq('id', activeShiftId);
+    if(shiftErr) throw shiftErr;
+
+    showToast('Lab / QC details submitted');
+  } catch(e){
+    showToast('Could not submit: ' + (e.message||e), true);
+  } finally {
+    submitBtn.disabled = false; submitBtn.textContent = 'Submit lab / QC details';
+    document.getElementById('lab-fill-view').style.display='none';
+    document.getElementById('lab-pending-view').style.display='block';
+    activeShiftId = null;
+    loadLabPending();
+  }
+});
+
+// ---------- RECORDS (My submissions, role-aware) ----------
+async function renderRecords(){
+  const el = document.getElementById('records-list');
+  el.innerHTML = '<div class="empty">Loading...</div>';
+  if(!currentUser || !currentRole) return;
+
+  let query = sb.from('shifts').select('*').order('created_at', {ascending:false});
+  if(currentRole==='operator') query = query.eq('user_id', currentUser.id);
+  if(currentRole==='production') query = query.eq('production_user_id', currentUser.id);
+  if(currentRole==='lab') query = query.eq('lab_user_id', currentUser.id);
+
+  const { data, error } = await query;
+  if(error){ el.innerHTML = '<div class="empty">Could not load: '+error.message+'</div>'; return; }
+  if(!data || data.length===0){ el.innerHTML = '<div class="empty">No submissions yet.</div>'; return; }
+  el.innerHTML = data.map(r=>`
+    <div class="batch-block">
+      <span class="batch-label">${r.shift_date} &middot; ${r.machine} &middot; ${r.shift_type}</span>
+      <div style="font-size:13px;line-height:1.6;">
+        Operator: <b>${r.operator||'-'}</b><br>
+        Status: ${r.production_submitted?'<span class="badge ok">Prod ✓</span>':'<span class="badge warn">Prod pending</span>'} ${r.lab_submitted?'<span class="badge ok">Lab ✓</span>':'<span class="badge warn">Lab pending</span>'}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ---------- DASHBOARD (shared) ----------
+async function renderDashboard(){
+  const tbody = document.getElementById('dash-tbody');
+  const emptyEl = document.getElementById('dash-empty');
+  tbody.innerHTML=''; emptyEl.style.display='block'; emptyEl.textContent='Loading...';
+
+  const { data: all, error } = await sb.from('shifts').select('*').order('created_at', {ascending:false});
+  if(error){ emptyEl.textContent = 'Could not load: ' + error.message; return; }
+
+  document.getElementById('m-total').textContent = all.length;
+  const totalBags = all.reduce((s,r)=>s+(r.bags||0),0);
+  document.getElementById('m-bags').textContent = totalBags;
+  const flagged = all.filter(r=>r.planned>0 && r.actual < r.planned).length;
+  document.getElementById('m-flagged').textContent = flagged;
+
+  if(all.length===0){ tbody.innerHTML=''; emptyEl.textContent='No records yet.'; emptyEl.style.display='block'; return; }
+  emptyEl.style.display='none';
+  tbody.innerHTML = all.map(r=>{
+    const below = r.planned>0 && r.actual < r.planned;
+    const statusBadges = `<span class="badge ok">Op ✓</span>` +
+      (r.production_submitted?`<span class="badge ok">Prod ✓</span>`:`<span class="badge warn">Prod ⏳</span>`) +
+      (r.lab_submitted?`<span class="badge ok">Lab ✓</span>`:`<span class="badge warn">Lab ⏳</span>`) +
+      (below?`<span class="badge warn">Below target</span>`:'');
+    return `<tr>
+      <td>${r.shift_date}</td><td>${r.machine}</td><td>${r.shift_type}</td><td>${r.operator||'-'}</td>
+      <td>${r.planned||0}</td><td>${r.actual||0}</td><td>${statusBadges}</td>
+    </tr>`;
+  }).join('');
+}
+
+renderBatches();
+</script>
+
+</body>
+</html>
