@@ -244,39 +244,36 @@ export function factoriesForModule(
 /**
  * Unique modules the user can access, derived from their role(s).
  *
+ * Uses profileRole (from auth-context) as the authoritative single role
+ * for the user, rather than deriving from all accessList entries.
+ * This prevents stale or extra user_roles rows from granting unintended access.
+ *
  * Rules:
  *  - operator / production_incharge  → job_card only
  *  - chemist / lab_manager           → job_card + lab_qc
- *    (lab staff sign off Job Card shifts AND run their own Lab QC module)
  *  - factory_admin / company_admin / viewer → both
  *
- * If the user_roles row has an explicit module column set, that takes
- * precedence over the role-based default.
+ * Falls back to accessList-based derivation if profileRole is null.
  */
-export function modulesForUser(accessList: UserAccess[]): ActivityModule[] {
+export function modulesForUser(
+  accessList: UserAccess[],
+  profileRole?: AppRole | null
+): ActivityModule[] {
   const seen = new Set<ActivityModule>();
 
-  for (const a of accessList) {
-    if (a.module !== null) {
-      // Explicit assignment on the role row — honour it directly.
-      seen.add(a.module);
-      continue;
-    }
-
-    switch (a.role) {
+  // If we have a definitive role from the auth profile, use that alone.
+  const role = profileRole ?? null;
+  if (role) {
+    switch (role) {
       case "operator":
       case "production_incharge":
         seen.add("job_card");
         break;
-
       case "chemist":
       case "lab_manager":
-        // Lab staff see Job Card (to complete the lab sign-off step on shifts)
-        // AND their own Lab QC module.
         seen.add("job_card");
         seen.add("lab_qc");
         break;
-
       case "factory_admin":
       case "company_admin":
       case "viewer":
@@ -284,8 +281,30 @@ export function modulesForUser(accessList: UserAccess[]): ActivityModule[] {
         seen.add("lab_qc");
         break;
     }
+    return (["job_card", "lab_qc"] as ActivityModule[]).filter(m => seen.has(m));
   }
 
-  // Sort deterministically: job_card first
+  // Fallback: derive from all accessList entries (e.g. company_admin with null factory).
+  for (const a of accessList) {
+    if (a.module !== null) {
+      seen.add(a.module);
+      continue;
+    }
+    switch (a.role) {
+      case "operator":
+      case "production_incharge":
+        seen.add("job_card");
+        break;
+      case "chemist":
+      case "lab_manager":
+        seen.add("job_card");
+        seen.add("lab_qc");
+        break;
+      default:
+        seen.add("job_card");
+        seen.add("lab_qc");
+    }
+  }
+
   return (["job_card", "lab_qc"] as ActivityModule[]).filter(m => seen.has(m));
 }

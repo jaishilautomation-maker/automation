@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // profiles has no role column — fetch profile and first role separately
     const [{ data: profileData }, { data: roleData }] = await Promise.all([
       supabase.from("profiles").select("id, full_name").eq("id", u.id).single(),
-      supabase.from("user_roles").select("role").eq("user_id", u.id).limit(1).single(),
+      supabase.from("user_roles").select("role").eq("user_id", u.id).order("granted_at", { ascending: false }).limit(1).single(),
     ]);
     if (profileData) {
       setProfile({

@@ -76,7 +76,7 @@ export default function SelectModulePage() {
   const [pickedModule, setPickedModule] = useState<ActivityModule | null>(null);
 
   const loading = authLoading || moduleLoading;
-  const modules = modulesForUser(accessList);
+  const modules = modulesForUser(accessList, profile?.role ?? null);
 
   // Auto-advance: single module → skip module pick
   useEffect(() => {
