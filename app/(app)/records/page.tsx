@@ -35,7 +35,9 @@ export default function RecordsPage() {
 
       if (profile.role === "operator")            query = query.eq("user_id", user.id);
       if (profile.role === "production_incharge") query = query.eq("production_user_id", user.id);
-      if (profile.role === "chemist" || profile.role === "lab_manager") query = query.eq("lab_user_id", user.id);
+      // Lab users see all shifts — both pending sign-off and ones they've completed.
+      // (lab_user_id is only set after they submit, so filtering by it would hide pending work)
+      // No extra filter needed — RLS already scopes to their factory.
 
       const { data, error } = await query;
       if (error) showToast("Could not load: " + error.message, true);
@@ -47,7 +49,11 @@ export default function RecordsPage() {
   }, [user, profile?.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const heading =
-    profile?.role === "operator" ? "मेरी सबमिट की गई एन्ट्री" : "My submissions";
+    profile?.role === "operator"
+      ? "मेरी सबमिट की गई एन्ट्री"
+      : profile?.role === "chemist" || profile?.role === "lab_manager"
+      ? "All Job Card Shifts"
+      : "My submissions";
 
   return (
     <div className="card">
