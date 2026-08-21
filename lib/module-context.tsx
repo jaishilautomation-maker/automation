@@ -91,7 +91,6 @@ function writeSession(key: string, value: unknown): void {
 
 export function ModuleProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
-  const supabase = createClient();
 
   const [accessList, setAccessList]     = useState<UserAccess[]>([]);
   const [activeModule, _setActiveModule] = useState<ActivityModule | null>(null);
@@ -111,6 +110,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
 
   // Load the user's access list from user_roles JOIN factories
   const loadAccessList = useCallback(async (userId: string) => {
+    const supabase = createClient();
     setLoading(true);
     try {
       // Fetch all user_roles rows with factory detail joined
@@ -181,7 +181,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;

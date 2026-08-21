@@ -34,10 +34,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   const loadProfile = useCallback(async (u: User) => {
-    // profiles has no role column — fetch profile and first role separately
+    const supabase = createClient();
     const [{ data: profileData }, { data: roleData }] = await Promise.all([
       supabase.from("profiles").select("id, full_name").eq("id", u.id).single(),
       supabase.from("user_roles").select("role").eq("user_id", u.id).order("granted_at", { ascending: false }).limit(1).single(),
@@ -50,13 +49,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email:     u.email,
       });
     }
-  }, [supabase]);
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     if (user) await loadProfile(user);
   }, [user, loadProfile]);
 
   useEffect(() => {
+    const supabase = createClient();
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) await loadProfile(session.user);
@@ -75,9 +76,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
     return () => subscription.unsubscribe();
-  }, [supabase, loadProfile]);
+  }, [loadProfile]);
 
   const signOut = async () => {
+    const supabase = createClient();
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
