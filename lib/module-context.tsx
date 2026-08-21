@@ -241,17 +241,51 @@ export function factoriesForModule(
   return result;
 }
 
-/** Unique modules the user can access (across all factories). */
+/**
+ * Unique modules the user can access, derived from their role(s).
+ *
+ * Rules:
+ *  - operator / production_incharge  → job_card only
+ *  - chemist / lab_manager           → job_card + lab_qc
+ *    (lab staff sign off Job Card shifts AND run their own Lab QC module)
+ *  - factory_admin / company_admin / viewer → both
+ *
+ * If the user_roles row has an explicit module column set, that takes
+ * precedence over the role-based default.
+ */
 export function modulesForUser(accessList: UserAccess[]): ActivityModule[] {
   const seen = new Set<ActivityModule>();
+
   for (const a of accessList) {
-    if (a.module === null) {
-      seen.add("job_card");
-      seen.add("lab_qc");
-    } else {
+    if (a.module !== null) {
+      // Explicit assignment on the role row — honour it directly.
       seen.add(a.module);
+      continue;
+    }
+
+    switch (a.role) {
+      case "operator":
+      case "production_incharge":
+        seen.add("job_card");
+        break;
+
+      case "chemist":
+      case "lab_manager":
+        // Lab staff see Job Card (to complete the lab sign-off step on shifts)
+        // AND their own Lab QC module.
+        seen.add("job_card");
+        seen.add("lab_qc");
+        break;
+
+      case "factory_admin":
+      case "company_admin":
+      case "viewer":
+        seen.add("job_card");
+        seen.add("lab_qc");
+        break;
     }
   }
+
   // Sort deterministically: job_card first
   return (["job_card", "lab_qc"] as ActivityModule[]).filter(m => seen.has(m));
 }

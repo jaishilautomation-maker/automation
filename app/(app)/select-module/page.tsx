@@ -25,11 +25,12 @@ import type { ActivityModule, AppRole, Factory } from "@/lib/types";
 // ---------------------------------------------------------------------------
 function moduleEntryPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
-    if (role === "operator")            return "/operator";
-    if (role === "production_incharge") return "/production";
+    if (role === "operator")                        return "/operator";
+    if (role === "production_incharge")             return "/production";
+    if (role === "chemist" || role === "lab_manager") return "/lab";
     return "/dashboard";
   }
-  // lab_qc → always the activity picker (which replaces the old placeholder)
+  // lab_qc → activity picker
   return "/lab-qc";
 }
 
