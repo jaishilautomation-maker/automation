@@ -14,14 +14,15 @@
 //      (UNIQUE constraint: batch_id + product_id + phase)
 // =============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
-import QcFieldRenderer from "@/components/QcFieldRenderer";
+import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
+import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
 
 interface BatchOption {
@@ -67,6 +68,7 @@ export default function ProductQcPage() {
   const [chemistName, setChemistName]   = useState("");
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
+  const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
@@ -252,9 +254,10 @@ export default function ProductQcPage() {
           .eq("id", existingRecord.id);
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
+        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingRecord.id)));
         showToast("Product QC updated ✓");
       } else {
-        const { error } = await supabase
+        const { data: newRow, error } = await supabase
           .from("product_qc")
           .insert({
             batch_id:      batchId,
@@ -267,9 +270,12 @@ export default function ProductQcPage() {
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
-          });
+          })
+          .select("id")
+          .single();
 
-        if (error) { showToast("Could not save: " + error.message, true); return; }
+        if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
         showToast("Product QC saved ✓");
         setBatchId("");
         setExistingRecord(null);
@@ -414,6 +420,15 @@ export default function ProductQcPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  photoUploadProps={(user && activeFactory) ? {
+                    factoryCode:  activeFactory.code,
+                    factoryId:    activeFactory.id,
+                    entityType:   "product_qc",
+                    entityId:     existingRecord?.id ?? null,
+                    userId:       user.id,
+                    onUploaded:   (key, path) => handleChange(key, path),
+                    uploaderRefs,
+                  } : undefined}
                 />
               ))}
             </div>

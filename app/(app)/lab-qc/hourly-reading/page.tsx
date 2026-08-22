@@ -12,14 +12,15 @@
 // beyond selecting the approximate hour, which keeps the form simple).
 // =============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
-import QcFieldRenderer from "@/components/QcFieldRenderer";
+import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
+import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ export default function HourlyReadingPage() {
   );
   const [remarks, setRemarks]         = useState("");
   const [submitting, setSubmitting]   = useState(false);
+  const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
   // Recent readings for the selected batch (today only)
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
@@ -183,16 +185,19 @@ export default function HourlyReadingPage() {
         }
       });
 
-      const { error } = await supabase.from("hourly_readings").insert({
+      const { data: newRow, error } = await supabase.from("hourly_readings").insert({
         batch_id:     batchId,
         factory_id:   activeFactory.id,
         recorded_by:  user.id,
         reading_time: new Date(readingTime).toISOString(),
         test_results: testResults,
         remarks:      remarks.trim() || null,
-      });
+      }).select("id").single();
 
-      if (error) { showToast("Could not save: " + error.message, true); return; }
+      if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+
+      // Flush pending photo uploads now we have the entity id
+      await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
 
       showToast("Reading saved ✓");
       // Reset values only; keep batch selected for next reading
@@ -257,6 +262,15 @@ export default function HourlyReadingPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  photoUploadProps={(user && activeFactory) ? {
+                    factoryCode:  activeFactory.code,
+                    factoryId:    activeFactory.id,
+                    entityType:   "rm_qc",
+                    entityId:     null,
+                    userId:       user.id,
+                    onUploaded:   (key, path) => handleChange(key, path),
+                    uploaderRefs,
+                  } : undefined}
                 />
               ))}
 

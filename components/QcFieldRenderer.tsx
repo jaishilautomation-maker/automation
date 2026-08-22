@@ -3,23 +3,49 @@
 // =============================================================================
 // QcFieldRenderer — renders a single qc_test_definitions field as a form input.
 //
-// Used by all Lab QC form pages (rm-qc, hourly-reading, batch-analysis,
-// product-qc, post-production, lab-trials) so the rendering logic is
-// defined exactly once.
+// Photo fields delegate to PhotoUploader (compress + Storage upload).
+// All other field types render inline.
 //
-// Calculated fields are displayed with a green background (read-only).
-// Photo fields show a placeholder until Supabase Storage upload is wired up.
+// For photo fields the parent must supply photoUploadProps so the uploader
+// knows the factory, entity type, and user.  If photoUploadProps is omitted
+// the field falls back to the "coming soon" placeholder (safe default for
+// pages not yet wired up).
 // =============================================================================
 
-import type { QcTestDefinition } from "@/lib/types";
+import { useRef } from "react";
+import type { QcTestDefinition, AttachmentEntityType } from "@/lib/types";
+import PhotoUploader, { type PhotoUploaderHandle } from "./PhotoUploader";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface PhotoUploadProps {
+  factoryCode: string;
+  factoryId:   string;
+  entityType:  AttachmentEntityType;
+  entityId:    string | null;   // null = QC row not saved yet
+  userId:      string;
+  /** Called after successful upload with the storage_path string */
+  onUploaded:  (fieldKey: string, storagePath: string) => void;
+  /** Ref map so the parent can call flush(entityId) after saving the QC row */
+  uploaderRefs: React.MutableRefObject<Record<string, PhotoUploaderHandle | null>>;
+}
 
 interface Props {
   def: QcTestDefinition;
   value: string;
   onChange: (key: string, val: string) => void;
+  photoUploadProps?: PhotoUploadProps;
 }
 
-export default function QcFieldRenderer({ def, value, onChange }: Props) {
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function QcFieldRenderer({ def, value, onChange, photoUploadProps }: Props) {
+  const localRef = useRef<PhotoUploaderHandle | null>(null);
+
   const labelEl = (
     <label>
       {def.label}
@@ -34,21 +60,44 @@ export default function QcFieldRenderer({ def, value, onChange }: Props) {
 
   // ── Photo ─────────────────────────────────────────────────────────────────
   if (def.input_type === "photo") {
+    if (!photoUploadProps) {
+      // Fallback if parent hasn't wired up upload context yet
+      return (
+        <div>
+          {labelEl}
+          <div style={{
+            border: "1px dashed var(--line)", borderRadius: 8,
+            padding: "12px", textAlign: "center",
+            fontSize: 12, color: "var(--ink-soft)",
+          }}>
+            📷 Photo upload not available here yet
+          </div>
+        </div>
+      );
+    }
+
+    const { factoryCode, factoryId, entityType, entityId, userId, onUploaded, uploaderRefs } = photoUploadProps;
+
     return (
       <div>
-        {labelEl}
-        <div
-          style={{
-            border: "1px dashed var(--line)",
-            borderRadius: 8,
-            padding: "12px",
-            textAlign: "center",
-            fontSize: 12,
-            color: "var(--ink-soft)",
+        <PhotoUploader
+          ref={el => {
+            localRef.current = el;
+            uploaderRefs.current[def.test_key] = el;
           }}
-        >
-          📷 Photo upload — coming soon
-        </div>
+          label={def.label}
+          fieldKey={def.test_key}
+          factoryCode={factoryCode}
+          entityType={entityType}
+          entityId={entityId}
+          currentPath={value || null}
+          userId={userId}
+          factoryId={factoryId}
+          onUploaded={(key, path) => {
+            onChange(key, path);
+            onUploaded(key, path);
+          }}
+        />
       </div>
     );
   }

@@ -15,14 +15,15 @@
 //  oil content, specific gravity, bulk density)
 // =============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
-import QcFieldRenderer from "@/components/QcFieldRenderer";
+import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
+import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
 
 interface BatchOption {
@@ -57,6 +58,7 @@ export default function BatchAnalysisPage() {
   const [chemistName, setChemistName]   = useState("");
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
+  const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
   // -------------------------------------------------------------------------
   // Load batches
@@ -211,7 +213,6 @@ export default function BatchAnalysisPage() {
         appearanceOkRaw === "false" ? false : null;
 
       if (existingAnalysis) {
-        // UPDATE existing record
         const { error } = await supabase
           .from("batch_analysis")
           .update({
@@ -225,10 +226,11 @@ export default function BatchAnalysisPage() {
           .eq("id", existingAnalysis.id);
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
+        // Flush photos against the existing record id
+        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
         showToast("Batch analysis updated ✓");
       } else {
-        // INSERT new record
-        const { error } = await supabase
+        const { data: newRow, error } = await supabase
           .from("batch_analysis")
           .insert({
             batch_id:      batchId,
@@ -239,11 +241,13 @@ export default function BatchAnalysisPage() {
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
-          });
+          })
+          .select("id")
+          .single();
 
-        if (error) { showToast("Could not save: " + error.message, true); return; }
+        if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
         showToast("Batch analysis saved ✓");
-        // Re-check so next submit knows to UPDATE
         setBatchId(prev => { setTimeout(() => setBatchId(prev), 0); return ""; });
       }
 
@@ -341,6 +345,15 @@ export default function BatchAnalysisPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  photoUploadProps={(user && activeFactory) ? {
+                    factoryCode:  activeFactory.code,
+                    factoryId:    activeFactory.id,
+                    entityType:   "batch_analysis",
+                    entityId:     existingAnalysis?.id ?? null,
+                    userId:       user.id,
+                    onUploaded:   (key, path) => handleChange(key, path),
+                    uploaderRefs,
+                  } : undefined}
                 />
               ))}
             </div>
