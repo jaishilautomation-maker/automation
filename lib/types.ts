@@ -621,3 +621,85 @@ export interface Database {
     };
   };
 }
+
+// ---------------------------------------------------------------------------
+// Breakdown Register (Form JSCI/PROD/04) — A-20/1 only
+// ---------------------------------------------------------------------------
+
+/** Machine options for the breakdown_register machine_name column. */
+export const BREAKDOWN_MACHINES = [
+  "M1",
+  "M2",
+  "N2 30Nm",
+  "N2 50Nm",
+  "CP Air Comp",
+  "CT Air Comp",
+  "AT Air Comp",
+  "Forklift",
+  "Screening Machine",
+  "Crusher",
+] as const;
+
+export type BreakdownMachine = typeof BREAKDOWN_MACHINES[number];
+
+/**
+ * breakdown_register — one row per breakdown event.
+ * sr_no is auto-incremented per (factory_id, machine_name) by DB trigger.
+ * Append-only: no UPDATE/DELETE for production_incharge.
+ */
+export interface BreakdownEntry {
+  id: string;
+  factory_id: string;
+  machine_name: BreakdownMachine;
+  sr_no: number;
+  start_at: string;            // timestamptz ISO
+  finish_at: string | null;    // null = still ongoing
+  nature_of_breakdown: string | null;
+  repair_carried_out: string | null;
+  parts_replaced: string | null;
+  corrective_action: string | null;
+  remarks: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Preventive Maintenance (Form JSCI/PROD/06) — A-20/1 only
+// ---------------------------------------------------------------------------
+
+/**
+ * pm_schedule_items — static checklist seeded by migration 013.
+ * Each row is one maintenance task for one machine component.
+ */
+export interface PmScheduleItem {
+  id: string;
+  factory_id: string;
+  sr_no: number;
+  machine: string;
+  component: string;
+  task: string;
+  frequency_weeks: number;
+}
+
+/**
+ * pm_completions — one row per "Mark done" action.
+ * Append-only.
+ */
+export interface PmCompletion {
+  id: string;
+  schedule_item_id: string;
+  completed_at: string;        // timestamptz ISO
+  completed_by: string;        // auth.users.id
+  notes: string | null;
+}
+
+/**
+ * Derived view of a schedule item with its computed due status.
+ * Built in the UI layer from pm_schedule_items + latest pm_completion.
+ */
+export interface PmItemWithStatus {
+  item: PmScheduleItem;
+  lastDoneAt: string | null;
+  nextDueAt: string;           // ISO date string
+  status: "ok" | "due_soon" | "overdue";
+}
