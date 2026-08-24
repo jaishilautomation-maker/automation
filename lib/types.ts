@@ -746,3 +746,155 @@ export interface QcImport {
   checksum: string | null;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// A-20 — Materials (extended with jsc_code)
+// ---------------------------------------------------------------------------
+
+/** materials — A-20 version adds jsc_code for JSC-1..JSC-73 master */
+export interface MaterialA20 extends Material {
+  jsc_code: string | null;   // e.g. 'JSC-1'; null for Water, Sulphur etc.
+}
+
+// ---------------------------------------------------------------------------
+// A-20 Module A — Production Job Card
+// ---------------------------------------------------------------------------
+
+/**
+ * product_formula_items — master recipe.
+ * One row per component per product (per phase where applicable).
+ * instructed_qty_kg is at reference_batch_size_kg scale.
+ * UI scales to the operator's actual batch_size_kg.
+ */
+export interface ProductFormulaItem {
+  id: string;
+  product_id: string;
+  phase: string | null;            // 'A' | 'B' | null (single-phase)
+  order_no: number;
+  component_name: string;
+  jsc_code: string | null;         // null for Water, Sulphur, etc.
+  instructed_qty_kg: number;
+  reference_batch_size_kg: number;
+}
+
+/**
+ * production_job_cards — one per production run.
+ * status: 'draft' → 'submitted'
+ */
+export interface ProductionJobCard {
+  id: string;
+  factory_id: string;
+  product_id: string;
+  lot_no: string;
+  job_date: string;              // ISO date
+  operator_id: string;
+  batch_size_kg: number;
+  premix_start: string | null;   // HH:MM
+  premix_end: string | null;
+  bead_mill_start: string | null;
+  bead_mill_end: string | null;
+  flow_rate: number | null;
+  collected_slurry_phase_a_kg: number | null;
+  collected_slurry_phase_b_kg: number | null;
+  ph: number | null;
+  status: "draft" | "submitted";
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * production_job_card_items — actuals per formula component per run.
+ * instructed_qty_kg is copied from the formula (scaled to batch_size_kg) at save time.
+ */
+export interface ProductionJobCardItem {
+  id: string;
+  job_card_id: string;
+  formula_item_id: string;
+  instructed_qty_kg: number;
+  added_qty_kg: number | null;
+  rm_batch_no: string | null;
+  drum_bag_no: string | null;
+  remark: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// A-20 Module B — Packing Machine Maintenance Checklist
+// ---------------------------------------------------------------------------
+
+/** packing_maintenance_items — static master list (seeded in migration 002) */
+export interface PackingMaintenanceItem {
+  id: string;
+  factory_id: string;
+  sr_no: number;
+  machine_name: string;
+  machine_part: string;
+}
+
+/** packing_maintenance_checklists — one per factory per date */
+export interface PackingMaintenanceChecklist {
+  id: string;
+  factory_id: string;
+  checklist_date: string;            // ISO date
+  operator_sign: string;             // auth.users.id
+  maintenance_engineer_sign: string | null;
+  production_manager_sign: string | null;
+  created_at: string;
+}
+
+/** packing_maintenance_checklist_entries — one row per item per checklist */
+export interface PackingMaintenanceChecklistEntry {
+  id: string;
+  checklist_id: string;
+  item_id: string;
+  status: "do" | "do_not" | null;
+  remark: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// A-20 Module C — Packing Machine Breakdown Report
+// ---------------------------------------------------------------------------
+
+export type PackingFaultType = "electrical" | "mechanical" | "hydraulic" | "pneumatic";
+
+/** packing_breakdown_reports — one per breakdown event */
+export interface PackingBreakdownReport {
+  id: string;
+  factory_id: string;
+
+  // Header
+  document_no: string | null;
+  machine_code: string | null;
+  machine_name: string;
+  department: string;
+  reporting_date: string;           // ISO date
+  reporting_time: string | null;    // HH:MM
+
+  // Problem
+  problem_reported: string | null;
+  nature_of_fault: PackingFaultType[];
+  attended_by: string | null;
+
+  // Details
+  fault_details: string | null;
+  root_cause: string | null;
+  action_taken: string | null;
+  cause_of_delay: string | null;
+  spare_parts_consumed: string | null;
+  quantity_specification: string | null;
+
+  // Handover
+  handed_over_date: string | null;
+  handed_over_time: string | null;
+
+  // Signatures
+  production_supervisor_sign: string | null;
+  production_manager_sign: string | null;
+  maintenance_engineer_sign: string | null;
+  maintenance_head_sign: string | null;
+
+  production_remarks: string | null;
+
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}

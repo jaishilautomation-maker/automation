@@ -1,20 +1,28 @@
 "use client";
 
 // =============================================================================
-// AppNav — role + module aware navigation sidebar.
+// AppNav — role + module + factory aware navigation sidebar.
 //
-// Job Card links: operator / production_incharge / lab-sign-off / dashboard
-// Lab QC links:   lab-qc activity picker / lab-qc records / dashboard
+// Factory A-20/1 (FACTORY_CODE=A20_1):
+//   operator          → A-20/1 shift entry (/operator)
+//   production_incharge → production sign-off + Breakdown + PM
+//   chemist/lab_manager → lab sign-off (job_card) + Lab QC (lab_qc)
 //
-// The active module is read from ModuleContext (set on the select-module page).
-// If no module has been chosen yet (e.g. first visit after login), the nav
-// falls back to role-based inference so returning users are never stuck.
+// Factory A-20 (FACTORY_CODE=A20):
+//   operator          → Production Job Card + Packing Maintenance + Packing Breakdown
+//   chemist/lab_manager → Lab QC only
+//
+// FACTORY_CODE is embedded at build time from NEXT_PUBLIC_FACTORY_CODE.
+// Fallback: "A20_1" keeps the existing behaviour unchanged.
 // =============================================================================
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
+import { FACTORY_CODE } from "@/lib/factory-config";
+
+const isA20 = FACTORY_CODE === "A20";
 
 export default function AppNav() {
   const pathname = usePathname();
@@ -25,21 +33,18 @@ export default function AppNav() {
   // Hide nav on the module/factory selector itself
   if (pathname === "/select-module") return null;
 
-  // Determine the effective module:
-  //   1. Use the explicit context selection if available.
-  //   2. Otherwise infer from the current path (handles direct URL access).
-  //   3. Fall back to role-based default.
+  // Determine the effective module from context → path → default
   const inferredModule =
     activeModule ??
     (pathname.startsWith("/lab-qc") ? "lab_qc" : "job_card");
 
   // -------------------------------------------------------------------------
-  // Build link sets per module + role
+  // Build link sets per factory / module / role
   // -------------------------------------------------------------------------
-
   let links: { href: string; label: string }[] = [];
 
   if (inferredModule === "lab_qc") {
+    // Lab QC — identical nav on both factory deployments
     links = [
       { href: "/lab-qc",              label: "Activities" },
       { href: "/lab-qc/records",      label: "My records" },
@@ -47,12 +52,7 @@ export default function AppNav() {
       { href: "/lab-qc/search",       label: "Search" },
       { href: "/dashboard",           label: "Dashboard" },
     ];
-
-    if (
-      role === "lab_manager" ||
-      role === "factory_admin" ||
-      role === "company_admin"
-    ) {
+    if (role === "lab_manager" || role === "factory_admin" || role === "company_admin") {
       links = [
         { href: "/lab-qc",              label: "Activities" },
         { href: "/lab-qc/records",      label: "Records" },
@@ -61,8 +61,26 @@ export default function AppNav() {
         { href: "/dashboard",           label: "Dashboard" },
       ];
     }
+  } else if (isA20) {
+    // ── A-20 job_card module ──
+    // operator on A-20 handles all three production / packing modules
+    if (role === "operator") {
+      links = [
+        { href: "/production-job-card", label: "Production Job Card" },
+        { href: "/packing-maintenance", label: "Packing Maintenance" },
+        { href: "/packing-breakdown",   label: "Packing Breakdown" },
+        { href: "/dashboard",           label: "Dashboard" },
+      ];
+    } else if (role === "factory_admin" || role === "company_admin") {
+      links = [
+        { href: "/production-job-card", label: "Production Job Card" },
+        { href: "/packing-maintenance", label: "Packing Maintenance" },
+        { href: "/packing-breakdown",   label: "Packing Breakdown" },
+        { href: "/dashboard",           label: "Dashboard" },
+      ];
+    }
   } else {
-    // Job Card
+    // ── A-20/1 job_card module (default) ──
     if (role === "operator") {
       links = [
         { href: "/operator",  label: "नई एन्ट्री" },
@@ -78,7 +96,6 @@ export default function AppNav() {
         { href: "/dashboard",   label: "Dashboard" },
       ];
     } else if (role === "chemist" || role === "lab_manager") {
-      // Job Card lab sign-off (different from Lab QC module)
       links = [
         { href: "/lab",       label: "Pending shifts" },
         { href: "/records",   label: "My submissions" },
@@ -93,7 +110,6 @@ export default function AppNav() {
 
   return (
     <nav className="app-nav">
-      {/* Always show a back-to-modules link */}
       <Link
         href="/select-module"
         aria-current={pathname === "/select-module" ? "page" : undefined}
@@ -106,7 +122,11 @@ export default function AppNav() {
         <Link
           key={href}
           href={href}
-          aria-current={pathname === href || pathname.startsWith(href + "/") ? "page" : undefined}
+          aria-current={
+            pathname === href || pathname.startsWith(href + "/")
+              ? "page"
+              : undefined
+          }
         >
           {label}
         </Link>

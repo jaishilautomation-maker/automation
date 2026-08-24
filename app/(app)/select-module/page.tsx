@@ -18,6 +18,7 @@ import {
   factoriesForModule,
   modulesForUser,
 } from "@/lib/module-context";
+import { FACTORY_CODE } from "@/lib/factory-config";
 import type { ActivityModule, AppRole, Factory } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -25,8 +26,13 @@ import type { ActivityModule, AppRole, Factory } from "@/lib/types";
 // ---------------------------------------------------------------------------
 function moduleEntryPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
-    if (role === "operator")                        return "/operator";
-    if (role === "production_incharge")             return "/production";
+    // A-20: operator handles production/packing modules, no shift-entry workflow
+    if (FACTORY_CODE === "A20") {
+      return "/production-job-card";
+    }
+    // A-20/1 (default)
+    if (role === "operator")                          return "/operator";
+    if (role === "production_incharge")               return "/production";
     if (role === "chemist" || role === "lab_manager") return "/lab";
     return "/dashboard";
   }
