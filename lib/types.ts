@@ -703,3 +703,46 @@ export interface PmItemWithStatus {
   nextDueAt: string;           // ISO date string
   status: "ok" | "due_soon" | "overdue";
 }
+
+// ---------------------------------------------------------------------------
+// QC Exchange — A-20/1 exchange log + A-20 imports
+// ---------------------------------------------------------------------------
+
+/** qc_exchange_log — A-20/1 side. Tracks outbound QC sync attempts. */
+export interface QcExchangeLog {
+  id: string;
+  source_table: string;        // 'product_qc' | 'rm_qc' | 'batch_analysis'
+  source_record_id: string;
+  factory_id: string;
+  payload: Record<string, unknown>;
+  status: "SYNC_PENDING" | "SYNC_SENT" | "SYNC_FAILED";
+  attempt_count: number;
+  last_attempted_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+/** qc_imports — A-20 side. Received QC records from A-20/1. */
+export interface QcImport {
+  id: string;
+  exchange_id: string;
+  source_factory: string;
+  source_record_id: string;
+  source_table: string;
+  source_batch_number: string | null;
+  material: string | null;
+  product: string | null;
+  qc_type: string | null;
+  test_result: string | null;
+  qc_status: "received" | "reviewed" | "rejected";
+  tested_at: string | null;
+  finalized_at: string | null;
+  transferred_at: string;
+  payload: Record<string, unknown>;
+  version: number;
+  superseded_by: string | null;
+  status: "active" | "superseded";
+  checksum: string | null;
+  created_at: string;
+}

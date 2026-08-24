@@ -40,26 +40,25 @@ export default function AppNav() {
   let links: { href: string; label: string }[] = [];
 
   if (inferredModule === "lab_qc") {
-    // Lab QC — all QC roles land on the activity picker (/lab-qc)
-    // then drill into sub-routes; records and search are shared
     links = [
-      { href: "/lab-qc",          label: "Activities" },
-      { href: "/lab-qc/records",  label: "My records" },
-      { href: "/lab-qc/search",   label: "Search" },
-      { href: "/dashboard",       label: "Dashboard" },
+      { href: "/lab-qc",              label: "Activities" },
+      { href: "/lab-qc/records",      label: "My records" },
+      { href: "/lab-qc/qc-imports",   label: "QC Imports" },
+      { href: "/lab-qc/search",       label: "Search" },
+      { href: "/dashboard",           label: "Dashboard" },
     ];
 
-    // Managers and admins get a link back to all records (not just their own)
     if (
       role === "lab_manager" ||
       role === "factory_admin" ||
       role === "company_admin"
     ) {
       links = [
-        { href: "/lab-qc",          label: "Activities" },
-        { href: "/lab-qc/records",  label: "Records" },
-        { href: "/lab-qc/search",   label: "Search" },
-        { href: "/dashboard",       label: "Dashboard" },
+        { href: "/lab-qc",              label: "Activities" },
+        { href: "/lab-qc/records",      label: "Records" },
+        { href: "/lab-qc/qc-imports",   label: "QC Imports" },
+        { href: "/lab-qc/search",       label: "Search" },
+        { href: "/dashboard",           label: "Dashboard" },
       ];
     }
   } else {
