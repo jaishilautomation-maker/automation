@@ -15,9 +15,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Factory name is resolved at build time from NEXT_PUBLIC_FACTORY_NAME env var.
+// Each Vercel deployment sets its own value; defaults to "Dombivli A-20/1".
+const factoryName = process.env.NEXT_PUBLIC_FACTORY_NAME ?? "Dombivli A-20/1";
+
 export const metadata: Metadata = {
-  title: "JSCI Job Card & QC System",
-  description: "Unified job card and quality control system for JSCI factories",
+  title: `JSCI · ${factoryName}`,
+  description: `Job card and quality control system — JSCI ${factoryName}`,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

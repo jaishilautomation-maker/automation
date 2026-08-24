@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
+import { FACTORY_NAME } from "@/lib/factory-config";
 import type { AppRole } from "@/lib/types";
+
+const factoryName = FACTORY_NAME;
 
 // Simplified role labels shown during self-registration.
 // These map to the app_role enum values that require no factory_admin grant.
@@ -90,7 +93,7 @@ export default function LoginPage() {
     <div className="auth-wrap">
       <div className="auth-card">
         <h2>{isSignup ? "Create account / खाता बनाएं" : "Sign in / लॉगिन"}</h2>
-        <div className="auth-sub">Job Card — Pulveriser / जॉब कार्ड — पल्वरायझर</div>
+        <div className="auth-sub">JSCI · {factoryName}</div>
 
         {error && <div className="auth-error">{error}</div>}
 

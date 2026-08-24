@@ -2,27 +2,40 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { FACTORY_NAME } from "@/lib/factory-config";
 
 function useModuleTitle(): { title: string; sub: string } {
   const pathname = usePathname();
+
   if (pathname.startsWith("/lab-qc")) {
-    return { title: "Lab QC — JSCI", sub: "JSCI/LAB/01 · Rev 01" };
+    return {
+      title: `Lab QC — JSCI · ${FACTORY_NAME}`,
+      sub:   "JSCI/LAB/01 · Rev 01",
+    };
   }
   if (
-    pathname.startsWith("/operator") ||
-    pathname.startsWith("/production") ||
-    pathname.startsWith("/lab") ||
-    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/operator")    ||
+    pathname.startsWith("/production")  ||
+    pathname.startsWith("/breakdown")   ||
+    pathname.startsWith("/maintenance") ||
+    pathname.startsWith("/lab")         ||
+    pathname.startsWith("/dashboard")   ||
     pathname.startsWith("/records")
   ) {
-    return { title: "Job Card — Pulveriser", sub: "JSCI/PROD/02 · Rev 02" };
+    return {
+      title: `Job Card — JSCI · ${FACTORY_NAME}`,
+      sub:   "JSCI/PROD/02 · Rev 02",
+    };
   }
-  return { title: "JSCI", sub: "Job Card & Lab QC" };
+  return {
+    title: `JSCI · ${FACTORY_NAME}`,
+    sub:   "Job Card & Lab QC",
+  };
 }
 
 export default function AppHeader() {
   const { profile, signOut } = useAuth();
-  const router   = useRouter();
+  const router = useRouter();
   const { title, sub } = useModuleTitle();
 
   const handleLogout = async () => {

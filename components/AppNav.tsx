@@ -72,9 +72,11 @@ export default function AppNav() {
       ];
     } else if (role === "production_incharge") {
       links = [
-        { href: "/production", label: "Pending shifts" },
-        { href: "/records",    label: "My submissions" },
-        { href: "/dashboard",  label: "Dashboard" },
+        { href: "/production",  label: "Pending shifts" },
+        { href: "/breakdown",   label: "Breakdown Register" },
+        { href: "/maintenance", label: "Preventive Maintenance" },
+        { href: "/records",     label: "My submissions" },
+        { href: "/dashboard",   label: "Dashboard" },
       ];
     } else if (role === "chemist" || role === "lab_manager") {
       // Job Card lab sign-off (different from Lab QC module)
