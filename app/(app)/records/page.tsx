@@ -11,6 +11,7 @@ interface ShiftRow {
   machine: string;
   shift_type: string;
   operator: string | null;
+  operator_submitted: boolean;
   production_submitted: boolean;
   lab_submitted: boolean;
 }
@@ -30,11 +31,12 @@ export default function RecordsPage() {
       setLoading(true);
       let query = supabase
         .from("shifts")
-        .select("id, shift_date, machine, shift_type, operator, production_submitted, lab_submitted")
+        .select("id, shift_date, machine, shift_type, operator, operator_submitted, production_submitted, lab_submitted")
         .order("created_at", { ascending: false });
 
-      if (profile.role === "operator")            query = query.eq("user_id", user.id);
-      if (profile.role === "production_incharge") query = query.eq("production_user_id", user.id);
+      // Production incharge sees shifts they created (user_id = them, since they INSERT now)
+      if (profile.role === "operator")            query = query.eq("operator_submitted", true).neq("user_id", "00000000-0000-0000-0000-000000000000");
+      if (profile.role === "production_incharge") query = query.eq("user_id", user.id);
       // Lab users see all shifts — both pending sign-off and ones they've completed.
       // (lab_user_id is only set after they submit, so filtering by it would hide pending work)
       // No extra filter needed — RLS already scopes to their factory.
@@ -74,6 +76,9 @@ export default function RecordsPage() {
               Status:{" "}
               <span className={`badge ${r.production_submitted ? "ok" : "warn"}`}>
                 Prod {r.production_submitted ? "✓" : "pending"}
+              </span>{" "}
+              <span className={`badge ${r.operator_submitted ? "ok" : "warn"}`}>
+                Op {r.operator_submitted ? "✓" : "pending"}
               </span>{" "}
               <span className={`badge ${r.lab_submitted ? "ok" : "warn"}`}>
                 Lab {r.lab_submitted ? "✓" : "pending"}

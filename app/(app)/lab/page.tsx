@@ -46,6 +46,7 @@ export default function LabPage() {
     const { data, error } = await supabase
       .from("shifts")
       .select("id, machine, shift_date, shift_type, operator, jobno")
+      .eq("operator_submitted", true)  // operator must have filled their part first
       .eq("lab_submitted", false)
       .order("created_at", { ascending: false });
     if (error) showToast("Could not load: " + error.message, true);
@@ -190,7 +191,10 @@ export default function LabPage() {
 
   return (
     <div className="card">
-      <h3>Shifts pending lab / QC input</h3>
+      <h3>Shifts pending lab / QC sign-off</h3>
+      <div className="field-hint" style={{ marginBottom: 10 }}>
+        These shifts have been filled by both Production and Operator.
+      </div>
       {loadingList ? (
         <div className="empty">Loading…</div>
       ) : pending.length === 0 ? (
