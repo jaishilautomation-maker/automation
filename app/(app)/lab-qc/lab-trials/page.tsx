@@ -8,13 +8,14 @@
 // batch or named product yet.
 // =============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import type { Product, LabTrialStatus } from "@/lib/types";
+import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
 
 interface BatchOption {
   id: string;
@@ -53,6 +54,10 @@ export default function LabTrialsPage() {
   const [status, setStatus]         = useState<LabTrialStatus>("ongoing");
   const [remarks, setRemarks]       = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Photo uploader refs
+  const productPhotoRef   = useRef<PhotoUploaderHandle | null>(null);
+  const jobCardPhotoRef   = useRef<PhotoUploaderHandle | null>(null);
 
   // Load all products (including trial-only)
   useEffect(() => {
@@ -109,6 +114,21 @@ export default function LabTrialsPage() {
         });
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Flush pending photos now we have the trial id
+      const trialId = (await supabase.from("lab_trials").select("id")
+        .eq("trial_code", trialCode.trim())
+        .eq("factory_id", activeFactory.id)
+        .order("submitted_at", { ascending: false })
+        .limit(1).single()).data?.id;
+
+      if (trialId) {
+        const flushes = [productPhotoRef, jobCardPhotoRef]
+          .filter(r => r.current?.hasPending)
+          .map(r => r.current!.flush(trialId));
+        await Promise.all(flushes);
+      }
+
       showToast("Lab trial saved ✓");
       setTrialCode(""); setObjective(""); setAppearance(""); setDensity("");
       setPhNeat(""); setPh5pct(""); setSuspensibility(""); setRemarksIfFailed("");
@@ -212,6 +232,37 @@ export default function LabTrialsPage() {
         <label>Remarks if Failed</label>
         <textarea rows={2} placeholder="Failure reason or observations"
           value={remarksIfFailed} onChange={e => setRemarksIfFailed(e.target.value)} />
+
+        {/* Photos */}
+        {user && activeFactory && (
+          <>
+            <label style={{ marginTop: 8 }}>Product Photo</label>
+            <PhotoUploader
+              ref={productPhotoRef}
+              label="Product Photo"
+              fieldKey="product_photo"
+              factoryCode={activeFactory.code}
+              entityType="lab_trial"
+              entityId={null}
+              userId={user.id}
+              factoryId={activeFactory.id}
+              onUploaded={() => {}}
+            />
+
+            <label style={{ marginTop: 8 }}>Job Card Photo</label>
+            <PhotoUploader
+              ref={jobCardPhotoRef}
+              label="Job Card Photo"
+              fieldKey="job_card_photo"
+              factoryCode={activeFactory.code}
+              entityType="lab_trial"
+              entityId={null}
+              userId={user.id}
+              factoryId={activeFactory.id}
+              onUploaded={() => {}}
+            />
+          </>
+        )}
       </div>
 
       <div className="card">

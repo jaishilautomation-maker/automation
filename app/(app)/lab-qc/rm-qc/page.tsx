@@ -1,7 +1,15 @@
 "use client";
 
 // =============================================================================
-// Lab QC — Raw Material QC (Dynamic form)
+// Lab QC — Raw Material QC
+//
+// A-20/1: Crude Sulphur only — dynamic form driven by qc_test_definitions
+//
+// A-20:   5 RM materials
+//   - Sulphur Powder → special branch: search qc_imports for A-20/1 source QC
+//     by batch number. Shows imported QC read-only if found.
+//   - Zinc Oxide, Calcium Chloride, Tebuconazole, Boric Powder →
+//     standard dynamic form from qc_test_definitions
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -13,15 +21,41 @@ import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
-import type { Material, QcTestDefinition, RmQcWithSource } from "@/lib/types";
+import type { Material, QcTestDefinition } from "@/lib/types";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 interface BatchOption {
   id: string;
   batch_number: string;
   lot_number: string | null;
   production_date: string;
-  source_batch_id: string | null;
 }
+
+interface QcImportRow {
+  id: string;
+  source_factory: string;
+  source_batch_number: string | null;
+  material: string | null;
+  test_result: string | null;
+  qc_status: string;
+  tested_at: string | null;
+  finalized_at: string | null;
+  transferred_at: string;
+  payload: Record<string, unknown>;
+  status: string;
+}
+
+const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
+
+const A20_RM_CODES = [
+  "SULPHUR_POWDER",
+  "ZINC_OXIDE",
+  "CALCIUM_CHLORIDE",
+  "TEBUCONAZOLE",
+  "BORIC_POWDER",
+];
 
 export default function RmQcPage() {
   const { user } = useAuth();
@@ -41,52 +75,74 @@ export default function RmQcPage() {
   const [testDate, setTestDate]       = useState(new Date().toISOString().slice(0, 10));
   const [chemistName, setChemistName] = useState("");
   const [remarks, setRemarks]         = useState("");
-  const [readThrough, setReadThrough] = useState<RmQcWithSource | null>(null);
-  const [loadingReadThrough, setLoadingReadThrough] = useState(false);
-  const [isReadThrough, setIsReadThrough] = useState(false);
   const [submitting, setSubmitting]   = useState(false);
 
-  // Photo uploader refs — keyed by test_key
+  // Sulphur Powder cross-factory state (A-20 only)
+  const [spBatchSearch, setSpBatchSearch]       = useState("");
+  const [spSearching, setSpSearching]           = useState(false);
+  const [spImport, setSpImport]                 = useState<QcImportRow | null>(null);
+  const [spNotFound, setSpNotFound]             = useState(false);
+
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
   const selectedMaterial = materials.find(m => m.id === materialId);
-  const isSulphurPowderAtFactory2 =
-    selectedMaterial?.code === "SULPHUR_POWDER" &&
-    activeFactory?.code === "DBV_20_2";
+  const isSulphurPowder  = selectedMaterial?.code === "SULPHUR_POWDER";
 
-  // A-20/1: lock to Crude Sulphur only. A-20: show all active materials.
+  // ---------------------------------------------------------------------------
+  // Load materials
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    const isCrudeSulphurOnly = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
     const sb = createClient();
-    const query = sb.from("materials").select("*").eq("is_active", true);
-    const finalQuery = isCrudeSulphurOnly
-      ? query.eq("code", "SULPHUR_CRUDE")
-      : query.order("name");
-
-    finalQuery.then(({ data }) => {
-      const mats = (data ?? []) as Material[];
-      setMaterials(mats);
-      if (isCrudeSulphurOnly && mats.length === 1) setMaterialId(mats[0].id);
-      setLoadingMats(false);
-    });
+    if (isA20_1) {
+      sb.from("materials").select("*").eq("code", "SULPHUR_CRUDE").eq("is_active", true)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) { setMaterials([data as Material]); setMaterialId((data as Material).id); }
+          setLoadingMats(false);
+        });
+    } else {
+      sb.from("materials").select("*").in("code", A20_RM_CODES).eq("is_active", true)
+        .then(({ data }) => {
+          const sorted = A20_RM_CODES
+            .map(code => (data ?? []).find((m: Material) => m.code === code))
+            .filter(Boolean) as Material[];
+          setMaterials(sorted);
+          setLoadingMats(false);
+        });
+    }
   }, []);
 
+  // ---------------------------------------------------------------------------
   // Load batches
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!materialId || !activeFactory) { setBatches([]); setBatchId(""); return; }
+    if (!materialId || !activeFactory || isSulphurPowder) {
+      setBatches([]); setBatchId(""); return;
+    }
     setLoadingBatches(true);
-    supabase.from("batches").select("id, batch_number, lot_number, production_date, source_batch_id")
-      .eq("factory_id", activeFactory.id).eq("material_id", materialId).eq("batch_type", "rm")
-      .order("production_date", { ascending: false }).limit(50)
-      .then(({ data }) => { setBatches((data ?? []) as BatchOption[]); setBatchId(""); setLoadingBatches(false); });
-  }, [materialId, activeFactory, supabase]);
+    supabase.from("batches")
+      .select("id, batch_number, lot_number, production_date")
+      .eq("factory_id", activeFactory.id)
+      .eq("material_id", materialId)
+      .eq("batch_type", "rm")
+      .order("production_date", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        setBatches((data ?? []) as BatchOption[]);
+        setBatchId("");
+        setLoadingBatches(false);
+      });
+  }, [materialId, activeFactory, isSulphurPowder, supabase]);
 
+  // ---------------------------------------------------------------------------
   // Load test definitions
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!materialId) { setTestDefs([]); setValues({}); return; }
+    if (!materialId || isSulphurPowder) { setTestDefs([]); setValues({}); return; }
     setLoadingDefs(true);
     supabase.from("qc_test_definitions").select("*")
-      .eq("material_id", materialId).eq("phase", "none").eq("is_active", true).order("sort_order")
+      .eq("material_id", materialId).eq("phase", "none").eq("is_active", true)
+      .order("sort_order")
       .then(({ data }) => {
         const defs = (data ?? []) as QcTestDefinition[];
         setTestDefs(defs);
@@ -95,21 +151,38 @@ export default function RmQcPage() {
         setValues(init);
         setLoadingDefs(false);
       });
-  }, [materialId, supabase]);
+  }, [materialId, isSulphurPowder, supabase]);
 
-  // Sulphur Powder read-through
-  useEffect(() => {
-    if (!batchId || !isSulphurPowderAtFactory2) { setReadThrough(null); setIsReadThrough(false); return; }
-    const selectedBatch = batches.find(b => b.id === batchId);
-    if (!selectedBatch?.source_batch_id) { setIsReadThrough(false); return; }
-    setLoadingReadThrough(true);
-    supabase.from("v_rm_qc_with_source").select("*").eq("batch_id", batchId).single()
-      .then(({ data }) => {
-        if (data) { setReadThrough(data as RmQcWithSource); setIsReadThrough(data.is_read_through); }
-        setLoadingReadThrough(false);
-      });
-  }, [batchId, isSulphurPowderAtFactory2, batches, supabase]);
+  // ---------------------------------------------------------------------------
+  // Sulphur Powder: search qc_imports by batch number
+  // ---------------------------------------------------------------------------
+  const searchSulphurQc = useCallback(async () => {
+    const q = spBatchSearch.trim();
+    if (!q) { showToast("Enter a batch number to search.", true); return; }
 
+    setSpSearching(true);
+    setSpImport(null);
+    setSpNotFound(false);
+
+    const { data, error } = await supabase
+      .from("qc_imports")
+      .select("*")
+      .eq("source_batch_number", q)
+      .eq("status", "active")
+      .maybeSingle();
+
+    setSpSearching(false);
+    if (error) { showToast("Search failed: " + error.message, true); return; }
+    if (data) {
+      setSpImport(data as QcImportRow);
+    } else {
+      setSpNotFound(true);
+    }
+  }, [spBatchSearch, supabase, showToast]);
+
+  // ---------------------------------------------------------------------------
+  // Field change
+  // ---------------------------------------------------------------------------
   const handleChange = useCallback((key: string, val: string) => {
     setValues(prev => {
       const next = { ...prev, [key]: val };
@@ -121,12 +194,14 @@ export default function RmQcPage() {
     });
   }, [testDefs]);
 
+  // ---------------------------------------------------------------------------
+  // Submit (non-Sulphur Powder materials)
+  // ---------------------------------------------------------------------------
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
     if (!materialId) { showToast("Select a material.", true); return; }
     if (!batchId)    { showToast("Select a batch.", true); return; }
     if (!chemistName.trim()) { showToast("Enter chemist name.", true); return; }
-    if (isReadThrough) { showToast("Read-through from Factory 20/1 — no entry needed.", true); return; }
 
     setSubmitting(true);
     try {
@@ -139,11 +214,10 @@ export default function RmQcPage() {
         } else if (d.input_type === "boolean") {
           testResults[d.test_key] = raw === "true";
         } else {
-          testResults[d.test_key] = raw; // storage_path for photos
+          testResults[d.test_key] = raw;
         }
       });
 
-      // INSERT and get back the new row id for photo linking
       const { data: newRow, error } = await supabase.from("rm_qc").insert({
         batch_id:      batchId,
         factory_id:    activeFactory.id,
@@ -151,25 +225,23 @@ export default function RmQcPage() {
         chemist_id:    user.id,
         test_date:     testDate,
         appearance:    values["appearance"] ?? null,
-        appearance_ok: values["appearance_ok"] === "true" ? true
-          : values["appearance_ok"] === "false" ? false : null,
+        appearance_ok: null,
         test_results:  testResults,
         remarks:       remarks.trim() || null,
       }).select("id").single();
 
-      if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+      if (error || !newRow) {
+        showToast("Could not save: " + (error?.message ?? "unknown"), true); return;
+      }
 
-      // Flush any pending photo uploads now that we have the entity id
       const flushPromises = Object.values(uploaderRefs.current)
-        .filter(Boolean)
-        .map(ref => ref!.flush(newRow.id));
+        .filter(Boolean).map(ref => ref!.flush(newRow.id));
       await Promise.all(flushPromises);
 
       showToast("QC results saved ✓");
       setBatchId("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
-      setChemistName("");
-      setRemarks("");
+      setChemistName(""); setRemarks("");
     } catch {
       showToast("Network error — try again.", true);
     } finally {
@@ -177,40 +249,150 @@ export default function RmQcPage() {
     }
   };
 
-  // Photo upload props
   const photoProps: PhotoUploadProps | undefined = (user && activeFactory) ? {
     factoryCode:  activeFactory.code,
     factoryId:    activeFactory.id,
     entityType:   "rm_qc",
-    entityId:     null, // null until after save — PhotoUploader defers upload
+    entityId:     null,
     userId:       user.id,
     onUploaded:   (key, path) => handleChange(key, path),
     uploaderRefs,
   } : undefined;
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   return (
     <>
       <Link href="/lab-qc" className="back-link">← Activities</Link>
 
       <div className="card">
         <h3>Raw Material QC</h3>
-        <label>Material *</label>
-        {loadingMats ? <div className="field-hint">Loading…</div>
-          : process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1" ? (
+
+        {/* Material selector */}
+        <label>Raw Material *</label>
+        {loadingMats ? (
+          <div className="field-hint">Loading…</div>
+        ) : isA20_1 ? (
+          <input type="text" disabled value={materials[0]?.name ?? "Crude Sulphur"}
+            style={{ background: "var(--surface)", fontWeight: 600 }} />
+        ) : (
+          <select value={materialId} onChange={e => {
+            setMaterialId(e.target.value);
+            setSpImport(null); setSpNotFound(false); setSpBatchSearch("");
+            setBatchId(""); setValues({});
+          }}>
+            <option value="">— Select raw material —</option>
+            {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* ── Sulphur Powder: cross-factory QC lookup ── */}
+      {isSulphurPowder && (
+        <div className="card">
+          <h3>Sulphur Powder QC</h3>
+          <div className="field-hint" style={{ marginBottom: 12 }}>
+            Sulphur Powder QC is performed at Factory A-20/1.
+            Enter the batch number to retrieve the finalized QC record.
+          </div>
+
+          <label>Batch Number *</label>
+          <div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
-              disabled
-              value={materials[0]?.name ?? "Crude Sulphur"}
-              style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
+              placeholder="e.g. SP-260824-001"
+              value={spBatchSearch}
+              onChange={e => { setSpBatchSearch(e.target.value); setSpImport(null); setSpNotFound(false); }}
+              onKeyDown={e => e.key === "Enter" && searchSulphurQc()}
+              style={{ flex: 1 }}
             />
-          ) : (
-            <select value={materialId} onChange={e => { setMaterialId(e.target.value); setReadThrough(null); }}>
-              <option value="">— Select material —</option>
-              {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              disabled={spSearching}
+              onClick={searchSulphurQc}
+            >
+              {spSearching ? "Searching…" : "Look up"}
+            </button>
+          </div>
+
+          {/* Found */}
+          {spImport && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{
+                padding: "10px 14px",
+                background: "var(--ok-soft)",
+                border: "1px solid var(--ok)",
+                borderRadius: 8,
+                marginBottom: 12,
+              }}>
+                <div style={{ fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>
+                  ✓ Source QC found
+                </div>
+                <div style={{ fontSize: 13 }}>
+                  <strong>Source:</strong> {spImport.source_factory}<br />
+                  <strong>Material:</strong> {spImport.material ?? "Sulphur Powder"}<br />
+                  <strong>Batch:</strong> {spImport.source_batch_number}<br />
+                  <strong>QC Status:</strong>{" "}
+                  <span style={{
+                    fontWeight: 700,
+                    color: spImport.test_result === "pass" ? "var(--ok)" : "var(--warn)",
+                  }}>
+                    {(spImport.test_result ?? spImport.qc_status ?? "—").toUpperCase()}
+                  </span><br />
+                  <strong>QC Date:</strong> {spImport.tested_at ? new Date(spImport.tested_at).toLocaleDateString("en-IN") : "—"}<br />
+                  <strong>Received at A-20:</strong> {new Date(spImport.transferred_at).toLocaleDateString("en-IN")}<br />
+                  <strong>Source QC ID:</strong> <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>{spImport.id}</span>
+                </div>
+              </div>
+
+              {/* Full payload read-only */}
+              <details>
+                <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--clay)", marginBottom: 6 }}>
+                  View QC Details (read-only)
+                </summary>
+                <textarea
+                  readOnly
+                  rows={10}
+                  value={JSON.stringify(spImport.payload, null, 2)}
+                  style={{
+                    fontFamily: "var(--font-geist-mono, monospace)",
+                    fontSize: 11, width: "100%",
+                    background: "var(--surface)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 6, padding: 10,
+                    resize: "vertical",
+                  }}
+                />
+              </details>
+
+              <div className="field-hint" style={{ marginTop: 8, color: "var(--ok)" }}>
+                This record is read-only. It was finalized by Factory A-20/1 and cannot be modified here.
+              </div>
+            </div>
           )}
-        {materialId && (
-          <>
+
+          {/* Not found */}
+          {spNotFound && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px",
+              background: "#fff3e0",
+              border: "1px solid var(--warn)",
+              borderRadius: 8, fontSize: 13, color: "var(--warn)",
+            }}>
+              Source QC not found for batch <strong>&ldquo;{spBatchSearch}&rdquo;</strong>.
+              Verify the batch number or wait for QC synchronization from A-20/1.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Standard dynamic QC form for non-Sulphur-Powder materials ── */}
+      {materialId && !isSulphurPowder && (
+        <>
+          {/* Batch selector */}
+          <div className="card">
             <label>Batch *</label>
             {loadingBatches ? <div className="field-hint">Loading batches…</div>
               : batches.length === 0 ? (
@@ -228,95 +410,65 @@ export default function RmQcPage() {
                   ))}
                 </select>
               )}
-          </>
-        )}
-      </div>
+          </div>
 
-      {/* Sulphur Powder read-through */}
-      {isSulphurPowderAtFactory2 && batchId && (
-        <div className="card">
-          {loadingReadThrough ? <div className="empty">Checking source batch…</div>
-            : isReadThrough && readThrough ? (
-              <div>
-                <h3 style={{ color: "var(--ok)" }}>Read-through from Factory 20/1</h3>
-                <div className="readonly-block">
-                  Sulphur Powder QC at Factory 20/2 is sourced from the Factory 20/1 batch analysis.
-                  Showing Factory 20/1 result — no new entry required.
-                </div>
+          {batchId && (
+            <>
+              <div className="card">
+                <h3>Test Details</h3>
                 <div className="row2">
-                  <div><label>Source batch</label><input type="text" disabled value={readThrough.source_batch_number ?? "—"} /></div>
-                  <div><label>Test date</label><input type="text" disabled value={readThrough.test_date ?? "—"} /></div>
+                  <div>
+                    <label>Test Date *</label>
+                    <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Chemist Name *</label>
+                    <input type="text" placeholder="Name" value={chemistName}
+                      onChange={e => setChemistName(e.target.value)} />
+                  </div>
                 </div>
-                <label>Appearance</label>
-                <input type="text" disabled value={readThrough.appearance ?? "—"} />
-                <label>Test Results (read-only)</label>
-                <textarea disabled rows={6} value={JSON.stringify(readThrough.test_results ?? {}, null, 2)}
-                  style={{ fontFamily: "var(--font-mono)", fontSize: 11 }} />
-                <div className="field-hint" style={{ color: "var(--ok)" }}>
-                  ✓ Read-only — data from Factory 20/1 via batch traceability chain.
+              </div>
+
+              {loadingDefs ? (
+                <div className="card"><div className="empty">Loading test fields…</div></div>
+              ) : testDefs.length === 0 ? (
+                <div className="card">
+                  <div className="field-hint">
+                    No test definitions found for {selectedMaterial?.name}.
+                    Run migration 003_a20_qc_seed.sql in the Supabase SQL editor.
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="field-hint" style={{ color: "var(--warn)" }}>
-                No source batch linked. Set <code>source_batch_id</code> on the batch record.
-              </div>
-            )}
-        </div>
-      )}
+              ) : (
+                <div className="card">
+                  <h3>Test Results — {selectedMaterial?.name}</h3>
+                  <div className="field-hint" style={{ marginBottom: 12 }}>
+                    All test fields are optional unless marked *.
+                    Leave blank if the test was not performed.
+                  </div>
+                  {testDefs.map(def => (
+                    <QcFieldRenderer
+                      key={def.id}
+                      def={def}
+                      value={values[def.test_key] ?? ""}
+                      onChange={handleChange}
+                      photoUploadProps={photoProps}
+                    />
+                  ))}
+                </div>
+              )}
 
-      {/* QC entry form */}
-      {materialId && batchId && !isReadThrough && (
-        <>
-          <div className="card">
-            <h3>Test Details</h3>
-            <div className="row2">
-              <div>
-                <label>Test Date *</label>
-                <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
+              <div className="card">
+                <h3>Remarks</h3>
+                <textarea placeholder="Additional observations…" value={remarks}
+                  onChange={e => setRemarks(e.target.value)} rows={3} />
               </div>
-              <div>
-                <label>Chemist Name *</label>
-                <input type="text" placeholder="Name" value={chemistName} onChange={e => setChemistName(e.target.value)} />
-              </div>
-            </div>
-          </div>
 
-          {loadingDefs ? (
-            <div className="card"><div className="empty">Loading test fields…</div></div>
-          ) : testDefs.length === 0 ? (
-            <div className="card"><div className="field-hint">No test definitions found for this material.</div></div>
-          ) : (
-            <div className="card">
-              <h3>Test Results</h3>
-              <div className="field-hint" style={{ marginBottom: 12 }}>
-                Green fields are auto-calculated. 📷 Photo fields upload when you save.
-              </div>
-              {testDefs.map(def => (
-                <QcFieldRenderer
-                  key={def.id}
-                  def={def}
-                  value={values[def.test_key] ?? ""}
-                  onChange={handleChange}
-                  photoUploadProps={photoProps}
-                />
-              ))}
-            </div>
+              <button className="btn btn-primary" type="button"
+                disabled={submitting || loadingDefs} onClick={handleSubmit}>
+                {submitting ? "Saving…" : "Save QC Results"}
+              </button>
+            </>
           )}
-
-          <div className="card">
-            <h3>Remarks</h3>
-            <textarea placeholder="Any additional observations…" value={remarks}
-              onChange={e => setRemarks(e.target.value)} rows={3} />
-          </div>
-
-          <p className="field-hint" style={{ marginBottom: 8 }}>
-            Factory: <strong>{activeFactory?.name ?? "—"}</strong> ·{" "}
-            Material: <strong>{selectedMaterial?.name ?? "—"}</strong>
-          </p>
-
-          <button className="btn btn-primary" type="button" disabled={submitting || loadingDefs} onClick={handleSubmit}>
-            {submitting ? "Saving…" : "Save QC Results"}
-          </button>
         </>
       )}
     </>

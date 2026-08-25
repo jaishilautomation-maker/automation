@@ -3,12 +3,12 @@
 // =============================================================================
 // Lab QC — Raw Material Receipt
 //
-// What this form does:
-//   1. Chemist selects a material (filtered to this factory's active materials)
-//   2. Fills in supplier, invoice, vehicle, date, quantity, lot number
-//   3. On submit:
-//      a. INSERTs a row into `batches` (batch_type = 'rm')
-//      b. INSERTs a row into `rm_receipts` linked to that batch
+// A-20/1: Crude Sulphur only — batch_number, quantity, appearance
+// A-20:   5 RM materials — Sulphur Powder, Zinc Oxide, Calcium Chloride,
+//         Tebuconazole, Boric Powder — same 3 fields each
+//
+// Per spec: 3 fields per material (batch_number, quantity_mt, appearance).
+// Stored in batches (batch_type='rm') + rm_receipts.
 // =============================================================================
 
 import { useEffect, useState } from "react";
@@ -23,7 +23,16 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-const UNITS = ["kg", "L", "MT", "bags", "drums"] as const;
+const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
+
+// A-20 RM materials in display order (matches spec)
+const A20_RM_CODES = [
+  "SULPHUR_POWDER",
+  "ZINC_OXIDE",
+  "CALCIUM_CHLORIDE",
+  "TEBUCONAZOLE",
+  "BORIC_POWDER",
+];
 
 export default function RmReceiptPage() {
   const { user } = useAuth();
@@ -31,74 +40,72 @@ export default function RmReceiptPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
-  // Master data
-  const [materials, setMaterials] = useState<Material[]>([]);
+  const [materials, setMaterials]     = useState<Material[]>([]);
   const [loadingMats, setLoadingMats] = useState(true);
-
-  // Form state
-  const [materialId, setMaterialId]     = useState("");
-  const [batchNumber, setBatchNumber]   = useState("");
-  const [lotNumber, setLotNumber]       = useState("");
-  const [supplierName, setSupplierName] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [vehicleNumber, setVehicleNumber] = useState("");
+  const [materialId, setMaterialId]   = useState("");
+  const [batchNumber, setBatchNumber] = useState("");
+  const [quantityMt, setQuantityMt]   = useState("");
+  const [appearance, setAppearance]   = useState("");
   const [receivedDate, setReceivedDate] = useState(todayISO());
-  const [quantity, setQuantity]         = useState("");
-  const [unit, setUnit]                 = useState<typeof UNITS[number]>("kg");
-  const [remarks, setRemarks]           = useState("");
-  const [submitting, setSubmitting]     = useState(false);
+  const [submitting, setSubmitting]   = useState(false);
 
-  // A-20/1: lock to Crude Sulphur only. A-20: show all active materials.
+  const selectedMaterial = materials.find(m => m.id === materialId);
+
   useEffect(() => {
-    const isCrudeSulphurOnly = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
-    const query = supabase.from("materials").select("*").eq("is_active", true);
-    const finalQuery = isCrudeSulphurOnly
-      ? query.eq("code", "SULPHUR_CRUDE")
-      : query.order("name");
-
-    finalQuery.then(({ data }) => {
-      const mats = (data ?? []) as Material[];
-      setMaterials(mats);
-      if (isCrudeSulphurOnly && mats.length === 1) setMaterialId(mats[0].id);
-      setLoadingMats(false);
-    });
-  }, [supabase]);
+    const sb = createClient();
+    if (isA20_1) {
+      // A-20/1: Crude Sulphur only
+      sb.from("materials").select("*").eq("code", "SULPHUR_CRUDE").eq("is_active", true)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) { setMaterials([data as Material]); setMaterialId((data as Material).id); }
+          setLoadingMats(false);
+        });
+    } else {
+      // A-20: 5 RM materials in spec order
+      sb.from("materials").select("*")
+        .in("code", A20_RM_CODES)
+        .eq("is_active", true)
+        .then(({ data }) => {
+          // Sort by spec order
+          const sorted = A20_RM_CODES
+            .map(code => (data ?? []).find((m: Material) => m.code === code))
+            .filter(Boolean) as Material[];
+          setMaterials(sorted);
+          setLoadingMats(false);
+        });
+    }
+  }, []);
 
   const reset = () => {
-    setMaterialId(""); setBatchNumber(""); setLotNumber("");
-    setSupplierName(""); setInvoiceNumber(""); setVehicleNumber("");
-    setReceivedDate(todayISO()); setQuantity(""); setUnit("kg"); setRemarks("");
+    if (!isA20_1) setMaterialId("");
+    setBatchNumber(""); setQuantityMt(""); setAppearance("");
+    setReceivedDate(todayISO());
   };
 
   const handleSubmit = async () => {
-    if (!user || !activeFactory) {
-      showToast("Session error — please refresh.", true);
-      return;
-    }
-    if (!materialId)        { showToast("Select a material.", true); return; }
-    if (!batchNumber.trim()) { showToast("Batch number is required.", true); return; }
-    if (!supplierName.trim()) { showToast("Supplier name is required.", true); return; }
-    if (!quantity || isNaN(parseFloat(quantity))) {
-      showToast("Enter a valid quantity.", true);
-      return;
+    if (!user || !activeFactory) { showToast("Session error — please refresh.", true); return; }
+    if (!materialId)             { showToast("Select a material.", true); return; }
+    if (!batchNumber.trim())     { showToast("Batch number is required.", true); return; }
+    if (!quantityMt || isNaN(parseFloat(quantityMt))) {
+      showToast("Enter a valid quantity.", true); return;
     }
 
     setSubmitting(true);
     try {
-      // 1. Insert batch row
+      const qty = parseFloat(quantityMt);
+
       const { data: batch, error: batchErr } = await supabase
         .from("batches")
         .insert({
           batch_number:    batchNumber.trim(),
-          lot_number:      lotNumber.trim() || null,
           factory_id:      activeFactory.id,
           material_id:     materialId,
           product_id:      null,
           batch_type:      "rm",
           production_date: receivedDate,
-          machine:         null,
-          quantity:        parseFloat(quantity),
-          unit,
+          quantity:        qty,
+          unit:            "MT",
           source_batch_id: null,
           created_by:      user.id,
         })
@@ -110,20 +117,17 @@ export default function RmReceiptPage() {
         return;
       }
 
-      // 2. Insert rm_receipt row
       const { error: receiptErr } = await supabase
         .from("rm_receipts")
         .insert({
-          batch_id:       batch.id,
-          factory_id:     activeFactory.id,
-          supplier_name:  supplierName.trim(),
-          invoice_number: invoiceNumber.trim() || null,
-          vehicle_number: vehicleNumber.trim() || null,
-          received_date:  receivedDate,
-          received_by:    user.id,
-          quantity:       parseFloat(quantity),
-          unit,
-          remarks:        remarks.trim() || null,
+          batch_id:      batch.id,
+          factory_id:    activeFactory.id,
+          supplier_name: selectedMaterial?.name ?? "—",  // required col; use material name
+          received_date: receivedDate,
+          received_by:   user.id,
+          quantity:      qty,
+          unit:          "MT",
+          remarks:       appearance.trim() || null,  // appearance stored in remarks
         });
 
       if (receiptErr) {
@@ -146,135 +150,66 @@ export default function RmReceiptPage() {
 
       <div className="card">
         <h3>Raw Material Receipt</h3>
+        <div className="field-hint">{activeFactory?.name ?? "—"}</div>
 
-        {/* Material — fixed to Crude Sulphur on A-20/1; full dropdown on A-20 */}
-        <label>Material *</label>
+        {/* Material selector */}
+        <label>Raw Material *</label>
         {loadingMats ? (
           <div className="field-hint">Loading…</div>
-        ) : process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1" ? (
-          <input
-            type="text"
-            disabled
-            value={materials[0]?.name ?? "Crude Sulphur"}
-            style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
-          />
+        ) : isA20_1 ? (
+          <input type="text" disabled value={materials[0]?.name ?? "Crude Sulphur"}
+            style={{ background: "var(--surface)", fontWeight: 600 }} />
         ) : (
-          <select value={materialId} onChange={e => setMaterialId(e.target.value)}>
-            <option value="">— Select material —</option>
-            {materials.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
+          <select value={materialId} onChange={e => { setMaterialId(e.target.value); setBatchNumber(""); setQuantityMt(""); setAppearance(""); }}>
+            <option value="">— Select raw material —</option>
+            {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         )}
 
-        {/* Batch / lot identifiers */}
-        <div className="row2">
-          <div>
-            <label>Batch / Delivery Number *</label>
+        {/* 3-field form — shown once material is selected */}
+        {materialId && selectedMaterial && (
+          <>
+            <label>{selectedMaterial.name} — Batch Number *</label>
             <input
               type="text"
-              placeholder="e.g. DEL-20240821"
+              placeholder="e.g. SP-260824-001"
               value={batchNumber}
               onChange={e => setBatchNumber(e.target.value)}
             />
-          </div>
-          <div>
-            <label>Lot Number (supplier)</label>
-            <input
-              type="text"
-              placeholder="Supplier lot no."
-              value={lotNumber}
-              onChange={e => setLotNumber(e.target.value)}
-            />
-          </div>
-        </div>
-      </div>
 
-      <div className="card">
-        <h3>Supplier Details</h3>
-
-        <label>Supplier Name *</label>
-        <input
-          type="text"
-          placeholder="Full supplier / vendor name"
-          value={supplierName}
-          onChange={e => setSupplierName(e.target.value)}
-        />
-
-        <div className="row2">
-          <div>
-            <label>Invoice Number</label>
-            <input
-              type="text"
-              placeholder="Invoice / challan no."
-              value={invoiceNumber}
-              onChange={e => setInvoiceNumber(e.target.value)}
-            />
-          </div>
-          <div>
-            <label>Vehicle Number</label>
-            <input
-              type="text"
-              placeholder="e.g. MH 04 AB 1234"
-              value={vehicleNumber}
-              onChange={e => setVehicleNumber(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <label>Date Received *</label>
-        <input
-          type="date"
-          value={receivedDate}
-          onChange={e => setReceivedDate(e.target.value)}
-        />
-      </div>
-
-      <div className="card">
-        <h3>Quantity</h3>
-        <div className="row2">
-          <div>
-            <label>Quantity *</label>
+            <label>{selectedMaterial.name} — Quantity Received (MT) *</label>
             <input
               type="number"
               min="0"
               step="0.001"
-              placeholder="0"
-              value={quantity}
-              onChange={e => setQuantity(e.target.value)}
+              placeholder="0.000"
+              value={quantityMt}
+              onChange={e => setQuantityMt(e.target.value)}
             />
-          </div>
-          <div>
-            <label>Unit</label>
-            <select value={unit} onChange={e => setUnit(e.target.value as typeof UNITS[number])}>
-              {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
-        </div>
+
+            <label>{selectedMaterial.name} — Appearance / Physical State</label>
+            <input
+              type="text"
+              placeholder="e.g. Yellow powder, free flowing"
+              value={appearance}
+              onChange={e => setAppearance(e.target.value)}
+            />
+
+            <label>Date Received</label>
+            <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)} />
+
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={submitting}
+              onClick={handleSubmit}
+              style={{ marginTop: 12 }}
+            >
+              {submitting ? "Saving…" : "Save Receipt"}
+            </button>
+          </>
+        )}
       </div>
-
-      <div className="card">
-        <h3>Remarks</h3>
-        <textarea
-          placeholder="Any observations about the delivery (condition, packaging, etc.)"
-          value={remarks}
-          onChange={e => setRemarks(e.target.value)}
-          rows={3}
-        />
-      </div>
-
-      <p className="field-hint" style={{ marginBottom: 8 }}>
-        Factory: <strong>{activeFactory?.name ?? "—"}</strong>
-      </p>
-
-      <button
-        className="btn btn-primary"
-        type="button"
-        disabled={submitting || loadingMats}
-        onClick={handleSubmit}
-      >
-        {submitting ? "Saving…" : "Save Receipt"}
-      </button>
     </>
   );
 }
