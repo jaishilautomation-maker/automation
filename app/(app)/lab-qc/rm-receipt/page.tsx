@@ -48,15 +48,19 @@ export default function RmReceiptPage() {
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
 
-  // Load materials
+  // Load Crude Sulphur only — A-20/1 RM Receipt is for Crude Sulphur exclusively
   useEffect(() => {
     supabase
       .from("materials")
       .select("*")
+      .eq("code", "SULPHUR_CRUDE")
       .eq("is_active", true)
-      .order("name")
+      .single()
       .then(({ data }) => {
-        setMaterials((data ?? []) as Material[]);
+        if (data) {
+          setMaterials([data as Material]);
+          setMaterialId((data as Material).id); // auto-select, no dropdown needed
+        }
         setLoadingMats(false);
       });
   }, [supabase]);
@@ -144,17 +148,17 @@ export default function RmReceiptPage() {
       <div className="card">
         <h3>Raw Material Receipt</h3>
 
-        {/* Material selection */}
-        <label>Material *</label>
+        {/* Material — fixed to Crude Sulphur for A-20/1 */}
+        <label>Material</label>
         {loadingMats ? (
-          <div className="field-hint">Loading materials…</div>
+          <div className="field-hint">Loading…</div>
         ) : (
-          <select value={materialId} onChange={e => setMaterialId(e.target.value)}>
-            <option value="">— Select material —</option>
-            {materials.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <input
+            type="text"
+            disabled
+            value={materials[0]?.name ?? "Crude Sulphur"}
+            style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
+          />
         )}
 
         {/* Batch / lot identifiers */}

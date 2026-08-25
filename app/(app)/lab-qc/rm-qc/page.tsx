@@ -54,11 +54,17 @@ export default function RmQcPage() {
     selectedMaterial?.code === "SULPHUR_POWDER" &&
     activeFactory?.code === "DBV_20_2";
 
-  // Load materials
+  // Load Crude Sulphur only — A-20/1 RM QC is for Crude Sulphur exclusively
   useEffect(() => {
     const sb = createClient();
-    sb.from("materials").select("*").eq("is_active", true).order("name")
-      .then(({ data }) => { setMaterials((data ?? []) as Material[]); setLoadingMats(false); });
+    sb.from("materials").select("*").eq("code", "SULPHUR_CRUDE").eq("is_active", true).single()
+      .then(({ data }) => {
+        if (data) {
+          setMaterials([data as Material]);
+          setMaterialId((data as Material).id); // auto-select
+        }
+        setLoadingMats(false);
+      });
   }, []);
 
   // Load batches
@@ -184,12 +190,14 @@ export default function RmQcPage() {
 
       <div className="card">
         <h3>Raw Material QC</h3>
-        <label>Material *</label>
+        <label>Material</label>
         {loadingMats ? <div className="field-hint">Loading…</div> : (
-          <select value={materialId} onChange={e => { setMaterialId(e.target.value); setReadThrough(null); }}>
-            <option value="">— Select material —</option>
-            {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          <input
+            type="text"
+            disabled
+            value={materials[0]?.name ?? "Crude Sulphur"}
+            style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
+          />
         )}
         {materialId && (
           <>
