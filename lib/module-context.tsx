@@ -108,12 +108,62 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     writeSession(SESSION_FACTORY_KEY, f);
   }, []);
 
-  // Load the user's access list from user_roles JOIN factories
+  // Load the user's access list from user_roles JOIN factories.
+  //
+  // FACTORY_CODE fast-path: if this deployment has a fixed factory code
+  // (NEXT_PUBLIC_FACTORY_CODE is set), skip the DB query for factories entirely.
+  // Load the factory row by code, then build the access list from the user's role
+  // in auth-context. This eliminates the "No module access" problem caused by
+  // user_roles rows having factory_id=NULL (self-registration default).
   const loadAccessList = useCallback(async (userId: string) => {
     const supabase = createClient();
     setLoading(true);
     try {
-      // Fetch all user_roles rows with factory detail joined
+      // ── Fast path: deployment-scoped factory ────────────────────────────
+      const deploymentCode = process.env.NEXT_PUBLIC_FACTORY_CODE;
+      if (deploymentCode) {
+        const { data: factoryRow } = await supabase
+          .from("factories")
+          .select("id, code, name, location, is_active, created_at")
+          .eq("code", deploymentCode === "A20_1" ? "DBV_20_1" : deploymentCode === "A20" ? "DBV_20_2" : deploymentCode)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (factoryRow) {
+          // Get the user's role from user_roles (any row for this user)
+          const { data: roleRow } = await supabase
+            .from("user_roles")
+            .select("role, module")
+            .eq("user_id", userId)
+            .order("granted_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const role = (roleRow?.role ?? "operator") as AppRole;
+          const module = (roleRow?.module ?? null) as ActivityModule | null;
+
+          const list: UserAccess[] = [{
+            factory: factoryRow as unknown as Factory,
+            module,
+            role,
+          }];
+          setAccessList(list);
+
+          // Restore or set defaults from sessionStorage
+          const savedModule  = readSession<ActivityModule>(SESSION_MODULE_KEY);
+          const savedFactory = readSession<Factory>(SESSION_FACTORY_KEY);
+          if (savedModule)  _setActiveModule(savedModule);
+          if (savedFactory && savedFactory.id === (factoryRow as unknown as Factory).id) {
+            _setActiveFactory(savedFactory);
+          } else {
+            _setActiveFactory(factoryRow as unknown as Factory);
+            writeSession(SESSION_FACTORY_KEY, factoryRow);
+          }
+          return;
+        }
+      }
+
+      // ── Standard path: multi-factory deployment ──────────────────────────
       const { data, error } = await supabase
         .from("user_roles")
         .select(`
@@ -130,13 +180,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
 
       const list: UserAccess[] = [];
       for (const row of data ?? []) {
-        // company_admin rows have factory_id = null → they get all factories
-        if (!row.factory_id || !row.factories) {
-          // Skip for now; company_admin's factory list resolves at the
-          // activity level via fn_user_factory_ids().  They see all factories
-          // in the factory picker via a separate query below.
-          continue;
-        }
+        if (!row.factory_id || !row.factories) continue;
         const factory = row.factories as unknown as Factory;
         if (factory.is_active) {
           list.push({
@@ -147,7 +191,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // For company_admin (no factory_id rows) — load all active factories
+      // company_admin — load all active factories
       const hasNullFactory = (data ?? []).some(r => !r.factory_id);
       if (hasNullFactory) {
         const { data: allFactories } = await supabase
@@ -167,7 +211,6 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
 
       setAccessList(list);
 
-      // Restore previous session selection if still valid
       const savedModule  = readSession<ActivityModule>(SESSION_MODULE_KEY);
       const savedFactory = readSession<Factory>(SESSION_FACTORY_KEY);
 

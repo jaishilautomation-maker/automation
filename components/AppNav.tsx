@@ -20,8 +20,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
-import { FACTORY_CODE } from "@/lib/factory-config";
+import { FACTORY_CODE, FACTORY_NAME } from "@/lib/factory-config";
 
+const IS_FACTORY_SCOPED = !!(
+  process.env.NEXT_PUBLIC_FACTORY_CODE &&
+  process.env.NEXT_PUBLIC_FACTORY_CODE !== ""
+);
 const isA20 = FACTORY_CODE === "A20";
 
 export default function AppNav() {
@@ -110,13 +114,21 @@ export default function AppNav() {
 
   return (
     <nav className="app-nav">
-      <Link
-        href="/select-module"
-        aria-current={pathname === "/select-module" ? "page" : undefined}
-        title="Switch module / factory"
-      >
-        ⬅ Modules
-      </Link>
+      {/* Factory-scoped: show factory name instead of "⬅ Modules" back link.
+          Lab users still get a "⬅ Modules" link since they have two modules. */}
+      {IS_FACTORY_SCOPED && role !== "chemist" && role !== "lab_manager" ? (
+        <span style={{ fontSize: 11, color: "var(--ink-soft)", padding: "6px 0", display: "block" }}>
+          {FACTORY_NAME}
+        </span>
+      ) : (
+        <Link
+          href="/select-module"
+          aria-current={pathname === "/select-module" ? "page" : undefined}
+          title="Switch module / factory"
+        >
+          ⬅ Modules
+        </Link>
+      )}
 
       {links.map(({ href, label }) => (
         <Link
