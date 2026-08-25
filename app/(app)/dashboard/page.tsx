@@ -132,8 +132,16 @@ export default function DashboardPage() {
       .eq("factory_id", activeFactory.id)
       .gte("test_date", sinceDate.toISOString().slice(0, 10))
       .order("test_date", { ascending: false });
-    if (error) showToast("Could not load QC summary: " + error.message, true);
-    else setQcSummary((data ?? []) as FactoryQcSummary[]);
+    if (error) {
+      // v_factory_qc_summary does not exist in every deployment (A-20 project
+      // doesn't have it — it's an A-20/1-only view). Silently skip rather than
+      // showing an error toast; the empty state renders a "No QC records" message.
+      if (!error.message.includes("schema cache")) {
+        showToast("Could not load QC summary: " + error.message, true);
+      }
+    } else {
+      setQcSummary((data ?? []) as FactoryQcSummary[]);
+    }
     setLoadingQc(false);
   };
 
