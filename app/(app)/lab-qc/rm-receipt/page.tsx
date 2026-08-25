@@ -48,21 +48,20 @@ export default function RmReceiptPage() {
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
 
-  // Load Crude Sulphur only — A-20/1 RM Receipt is for Crude Sulphur exclusively
+  // A-20/1: lock to Crude Sulphur only. A-20: show all active materials.
   useEffect(() => {
-    supabase
-      .from("materials")
-      .select("*")
-      .eq("code", "SULPHUR_CRUDE")
-      .eq("is_active", true)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setMaterials([data as Material]);
-          setMaterialId((data as Material).id); // auto-select, no dropdown needed
-        }
-        setLoadingMats(false);
-      });
+    const isCrudeSulphurOnly = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
+    const query = supabase.from("materials").select("*").eq("is_active", true);
+    const finalQuery = isCrudeSulphurOnly
+      ? query.eq("code", "SULPHUR_CRUDE")
+      : query.order("name");
+
+    finalQuery.then(({ data }) => {
+      const mats = (data ?? []) as Material[];
+      setMaterials(mats);
+      if (isCrudeSulphurOnly && mats.length === 1) setMaterialId(mats[0].id);
+      setLoadingMats(false);
+    });
   }, [supabase]);
 
   const reset = () => {
@@ -148,17 +147,24 @@ export default function RmReceiptPage() {
       <div className="card">
         <h3>Raw Material Receipt</h3>
 
-        {/* Material — fixed to Crude Sulphur for A-20/1 */}
-        <label>Material</label>
+        {/* Material — fixed to Crude Sulphur on A-20/1; full dropdown on A-20 */}
+        <label>Material *</label>
         {loadingMats ? (
           <div className="field-hint">Loading…</div>
-        ) : (
+        ) : process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1" ? (
           <input
             type="text"
             disabled
             value={materials[0]?.name ?? "Crude Sulphur"}
             style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
           />
+        ) : (
+          <select value={materialId} onChange={e => setMaterialId(e.target.value)}>
+            <option value="">— Select material —</option>
+            {materials.map(m => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
         )}
 
         {/* Batch / lot identifiers */}

@@ -54,17 +54,21 @@ export default function RmQcPage() {
     selectedMaterial?.code === "SULPHUR_POWDER" &&
     activeFactory?.code === "DBV_20_2";
 
-  // Load Crude Sulphur only — A-20/1 RM QC is for Crude Sulphur exclusively
+  // A-20/1: lock to Crude Sulphur only. A-20: show all active materials.
   useEffect(() => {
+    const isCrudeSulphurOnly = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
     const sb = createClient();
-    sb.from("materials").select("*").eq("code", "SULPHUR_CRUDE").eq("is_active", true).single()
-      .then(({ data }) => {
-        if (data) {
-          setMaterials([data as Material]);
-          setMaterialId((data as Material).id); // auto-select
-        }
-        setLoadingMats(false);
-      });
+    const query = sb.from("materials").select("*").eq("is_active", true);
+    const finalQuery = isCrudeSulphurOnly
+      ? query.eq("code", "SULPHUR_CRUDE")
+      : query.order("name");
+
+    finalQuery.then(({ data }) => {
+      const mats = (data ?? []) as Material[];
+      setMaterials(mats);
+      if (isCrudeSulphurOnly && mats.length === 1) setMaterialId(mats[0].id);
+      setLoadingMats(false);
+    });
   }, []);
 
   // Load batches
@@ -190,15 +194,21 @@ export default function RmQcPage() {
 
       <div className="card">
         <h3>Raw Material QC</h3>
-        <label>Material</label>
-        {loadingMats ? <div className="field-hint">Loading…</div> : (
-          <input
-            type="text"
-            disabled
-            value={materials[0]?.name ?? "Crude Sulphur"}
-            style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
-          />
-        )}
+        <label>Material *</label>
+        {loadingMats ? <div className="field-hint">Loading…</div>
+          : process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1" ? (
+            <input
+              type="text"
+              disabled
+              value={materials[0]?.name ?? "Crude Sulphur"}
+              style={{ background: "var(--surface)", color: "var(--ink)", fontWeight: 600 }}
+            />
+          ) : (
+            <select value={materialId} onChange={e => { setMaterialId(e.target.value); setReadThrough(null); }}>
+              <option value="">— Select material —</option>
+              {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          )}
         {materialId && (
           <>
             <label>Batch *</label>
