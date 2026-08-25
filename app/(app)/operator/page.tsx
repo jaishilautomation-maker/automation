@@ -87,6 +87,9 @@ export default function OperatorPage() {
     const { data, error } = await supabase
       .from("shifts")
       .select("id, machine, shift_date, shift_type, jobno")
+      // production_submitted=true → production created it
+      // operator_submitted=false  → operator hasn't filled it yet
+      .eq("production_submitted", true)
       .eq("operator_submitted", false)
       .order("created_at", { ascending: false });
     if (error) showToast("Could not load: " + error.message, true);
@@ -148,14 +151,14 @@ export default function OperatorPage() {
     try {
       // Update shift with operator fields
       const { error: shiftErr } = await supabase.from("shifts").update({
-        operator:          operatorName.trim(),
+        operator:            operatorName.trim(),
         checkpoint_cleaning: chkClean,
         checkpoint_roller:   chkRoller,
         checkpoint_mesh:     chkMesh,
-        hours_total:        hoursTotal > 0 ? hoursTotal : null,
-        sig_operator:       sigOp.trim()   || null,
-        sig_maintenance:    sigMaint.trim() || null,
-        operator_submitted: true,
+        hours_total:         hoursTotal > 0 ? hoursTotal : null,
+        sig_operator:        sigOp.trim()   || null,
+        sig_maintenance:     sigMaint.trim() || null,
+        operator_submitted:  true,           // marks shift ready for production's pending tab
       }).eq("id", activeShift.id);
 
       if (shiftErr) { showToast("Could not save shift: " + shiftErr.message, true); return; }
