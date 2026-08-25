@@ -61,14 +61,16 @@ export default function PostProductionPage() {
   const [remarks, setRemarks]                 = useState("");
   const [submitting, setSubmitting]           = useState(false);
 
-  // Load products
+  // Load products — A-20: 5 Lab QC products only; A-20/1: all non-trial
+  const A20_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "ZIDDI", "LIQUID_CALCIUM", "LIQUID_BORON"];
+  const isA20 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20";
+
   useEffect(() => {
-    supabase
-      .from("products")
-      .select("*")
-      .eq("is_trial_only", false)
-      .eq("is_active", true)
-      .order("name")
+    const q = supabase.from("products").select("*").eq("is_active", true);
+    const finalQ = isA20
+      ? q.in("code", A20_PRODUCT_CODES)
+      : q.eq("is_trial_only", false);
+    finalQ.order("name")
       .then(({ data }) => { setProducts((data ?? []) as Product[]); setLoadingProducts(false); });
   }, [supabase]);
 

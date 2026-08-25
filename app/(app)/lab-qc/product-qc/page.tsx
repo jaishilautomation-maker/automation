@@ -74,15 +74,18 @@ export default function ProductQcPage() {
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
 
   // -------------------------------------------------------------------------
-  // Load non-trial products
+  // Load products — A-20: filter to 5 known Lab QC products by code
+  //                 A-20/1: all non-trial active products
   // -------------------------------------------------------------------------
+  const A20_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "ZIDDI", "LIQUID_CALCIUM", "LIQUID_BORON"];
+  const isA20 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20";
+
   useEffect(() => {
-    supabase
-      .from("products")
-      .select("*")
-      .eq("is_trial_only", false)
-      .eq("is_active", true)
-      .order("name")
+    const q = supabase.from("products").select("*").eq("is_active", true);
+    const finalQ = isA20
+      ? q.in("code", A20_PRODUCT_CODES)
+      : q.eq("is_trial_only", false);
+    finalQ.order("name")
       .then(({ data }) => {
         setProducts((data ?? []) as Product[]);
         setLoadingProducts(false);
