@@ -310,7 +310,7 @@ export default function ProductionPage() {
                   )}
                 </div>
 
-                <label>माल का Code Number</label>
+                <label>Maal ka Code Number</label>
                 <input type="text" placeholder="e.g. SC-001"
                   value={b.maalCode} onChange={e => changeBatch(b.id, "maalCode", e.target.value)} />
 
