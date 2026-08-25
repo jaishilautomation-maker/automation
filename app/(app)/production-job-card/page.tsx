@@ -48,9 +48,18 @@ function scaleQty(instructed: number, ref: number, actual: number): number {
   return Math.round((instructed / ref) * actual * 1000) / 1000;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// A-20 production products in display order
+const A20_PROD_CODES = [
+  "SULPHUR_SC_UPL",
+  "SULPHUR_SC",
+  "NUTRIZIN",
+  "INSTACAL",
+  "K_GUM",
+  "INSTABORE",
+];
+
+// Products that have Phase A + B
+const PHASE_AWARE_PROD_CODES = ["SULPHUR_SC", "NUTRIZIN", "INSTACAL", "INSTABORE"];
 export default function ProductionJobCardPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -86,19 +95,23 @@ export default function ProductionJobCardPage() {
   const [submitting, setSubmitting]   = useState(false);
 
   const selectedProduct = products.find(p => p.id === productId);
+  const isPhaseAware = PHASE_AWARE_PROD_CODES.includes(selectedProduct?.code ?? "");
 
   // -------------------------------------------------------------------------
-  // Load products
+  // Load products — filtered to the 6 confirmed A-20 production products in spec order
   // -------------------------------------------------------------------------
   useEffect(() => {
     const sb = createClient();
     sb.from("products")
       .select("*")
-      .eq("is_trial_only", false)
+      .in("code", A20_PROD_CODES)
       .eq("is_active", true)
-      .order("name")
       .then(({ data }) => {
-        setProducts((data ?? []) as Product[]);
+        // Sort by spec order, not alphabetically
+        const sorted = A20_PROD_CODES
+          .map(code => (data ?? []).find((p: Product) => p.code === code))
+          .filter(Boolean) as Product[];
+        setProducts(sorted);
         setLoadingProducts(false);
       });
   }, []);
@@ -399,6 +412,11 @@ export default function ProductionJobCardPage() {
                 <option value="">— Select product —</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
+            )}
+            {isPhaseAware && productId && (
+              <div className="field-hint" style={{ color: "var(--clay)" }}>
+                This product has Phase A and Phase B — formula items will be grouped by phase.
+              </div>
             )}
           </div>
           <div>
