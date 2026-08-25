@@ -120,8 +120,8 @@ export default function ProductionPage() {
           shift_date:           shiftDate,
           shift_type:           shiftType,
           sig_production:       sigProd.trim() || null,
-          production_submitted: true,   // production step done at creation
-          operator_submitted:   false,  // operator fills next
+          production_submitted: true,
+          // operator_submitted defaults to false in DB (migration 010)
           lab_submitted:        false,
         })
         .select("id")

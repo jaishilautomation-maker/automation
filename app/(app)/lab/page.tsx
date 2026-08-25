@@ -46,7 +46,9 @@ export default function LabPage() {
     const { data, error } = await supabase
       .from("shifts")
       .select("id, machine, shift_date, shift_type, operator, jobno")
-      .eq("operator_submitted", true)  // operator must have filled their part first
+      // operator_submitted=true → operator has filled their part
+      // lab_submitted=false    → lab hasn't done theirs yet
+      .eq("operator_submitted", true)
       .eq("lab_submitted", false)
       .order("created_at", { ascending: false });
     if (error) showToast("Could not load: " + error.message, true);
