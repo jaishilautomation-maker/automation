@@ -175,42 +175,20 @@ export default function BatchAnalysisPage() {
 
     setSubmitting(true);
     try {
-      // Resolve or create batch
-      let batchId = resolvedBatchId;
+      // Resolve or create batch via API (bypasses RLS)
+      const batchRes = await fetch("/api/lab-qc/create-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "ensure_batch",
+          payload: { batch_number: batchNumber.trim(), factory_id: activeFactory.id },
+        }),
+      });
+      const batchJson = await batchRes.json();
+      if (!batchRes.ok) { showToast("Could not create batch: " + (batchJson.error ?? "unknown"), true); return; }
 
-      if (!batchId) {
-        const { data: mat } = await supabase
-          .from("materials")
-          .select("id")
-          .eq("code", "SULPHUR_POWDER")
-          .single();
-
-        if (!mat) { showToast("Material config error.", true); return; }
-
-        const { data: newBatch, error: batchErr } = await supabase
-          .from("batches")
-          .insert({
-            batch_number:    batchNumber.trim(),
-            factory_id:      activeFactory.id,
-            material_id:     mat.id,
-            product_id:      null,
-            batch_type:      "fg",
-            production_date: new Date().toISOString().slice(0, 10),
-            quantity:        null,
-            unit:            "kg",
-            source_batch_id: null,
-            created_by:      user.id,
-          })
-          .select("id")
-          .single();
-
-        if (batchErr || !newBatch) {
-          showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
-          return;
-        }
-        batchId = newBatch.id;
-        setResolvedBatchId(batchId);
-      }
+      const batchId = batchJson.batch_id;
+      setResolvedBatchId(batchId);
 
       // Build test_results JSONB
       const testResults: Record<string, number | string | boolean> = {};
@@ -234,39 +212,49 @@ export default function BatchAnalysisPage() {
         appearanceOkRaw === "false" ? false : null;
 
       if (existingAnalysis) {
-        const { error } = await supabase
-          .from("batch_analysis")
-          .update({
-            analysis_date: analysisDate,
-            appearance:    appearanceVal,
-            appearance_ok: appearanceOk,
-            test_results:  testResults,
-            remarks:       remarks.trim() || null,
-            updated_by:    user.id,
-          })
-          .eq("id", existingAnalysis.id);
+        // Update via API
+        const updateRes = await fetch("/api/lab-qc/create-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "update_batch_analysis",
+            payload: {
+              id:            existingAnalysis.id,
+              analysis_date: analysisDate,
+              appearance:    appearanceVal,
+              appearance_ok: appearanceOk,
+              test_results:  testResults,
+              remarks:       remarks.trim() || null,
+            },
+          }),
+        });
+        const updateJson = await updateRes.json();
+        if (!updateRes.ok) { showToast("Update failed: " + (updateJson.error ?? "unknown"), true); return; }
 
-        if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
         showToast("Batch analysis updated ✓");
       } else {
-        const { data: newRow, error } = await supabase
-          .from("batch_analysis")
-          .insert({
-            batch_id:      batchId,
-            factory_id:    activeFactory.id,
-            chemist_id:    user.id,
-            analysis_date: analysisDate,
-            appearance:    appearanceVal,
-            appearance_ok: appearanceOk,
-            test_results:  testResults,
-            remarks:       remarks.trim() || null,
-          })
-          .select("id")
-          .single();
+        // Insert via API
+        const insertRes = await fetch("/api/lab-qc/create-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "insert_batch_analysis",
+            payload: {
+              batch_id:      batchId,
+              factory_id:    activeFactory.id,
+              analysis_date: analysisDate,
+              appearance:    appearanceVal,
+              appearance_ok: appearanceOk,
+              test_results:  testResults,
+              remarks:       remarks.trim() || null,
+            },
+          }),
+        });
+        const insertJson = await insertRes.json();
+        if (!insertRes.ok) { showToast("Could not save: " + (insertJson.error ?? "unknown"), true); return; }
 
-        if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
-        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(insertJson.id)));
         showToast("Batch analysis saved ✓");
       }
 
