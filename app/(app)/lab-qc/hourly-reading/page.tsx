@@ -6,10 +6,9 @@
 // Append-only: one row per hourly reading per batch.
 // test_results driven by qc_test_definitions WHERE material_id = SULPHUR_POWDER
 //                                               AND phase = 'none'
-// (2 fields: colour_appearance + appearance_photo)
 //
-// The reading timestamp is captured at submission time (not user-editable
-// beyond selecting the approximate hour, which keeps the form simple).
+// User enters a BATCH NUMBER (text input). If a batch with that number exists,
+// we link to it; otherwise we create a new batch record automatically.
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -22,15 +21,6 @@ import { evalFormula } from "@/lib/formula";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition } from "@/lib/types";
-
-// ---------------------------------------------------------------------------
-// Batch option (WIP batches of SULPHUR_POWDER at this factory)
-// ---------------------------------------------------------------------------
-interface BatchOption {
-  id: string;
-  batch_number: string;
-  production_date: string;
-}
 
 // ---------------------------------------------------------------------------
 // Recent reading row (for the "today's readings" summary below the form)
@@ -47,10 +37,9 @@ export default function HourlyReadingPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
-  // Batches
-  const [batches, setBatches]         = useState<BatchOption[]>([]);
-  const [batchId, setBatchId]         = useState("");
-  const [loadingBatches, setLoadingBatches] = useState(true);
+  // Batch number (free text input)
+  const [batchNumber, setBatchNumber] = useState("");
+  const [resolvedBatchId, setResolvedBatchId] = useState<string | null>(null);
 
   // Test definitions
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
@@ -59,41 +48,14 @@ export default function HourlyReadingPage() {
   // Form state
   const [values, setValues]           = useState<Record<string, string>>({});
   const [readingTime, setReadingTime] = useState(() =>
-    new Date().toISOString().slice(0, 16) // datetime-local format: "YYYY-MM-DDTHH:MM"
+    new Date().toISOString().slice(0, 16)
   );
   const [remarks, setRemarks]         = useState("");
   const [submitting, setSubmitting]   = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
-  // Recent readings for the selected batch (today only)
+  // Recent readings for the entered batch number
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
-
-  // -------------------------------------------------------------------------
-  // Load SULPHUR_POWDER WIP/FG batches at this factory
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!activeFactory) return;
-
-    supabase
-      .from("materials")
-      .select("id")
-      .eq("code", "SULPHUR_POWDER")
-      .single()
-      .then(({ data: mat }) => {
-        if (!mat) { setLoadingBatches(false); return; }
-        return supabase
-          .from("batches")
-          .select("id, batch_number, production_date")
-          .eq("factory_id", activeFactory.id)
-          .eq("material_id", mat.id)
-          .order("production_date", { ascending: false })
-          .limit(30);
-      })
-      .then(res => {
-        if (res) setBatches((res.data ?? []) as BatchOption[]);
-        setLoadingBatches(false);
-      });
-  }, [activeFactory, supabase]);
 
   // -------------------------------------------------------------------------
   // Load test definitions (phase='none' for SULPHUR_POWDER = hourly fields)
@@ -127,23 +89,45 @@ export default function HourlyReadingPage() {
   }, [supabase]);
 
   // -------------------------------------------------------------------------
-  // Load today's readings for the selected batch
+  // Resolve batch number → batch_id (look up or will create on submit)
+  // Also load recent readings for this batch
   // -------------------------------------------------------------------------
-  const loadRecentReadings = useCallback(async (bid: string) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data } = await supabase
-      .from("hourly_readings")
-      .select("id, reading_time, test_results")
-      .eq("batch_id", bid)
-      .gte("reading_time", today)
-      .order("reading_time", { ascending: false });
-    setRecentReadings((data ?? []) as RecentReading[]);
-  }, [supabase]);
+  const resolveBatch = useCallback(async (bn: string) => {
+    if (!bn.trim() || !activeFactory) {
+      setResolvedBatchId(null);
+      setRecentReadings([]);
+      return;
+    }
 
-  useEffect(() => {
-    if (batchId) loadRecentReadings(batchId);
-    else setRecentReadings([]);
-  }, [batchId, loadRecentReadings]);
+    // Look for existing batch
+    const { data } = await supabase
+      .from("batches")
+      .select("id")
+      .eq("factory_id", activeFactory.id)
+      .eq("batch_number", bn.trim())
+      .eq("batch_type", "fg")
+      .maybeSingle();
+
+    const bid = data?.id ?? null;
+    setResolvedBatchId(bid);
+
+    // Load recent readings if batch found
+    if (bid) {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: readings } = await supabase
+        .from("hourly_readings")
+        .select("id, reading_time, test_results")
+        .eq("batch_id", bid)
+        .gte("reading_time", today)
+        .order("reading_time", { ascending: false });
+      setRecentReadings((readings ?? []) as RecentReading[]);
+    } else {
+      setRecentReadings([]);
+    }
+  }, [activeFactory, supabase]);
+
+  // Debounce batch lookup on blur
+  const handleBatchBlur = () => { resolveBatch(batchNumber); };
 
   // -------------------------------------------------------------------------
   // Field change handler (recalculates formulas live)
@@ -169,10 +153,50 @@ export default function HourlyReadingPage() {
   // -------------------------------------------------------------------------
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
-    if (!batchId) { showToast("Select a batch.", true); return; }
+    if (!batchNumber.trim()) { showToast("Batch number is required.", true); return; }
 
     setSubmitting(true);
     try {
+      // Resolve or create batch
+      let batchId = resolvedBatchId;
+
+      if (!batchId) {
+        // Get SULPHUR_POWDER material id
+        const { data: mat } = await supabase
+          .from("materials")
+          .select("id")
+          .eq("code", "SULPHUR_POWDER")
+          .single();
+
+        if (!mat) { showToast("Material config error.", true); return; }
+
+        // Create a new batch record
+        const { data: newBatch, error: batchErr } = await supabase
+          .from("batches")
+          .insert({
+            batch_number:    batchNumber.trim(),
+            factory_id:      activeFactory.id,
+            material_id:     mat.id,
+            product_id:      null,
+            batch_type:      "fg",
+            production_date: new Date().toISOString().slice(0, 10),
+            quantity:        null,
+            unit:            "KG",
+            source_batch_id: null,
+            created_by:      user.id,
+          })
+          .select("id")
+          .single();
+
+        if (batchErr || !newBatch) {
+          showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
+          return;
+        }
+        batchId = newBatch.id;
+        setResolvedBatchId(batchId);
+      }
+
+      // Build test_results
       const testResults: Record<string, number | string> = {};
       testDefs.forEach(d => {
         const raw = values[d.test_key];
@@ -196,15 +220,15 @@ export default function HourlyReadingPage() {
 
       if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
 
-      // Flush pending photo uploads now we have the entity id
+      // Flush pending photo uploads
       await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
 
       showToast("Reading saved ✓");
-      // Reset values only; keep batch selected for next reading
+      // Reset values only; keep batch number for next reading
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
       setReadingTime(new Date().toISOString().slice(0, 16));
-      loadRecentReadings(batchId);
+      resolveBatch(batchNumber);
     } catch {
       showToast("Network error — try again.", true);
     } finally {
@@ -222,22 +246,23 @@ export default function HourlyReadingPage() {
       <div className="card">
         <h3>Hourly Readings — Sulphur Powder</h3>
 
-        <label>Batch *</label>
-        {loadingBatches ? (
-          <div className="field-hint">Loading batches…</div>
-        ) : batches.length === 0 ? (
-          <div className="field-hint" style={{ color: "var(--warn)" }}>
-            No Sulphur Powder batches at {activeFactory?.name}.
+        <label>Batch Number *</label>
+        <input
+          type="text"
+          placeholder="Enter batch number e.g. SP-260824-001"
+          value={batchNumber}
+          onChange={e => setBatchNumber(e.target.value)}
+          onBlur={handleBatchBlur}
+        />
+        {batchNumber.trim() && resolvedBatchId && (
+          <div className="field-hint" style={{ color: "var(--ok)" }}>
+            ✓ Existing batch found
           </div>
-        ) : (
-          <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-            <option value="">— Select batch —</option>
-            {batches.map(b => (
-              <option key={b.id} value={b.id}>
-                {b.batch_number} · {b.production_date}
-              </option>
-            ))}
-          </select>
+        )}
+        {batchNumber.trim() && !resolvedBatchId && (
+          <div className="field-hint">
+            New batch — will be created on save
+          </div>
         )}
 
         <label>Reading Time *</label>
@@ -248,7 +273,7 @@ export default function HourlyReadingPage() {
         />
       </div>
 
-      {batchId && (
+      {batchNumber.trim() && (
         <>
           {/* Dynamic test fields */}
           {loadingDefs ? (

@@ -3,20 +3,20 @@
 // =============================================================================
 // Lab QC — Raw Material Receipt
 //
-// A-20/1: Crude Sulphur only — batch_number, quantity, appearance
-// A-20:   5 RM materials — Sulphur Powder, Zinc Oxide, Calcium Chloride,
-//         Tebuconazole, Boric Powder — same 3 fields each
+// A-20/1: Crude Sulphur only — invoice_number, quantity, appearance, photo
+// A-20:   5 RM materials — same fields each
 //
-// Per spec: 3 fields per material (batch_number, quantity_mt, appearance).
+// Per spec: invoice_number, quantity_mt, appearance, photo.
 // Stored in batches (batch_type='rm') + rm_receipts.
 // =============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material } from "@/lib/types";
 
 function todayISO() {
@@ -40,14 +40,16 @@ export default function RmReceiptPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
-  const [materials, setMaterials]     = useState<Material[]>([]);
-  const [loadingMats, setLoadingMats] = useState(true);
-  const [materialId, setMaterialId]   = useState("");
-  const [batchNumber, setBatchNumber] = useState("");
-  const [quantityMt, setQuantityMt]   = useState("");
-  const [appearance, setAppearance]   = useState("");
+  const [materials, setMaterials]       = useState<Material[]>([]);
+  const [loadingMats, setLoadingMats]   = useState(true);
+  const [materialId, setMaterialId]     = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [quantityMt, setQuantityMt]     = useState("");
+  const [appearance, setAppearance]     = useState("");
   const [receivedDate, setReceivedDate] = useState(todayISO());
-  const [submitting, setSubmitting]   = useState(false);
+  const [submitting, setSubmitting]     = useState(false);
+
+  const photoRef = useRef<PhotoUploaderHandle | null>(null);
 
   const selectedMaterial = materials.find(m => m.id === materialId);
 
@@ -67,7 +69,6 @@ export default function RmReceiptPage() {
         .in("code", A20_RM_CODES)
         .eq("is_active", true)
         .then(({ data }) => {
-          // Sort by spec order
           const sorted = A20_RM_CODES
             .map(code => (data ?? []).find((m: Material) => m.code === code))
             .filter(Boolean) as Material[];
@@ -79,14 +80,14 @@ export default function RmReceiptPage() {
 
   const reset = () => {
     if (!isA20_1) setMaterialId("");
-    setBatchNumber(""); setQuantityMt(""); setAppearance("");
+    setInvoiceNumber(""); setQuantityMt(""); setAppearance("");
     setReceivedDate(todayISO());
   };
 
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — please refresh.", true); return; }
     if (!materialId)             { showToast("Select a material.", true); return; }
-    if (!batchNumber.trim())     { showToast("Batch number is required.", true); return; }
+    if (!invoiceNumber.trim())   { showToast("Invoice number is required.", true); return; }
     if (!quantityMt || isNaN(parseFloat(quantityMt))) {
       showToast("Enter a valid quantity.", true); return;
     }
@@ -95,10 +96,11 @@ export default function RmReceiptPage() {
     try {
       const qty = parseFloat(quantityMt);
 
+      // Store invoice_number in the batch_number column for DB compatibility
       const { data: batch, error: batchErr } = await supabase
         .from("batches")
         .insert({
-          batch_number:    batchNumber.trim(),
+          batch_number:    invoiceNumber.trim(),
           factory_id:      activeFactory.id,
           material_id:     materialId,
           product_id:      null,
@@ -113,7 +115,7 @@ export default function RmReceiptPage() {
         .single();
 
       if (batchErr || !batch) {
-        showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
+        showToast("Could not create receipt: " + (batchErr?.message ?? "unknown"), true);
         return;
       }
 
@@ -122,17 +124,22 @@ export default function RmReceiptPage() {
         .insert({
           batch_id:      batch.id,
           factory_id:    activeFactory.id,
-          supplier_name: selectedMaterial?.name ?? "—",  // required col; use material name
+          supplier_name: selectedMaterial?.name ?? "—",
           received_date: receivedDate,
           received_by:   user.id,
           quantity:      qty,
           unit:          "MT",
-          remarks:       appearance.trim() || null,  // appearance stored in remarks
+          remarks:       appearance.trim() || null,
         });
 
       if (receiptErr) {
         showToast("Batch saved but receipt failed: " + receiptErr.message, true);
         return;
+      }
+
+      // Flush photo upload if pending
+      if (photoRef.current?.hasPending) {
+        await photoRef.current.flush(batch.id);
       }
 
       showToast("Receipt recorded ✓");
@@ -160,24 +167,24 @@ export default function RmReceiptPage() {
           <input type="text" disabled value={materials[0]?.name ?? "Crude Sulphur"}
             style={{ background: "var(--surface)", fontWeight: 600 }} />
         ) : (
-          <select value={materialId} onChange={e => { setMaterialId(e.target.value); setBatchNumber(""); setQuantityMt(""); setAppearance(""); }}>
+          <select value={materialId} onChange={e => { setMaterialId(e.target.value); setInvoiceNumber(""); setQuantityMt(""); setAppearance(""); }}>
             <option value="">— Select raw material —</option>
             {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         )}
 
-        {/* 3-field form — shown once material is selected */}
+        {/* Form — shown once material is selected */}
         {materialId && selectedMaterial && (
           <>
-            <label>{selectedMaterial.name} — Batch Number *</label>
+            <label>Invoice Number *</label>
             <input
               type="text"
-              placeholder="e.g. SP-260824-001"
-              value={batchNumber}
-              onChange={e => setBatchNumber(e.target.value)}
+              placeholder="e.g. INV-2024-001"
+              value={invoiceNumber}
+              onChange={e => setInvoiceNumber(e.target.value)}
             />
 
-            <label>{selectedMaterial.name} — Quantity Received (MT) *</label>
+            <label>Quantity Received (MT) *</label>
             <input
               type="number"
               min="0"
@@ -187,7 +194,7 @@ export default function RmReceiptPage() {
               onChange={e => setQuantityMt(e.target.value)}
             />
 
-            <label>{selectedMaterial.name} — Appearance / Physical State</label>
+            <label>Appearance / Physical State</label>
             <input
               type="text"
               placeholder="e.g. Yellow powder, free flowing"
@@ -197,6 +204,23 @@ export default function RmReceiptPage() {
 
             <label>Date Received</label>
             <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)} />
+
+            {/* Photo upload (compressed) */}
+            {user && activeFactory && (
+              <div style={{ marginTop: 12 }}>
+                <PhotoUploader
+                  ref={photoRef}
+                  label="Receipt Photo"
+                  fieldKey="receipt_photo"
+                  factoryCode={activeFactory.code}
+                  entityType="rm_qc"
+                  entityId={null}
+                  userId={user.id}
+                  factoryId={activeFactory.id}
+                  onUploaded={() => {}}
+                />
+              </div>
+            )}
 
             <button
               className="btn btn-primary"

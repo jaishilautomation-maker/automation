@@ -105,23 +105,56 @@ export default function ProductQcPage() {
 
   // -------------------------------------------------------------------------
   // Load batches when product changes
+  // For A-20/1: also load SULPHUR_POWDER material batches (batch_type='fg')
+  // since hourly-reading / batch-analysis create them with material_id
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!productId || !activeFactory) { setBatches([]); return; }
 
     setLoadingBatches(true);
-    supabase
-      .from("batches")
-      .select("id, batch_number, lot_number, production_date")
-      .eq("factory_id", activeFactory.id)
-      .eq("product_id", productId)
-      .order("production_date", { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
-        setBatches((data ?? []) as BatchOption[]);
-        setLoadingBatches(false);
-      });
-  }, [productId, activeFactory, supabase]);
+
+    // For A-20/1 Sulphur Powder products, also check material-based batches
+    const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
+    const selectedCode = products.find(p => p.id === productId)?.code;
+    const isSulphurProduct = selectedCode === "SULPHUR_SC" || selectedCode === "SULPHUR_POWDER";
+
+    if (isA20_1 && isSulphurProduct) {
+      // Load batches by material (SULPHUR_POWDER, batch_type='fg') — these are
+      // created by hourly-reading / batch-analysis pages
+      supabase
+        .from("materials")
+        .select("id")
+        .eq("code", "SULPHUR_POWDER")
+        .single()
+        .then(({ data: mat }) => {
+          if (!mat) { setLoadingBatches(false); return; }
+          return supabase
+            .from("batches")
+            .select("id, batch_number, lot_number, production_date")
+            .eq("factory_id", activeFactory.id)
+            .eq("material_id", mat.id)
+            .eq("batch_type", "fg")
+            .order("production_date", { ascending: false })
+            .limit(50);
+        })
+        .then(res => {
+          if (res) setBatches((res.data ?? []) as BatchOption[]);
+          setLoadingBatches(false);
+        });
+    } else {
+      supabase
+        .from("batches")
+        .select("id, batch_number, lot_number, production_date")
+        .eq("factory_id", activeFactory.id)
+        .eq("product_id", productId)
+        .order("production_date", { ascending: false })
+        .limit(50)
+        .then(({ data }) => {
+          setBatches((data ?? []) as BatchOption[]);
+          setLoadingBatches(false);
+        });
+    }
+  }, [productId, activeFactory, supabase, products]);
 
   // -------------------------------------------------------------------------
   // Load test definitions when product + phase change
@@ -334,20 +367,22 @@ export default function ProductQcPage() {
         )}
       </div>
 
-      {/* Step 3: batch */}
+      {/* Step 3: batch — references batch numbers from hourly reading / batch analysis */}
       {productId && (
         <div className="card">
           <h3>Batch</h3>
-          <label>Batch *</label>
+          <label>Batch Number *</label>
           {loadingBatches ? (
             <div className="field-hint">Loading batches…</div>
           ) : batches.length === 0 ? (
             <div className="field-hint" style={{ color: "var(--warn)" }}>
               No batches for {selectedProduct?.name ?? "this product"} at {activeFactory?.name}.
+              <br />
+              <span style={{ fontSize: 12 }}>Create a batch via Hourly Reading or Batch Analysis first.</span>
             </div>
           ) : (
             <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-              <option value="">— Select batch —</option>
+              <option value="">— Select batch number —</option>
               {batches.map(b => (
                 <option key={b.id} value={b.id}>
                   {b.batch_number}

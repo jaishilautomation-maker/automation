@@ -4,15 +4,11 @@
 // Lab QC — Batch Analysis (Sulphur Powder, Factory A 20/1)
 //
 // One analysis per batch (UNIQUE batch_id on batch_analysis table).
-// When a batch already has an analysis:
-//   → Load it, show in edit mode, submit = UPDATE
-// When no analysis exists yet:
-//   → Show blank form, submit = INSERT
+// User enters a BATCH NUMBER (text input). If existing → loads for edit.
+// If new → creates batch on save then inserts analysis.
 //
 // test_results driven by qc_test_definitions WHERE material_id = SULPHUR_POWDER
 //                                               AND phase = 'B'
-// (39 fields — purity, acidity, mesh, melting point, moisture, ash,
-//  oil content, specific gravity, bulk density)
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -26,31 +22,23 @@ import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRend
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
 
-interface BatchOption {
-  id: string;
-  batch_number: string;
-  lot_number: string | null;
-  production_date: string;
-}
-
 export default function BatchAnalysisPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
 
-  // Batches
-  const [batches, setBatches]           = useState<BatchOption[]>([]);
-  const [batchId, setBatchId]           = useState("");
-  const [loadingBatches, setLoadingBatches] = useState(true);
+  // Batch number (free text)
+  const [batchNumber, setBatchNumber] = useState("");
+  const [resolvedBatchId, setResolvedBatchId] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   // Test definitions
   const [testDefs, setTestDefs]         = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs]   = useState(true);
 
-  // Existing analysis for selected batch (null = none yet)
+  // Existing analysis for resolved batch (null = none yet)
   const [existingAnalysis, setExistingAnalysis] = useState<BatchAnalysis | null>(null);
-  const [checkingExisting, setCheckingExisting] = useState(false);
 
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
@@ -59,33 +47,6 @@ export default function BatchAnalysisPage() {
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
-
-  // -------------------------------------------------------------------------
-  // Load batches
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!activeFactory) return;
-
-    supabase
-      .from("materials")
-      .select("id")
-      .eq("code", "SULPHUR_POWDER")
-      .single()
-      .then(({ data: mat }) => {
-        if (!mat) { setLoadingBatches(false); return; }
-        return supabase
-          .from("batches")
-          .select("id, batch_number, lot_number, production_date")
-          .eq("factory_id", activeFactory.id)
-          .eq("material_id", mat.id)
-          .order("production_date", { ascending: false })
-          .limit(50);
-      })
-      .then(res => {
-        if (res) setBatches((res.data ?? []) as BatchOption[]);
-        setLoadingBatches(false);
-      });
-  }, [activeFactory, supabase]);
 
   // -------------------------------------------------------------------------
   // Load test definitions (phase = 'B' for batch analysis)
@@ -119,46 +80,69 @@ export default function BatchAnalysisPage() {
   }, [supabase]);
 
   // -------------------------------------------------------------------------
-  // When batch changes — check for existing analysis (INSERT vs UPDATE)
+  // Resolve batch number on blur → find existing batch + analysis
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!batchId) {
+  const resolveBatch = useCallback(async (bn: string) => {
+    if (!bn.trim() || !activeFactory) {
+      setResolvedBatchId(null);
       setExistingAnalysis(null);
       return;
     }
-    setCheckingExisting(true);
-    supabase
-      .from("batch_analysis")
-      .select("*")
-      .eq("batch_id", batchId)
-      .maybeSingle()
-      .then(({ data }) => {
-        const analysis = data as BatchAnalysis | null;
-        setExistingAnalysis(analysis);
-        if (analysis) {
-          // Pre-fill form with existing values
-          setAnalysisDate(analysis.analysis_date);
-          setRemarks(analysis.remarks ?? "");
-          const prefill: Record<string, string> = {};
-          const tr = (analysis.test_results ?? {}) as Record<string, unknown>;
-          testDefs.forEach(d => {
-            const v = tr[d.test_key];
-            prefill[d.test_key] = v !== undefined && v !== null ? String(v) : "";
-          });
-          setValues(prefill);
-        } else {
-          // Clear to blank for a fresh entry
-          const init: Record<string, string> = {};
-          testDefs.forEach(d => { init[d.test_key] = ""; });
-          setValues(init);
-          setRemarks("");
-        }
-        setCheckingExisting(false);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId, supabase]);
-  // testDefs is intentionally excluded to avoid re-triggering when defs load;
-  // prefill only runs when the user actively changes batchId.
+
+    setResolving(true);
+
+    // Look for existing batch
+    const { data: batchRow } = await supabase
+      .from("batches")
+      .select("id")
+      .eq("factory_id", activeFactory.id)
+      .eq("batch_number", bn.trim())
+      .eq("batch_type", "fg")
+      .maybeSingle();
+
+    const bid = batchRow?.id ?? null;
+    setResolvedBatchId(bid);
+
+    // Check for existing analysis
+    if (bid) {
+      const { data: analysis } = await supabase
+        .from("batch_analysis")
+        .select("*")
+        .eq("batch_id", bid)
+        .maybeSingle();
+
+      const existing = analysis as BatchAnalysis | null;
+      setExistingAnalysis(existing);
+
+      if (existing) {
+        setAnalysisDate(existing.analysis_date);
+        setRemarks(existing.remarks ?? "");
+        const prefill: Record<string, string> = {};
+        const tr = (existing.test_results ?? {}) as Record<string, unknown>;
+        testDefs.forEach(d => {
+          const v = tr[d.test_key];
+          prefill[d.test_key] = v !== undefined && v !== null ? String(v) : "";
+        });
+        setValues(prefill);
+      } else {
+        resetForm();
+      }
+    } else {
+      setExistingAnalysis(null);
+      resetForm();
+    }
+
+    setResolving(false);
+  }, [activeFactory, supabase, testDefs]);
+
+  const resetForm = () => {
+    const init: Record<string, string> = {};
+    testDefs.forEach(d => { init[d.test_key] = ""; });
+    setValues(init);
+    setRemarks("");
+  };
+
+  const handleBatchBlur = () => { resolveBatch(batchNumber); };
 
   // -------------------------------------------------------------------------
   // Field change with live formula recalculation
@@ -184,13 +168,50 @@ export default function BatchAnalysisPage() {
   // -------------------------------------------------------------------------
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
-    if (!batchId) { showToast("Select a batch.", true); return; }
+    if (!batchNumber.trim()) { showToast("Batch number is required.", true); return; }
     if (!chemistName.trim() && !existingAnalysis) {
       showToast("Enter chemist name.", true); return;
     }
 
     setSubmitting(true);
     try {
+      // Resolve or create batch
+      let batchId = resolvedBatchId;
+
+      if (!batchId) {
+        const { data: mat } = await supabase
+          .from("materials")
+          .select("id")
+          .eq("code", "SULPHUR_POWDER")
+          .single();
+
+        if (!mat) { showToast("Material config error.", true); return; }
+
+        const { data: newBatch, error: batchErr } = await supabase
+          .from("batches")
+          .insert({
+            batch_number:    batchNumber.trim(),
+            factory_id:      activeFactory.id,
+            material_id:     mat.id,
+            product_id:      null,
+            batch_type:      "fg",
+            production_date: new Date().toISOString().slice(0, 10),
+            quantity:        null,
+            unit:            "KG",
+            source_batch_id: null,
+            created_by:      user.id,
+          })
+          .select("id")
+          .single();
+
+        if (batchErr || !newBatch) {
+          showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
+          return;
+        }
+        batchId = newBatch.id;
+        setResolvedBatchId(batchId);
+      }
+
       // Build test_results JSONB
       const testResults: Record<string, number | string | boolean> = {};
       testDefs.forEach(d => {
@@ -226,7 +247,6 @@ export default function BatchAnalysisPage() {
           .eq("id", existingAnalysis.id);
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
-        // Flush photos against the existing record id
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
         showToast("Batch analysis updated ✓");
       } else {
@@ -248,7 +268,6 @@ export default function BatchAnalysisPage() {
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
         showToast("Batch analysis saved ✓");
-        setBatchId(prev => { setTimeout(() => setBatchId(prev), 0); return ""; });
       }
 
       setChemistName("");
@@ -269,31 +288,27 @@ export default function BatchAnalysisPage() {
       <div className="card">
         <h3>Batch Analysis — Sulphur Powder</h3>
 
-        <label>Batch *</label>
-        {loadingBatches ? (
-          <div className="field-hint">Loading batches…</div>
-        ) : batches.length === 0 ? (
-          <div className="field-hint" style={{ color: "var(--warn)" }}>
-            No Sulphur Powder batches at {activeFactory?.name}.
+        <label>Batch Number *</label>
+        <input
+          type="text"
+          placeholder="Enter batch number e.g. SP-260824-001"
+          value={batchNumber}
+          onChange={e => setBatchNumber(e.target.value)}
+          onBlur={handleBatchBlur}
+        />
+        {resolving && <div className="field-hint">Looking up batch…</div>}
+        {!resolving && batchNumber.trim() && resolvedBatchId && !existingAnalysis && (
+          <div className="field-hint" style={{ color: "var(--ok)" }}>
+            ✓ Batch found — no analysis yet
           </div>
-        ) : (
-          <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-            <option value="">— Select batch —</option>
-            {batches.map(b => (
-              <option key={b.id} value={b.id}>
-                {b.batch_number}
-                {b.lot_number ? ` · Lot ${b.lot_number}` : ""}
-                {" · "}{b.production_date}
-              </option>
-            ))}
-          </select>
+        )}
+        {!resolving && batchNumber.trim() && !resolvedBatchId && (
+          <div className="field-hint">
+            New batch — will be created on save
+          </div>
         )}
 
-        {checkingExisting && (
-          <div className="field-hint">Checking for existing analysis…</div>
-        )}
-
-        {batchId && !checkingExisting && existingAnalysis && (
+        {!resolving && batchNumber.trim() && existingAnalysis && (
           <div
             className="readonly-block"
             style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 10 }}
@@ -305,7 +320,7 @@ export default function BatchAnalysisPage() {
         )}
       </div>
 
-      {batchId && !checkingExisting && (
+      {batchNumber.trim() && !resolving && (
         <>
           <div className="card">
             <h3>Analysis Details</h3>
@@ -330,7 +345,7 @@ export default function BatchAnalysisPage() {
             </div>
           </div>
 
-          {/* Dynamic test fields — 39 fields grouped by the sort_order in DB */}
+          {/* Dynamic test fields */}
           {loadingDefs ? (
             <div className="card"><div className="empty">Loading test fields…</div></div>
           ) : (

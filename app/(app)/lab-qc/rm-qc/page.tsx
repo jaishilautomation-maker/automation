@@ -113,7 +113,7 @@ export default function RmQcPage() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Load batches
+  // Load batches (for A-20/1 crude sulphur these are invoice-number entries)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!materialId || !activeFactory || isSulphurPowder) {
@@ -391,18 +391,18 @@ export default function RmQcPage() {
       {/* ── Standard dynamic QC form for non-Sulphur-Powder materials ── */}
       {materialId && !isSulphurPowder && (
         <>
-          {/* Batch selector */}
+          {/* Batch selector (shows invoice number for A-20/1 crude sulphur) */}
           <div className="card">
-            <label>Batch *</label>
-            {loadingBatches ? <div className="field-hint">Loading batches…</div>
+            <label>{isA20_1 ? "Invoice Number" : "Batch"} *</label>
+            {loadingBatches ? <div className="field-hint">Loading…</div>
               : batches.length === 0 ? (
                 <div className="field-hint" style={{ color: "var(--warn)" }}>
-                  No batches found.{" "}
+                  No receipts found.{" "}
                   <Link href="/lab-qc/rm-receipt" style={{ color: "var(--clay)" }}>Create a receipt first →</Link>
                 </div>
               ) : (
                 <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-                  <option value="">— Select batch —</option>
+                  <option value="">{isA20_1 ? "— Select invoice —" : "— Select batch —"}</option>
                   {batches.map(b => (
                     <option key={b.id} value={b.id}>
                       {b.batch_number}{b.lot_number ? ` · Lot ${b.lot_number}` : ""} · {b.production_date}
