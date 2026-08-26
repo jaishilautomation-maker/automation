@@ -148,7 +148,7 @@ export default function HourlyReadingPage() {
   );
 
   // -------------------------------------------------------------------------
-  // Submit
+  // Submit — direct supabase client (same as rm-receipt pattern)
   // -------------------------------------------------------------------------
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
@@ -156,20 +156,35 @@ export default function HourlyReadingPage() {
 
     setSubmitting(true);
     try {
-      // Resolve or create batch via API (bypasses RLS)
-      const batchRes = await fetch("/api/lab-qc/create-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "ensure_batch",
-          payload: { batch_number: batchNumber.trim(), factory_id: activeFactory.id },
-        }),
-      });
-      const batchJson = await batchRes.json();
-      if (!batchRes.ok) { showToast("Could not create batch: " + (batchJson.error ?? "unknown"), true); return; }
+      // Resolve or create batch
+      let batchId = resolvedBatchId;
 
-      const batchId = batchJson.batch_id;
-      setResolvedBatchId(batchId);
+      if (!batchId) {
+        // Create a new batch record (same pattern as rm-receipt which works)
+        const { data: newBatch, error: batchErr } = await supabase
+          .from("batches")
+          .insert({
+            batch_number:    batchNumber.trim(),
+            factory_id:      activeFactory.id,
+            material_id:     null,
+            product_id:      null,
+            batch_type:      "fg",
+            production_date: new Date().toISOString().slice(0, 10),
+            quantity:        null,
+            unit:            "kg",
+            source_batch_id: null,
+            created_by:      user.id,
+          })
+          .select("id")
+          .single();
+
+        if (batchErr || !newBatch) {
+          showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
+          return;
+        }
+        batchId = newBatch.id;
+        setResolvedBatchId(batchId);
+      }
 
       // Build test_results
       const testResults: Record<string, number | string> = {};
@@ -184,26 +199,20 @@ export default function HourlyReadingPage() {
         }
       });
 
-      // Insert hourly reading via API (bypasses RLS)
-      const readingRes = await fetch("/api/lab-qc/create-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "insert_hourly_reading",
-          payload: {
-            batch_id:     batchId,
-            factory_id:   activeFactory.id,
-            reading_time: new Date(readingTime).toISOString(),
-            test_results: testResults,
-            remarks:      remarks.trim() || null,
-          },
-        }),
-      });
-      const readingJson = await readingRes.json();
-      if (!readingRes.ok) { showToast("Could not save: " + (readingJson.error ?? "unknown"), true); return; }
+      // Insert hourly reading
+      const { data: newRow, error } = await supabase.from("hourly_readings").insert({
+        batch_id:     batchId,
+        factory_id:   activeFactory.id,
+        recorded_by:  user.id,
+        reading_time: new Date(readingTime).toISOString(),
+        test_results: testResults,
+        remarks:      remarks.trim() || null,
+      }).select("id").single();
+
+      if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
 
       // Flush pending photo uploads
-      await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(readingJson.id)));
+      await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
 
       showToast("Reading saved ✓");
       // Reset values only; keep batch number for next reading
