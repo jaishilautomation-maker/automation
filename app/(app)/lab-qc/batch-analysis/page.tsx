@@ -197,7 +197,7 @@ export default function BatchAnalysisPage() {
             batch_type:      "fg",
             production_date: new Date().toISOString().slice(0, 10),
             quantity:        null,
-            unit:            "KG",
+            unit:            "kg",
             source_batch_id: null,
             created_by:      user.id,
           })
