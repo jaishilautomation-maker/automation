@@ -58,6 +58,7 @@ export default function RmReceiptPage() {
   const [quantityMt, setQuantityMt]     = useState("");
   const [appearance, setAppearance]     = useState("");
   const [receivedDate, setReceivedDate] = useState(todayISO());
+  const [csTruckNumber, setCsTruckNumber] = useState("");
 
   // Oil fields
   const [supplierName, setSupplierName] = useState("");
@@ -89,7 +90,7 @@ export default function RmReceiptPage() {
 
   const reset = () => {
     setInvoiceNumber(""); setQuantityMt(""); setAppearance("");
-    setReceivedDate(todayISO());
+    setReceivedDate(todayISO()); setCsTruckNumber("");
     setSupplierName(""); setOilDatetime(nowLocalDatetime());
     setOilQuantity(""); setTruckNumber(""); setOilBatchNumber("");
     if (!isA20_1) setMaterialId("");
@@ -136,7 +137,7 @@ export default function RmReceiptPage() {
         received_by:   user.id,
         quantity:      qty,
         unit:          "MT",
-        remarks:       appearance.trim() || null,
+        remarks:       [appearance.trim(), csTruckNumber.trim() ? `Truck: ${csTruckNumber.trim()}` : ""].filter(Boolean).join(" | ") || null,
       });
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
@@ -307,6 +308,10 @@ export default function RmReceiptPage() {
 
           <label>Date Received</label>
           <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)} />
+
+          <label>Truck Number</label>
+          <input type="text" placeholder="e.g. MH-12-AB-1234"
+            value={csTruckNumber} onChange={e => setCsTruckNumber(e.target.value)} />
 
           {user && activeFactory && (
             <div style={{ marginTop: 12 }}>
