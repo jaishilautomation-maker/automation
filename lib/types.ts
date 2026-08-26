@@ -32,7 +32,8 @@ export type AttachmentEntityType =
   | "batch_analysis"
   | "product_qc"
   | "post_production_test"
-  | "lab_trial";
+  | "lab_trial"
+  | "hourly_reading";
 
 /** Valid values for lab_trials.status */
 export type LabTrialStatus = "ongoing" | "completed" | "abandoned";

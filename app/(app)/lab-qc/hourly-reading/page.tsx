@@ -284,7 +284,7 @@ export default function HourlyReadingPage() {
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,
-                    entityType:   "hourly_readings",
+                    entityType:   "hourly_reading",
                     entityId:     null,
                     userId:       user.id,
                     onUploaded:   (key, path) => handleChange(key, path),
