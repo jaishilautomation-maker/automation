@@ -134,23 +134,34 @@ export default function RmQcPage() {
   // Load batches (for A-20/1 crude sulphur these are invoice-number entries)
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!materialId || !activeFactory || isSulphurPowder) {
+    if (!activeFactory) { setBatches([]); setBatchId(""); return; }
+    if (!isA20_1 && (!materialId || isSulphurPowder)) {
+      setBatches([]); setBatchId(""); return;
+    }
+    // For A-20/1: skip if oil type is selected
+    if (isA20_1 && qcRmType !== "crude_sulphur") {
       setBatches([]); setBatchId(""); return;
     }
     setLoadingBatches(true);
-    supabase.from("batches")
+
+    let query = supabase.from("batches")
       .select("id, batch_number, lot_number, production_date")
       .eq("factory_id", activeFactory.id)
-      .eq("material_id", materialId)
       .eq("batch_type", "rm")
       .order("production_date", { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
+      .limit(50);
+
+    // For A-20 (non A-20/1), filter by material
+    if (!isA20_1 && materialId) {
+      query = query.eq("material_id", materialId);
+    }
+
+    query.then(({ data }) => {
         setBatches((data ?? []) as BatchOption[]);
         setBatchId("");
         setLoadingBatches(false);
       });
-  }, [materialId, activeFactory, isSulphurPowder, supabase]);
+  }, [materialId, activeFactory, isSulphurPowder, supabase, qcRmType]);
 
   // ---------------------------------------------------------------------------
   // Load test definitions
