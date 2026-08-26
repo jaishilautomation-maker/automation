@@ -66,24 +66,28 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ batch_id: existing.id, created: false });
       }
 
-      // Get SULPHUR_POWDER or SULPHUR_CRUDE material
-      let mat = (await service
+      // Get material — A-20/1 uses SULPHUR_CRUDE, A-20 uses SULPHUR_POWDER
+      // Try SULPHUR_CRUDE first (A-20/1 factory), fallback to SULPHUR_POWDER
+      let mat = null;
+      const { data: crudeMat } = await service
         .from("materials")
         .select("id")
-        .eq("code", "SULPHUR_POWDER")
-        .maybeSingle()).data;
+        .eq("code", "SULPHUR_CRUDE")
+        .maybeSingle();
 
-      // Fallback to SULPHUR_CRUDE for Factory A-20/1
-      if (!mat) {
-        mat = (await service
+      if (crudeMat) {
+        mat = crudeMat;
+      } else {
+        const { data: powderMat } = await service
           .from("materials")
           .select("id")
-          .eq("code", "SULPHUR_CRUDE")
-          .maybeSingle()).data;
+          .eq("code", "SULPHUR_POWDER")
+          .maybeSingle();
+        mat = powderMat;
       }
 
       if (!mat) {
-        return NextResponse.json({ error: "Sulphur material not found in DB" }, { status: 500 });
+        return NextResponse.json({ error: "Sulphur material not found" }, { status: 500 });
       }
 
       const { data: newBatch, error: batchErr } = await service
