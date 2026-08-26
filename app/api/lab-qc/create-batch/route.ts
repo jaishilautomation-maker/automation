@@ -1,11 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 // =============================================================================
 // API Route: Create a batch + insert hourly_readings / batch_analysis
-// Uses service role to bypass RLS on hourly_readings which only allows
+// Uses service role to bypass RLS on hourly_readings / batches which only allows
 // operator/production_incharge — but lab chemists also need to insert.
 // =============================================================================
 
@@ -13,7 +12,9 @@ function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!url || !key) throw new Error("Supabase service role env vars missing");
-  return createServiceClient(url, key);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createClient } = require("@supabase/supabase-js");
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 async function getAuthUser() {
@@ -41,7 +42,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action, payload } = body;
 
-    const service = getServiceClient();
+    let service;
+    try {
+      service = getServiceClient();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Service client init failed";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
 
     // ---------------------------------------------------------------------------
     // Action: ensure_batch — find or create a SULPHUR_POWDER batch
