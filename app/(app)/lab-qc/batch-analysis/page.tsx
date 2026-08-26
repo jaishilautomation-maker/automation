@@ -97,7 +97,6 @@ export default function BatchAnalysisPage() {
       .select("id")
       .eq("factory_id", activeFactory.id)
       .eq("batch_number", bn.trim())
-      .eq("batch_type", "fg")
       .maybeSingle();
 
     const bid = batchRow?.id ?? null;
@@ -219,12 +218,12 @@ export default function BatchAnalysisPage() {
           body: JSON.stringify({
             action: "update_batch_analysis",
             payload: {
-              id:            existingAnalysis.id,
+              id: existingAnalysis.id,
               analysis_date: analysisDate,
-              appearance:    appearanceVal,
+              appearance: appearanceVal,
               appearance_ok: appearanceOk,
-              test_results:  testResults,
-              remarks:       remarks.trim() || null,
+              test_results: testResults,
+              remarks: remarks.trim() || null,
             },
           }),
         });
@@ -241,13 +240,13 @@ export default function BatchAnalysisPage() {
           body: JSON.stringify({
             action: "insert_batch_analysis",
             payload: {
-              batch_id:      batchId,
-              factory_id:    activeFactory.id,
+              batch_id: batchId,
+              factory_id: activeFactory.id,
               analysis_date: analysisDate,
-              appearance:    appearanceVal,
+              appearance: appearanceVal,
               appearance_ok: appearanceOk,
-              test_results:  testResults,
-              remarks:       remarks.trim() || null,
+              test_results: testResults,
+              remarks: remarks.trim() || null,
             },
           }),
         });

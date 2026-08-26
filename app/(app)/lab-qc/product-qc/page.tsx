@@ -119,26 +119,17 @@ export default function ProductQcPage() {
     const isSulphurProduct = selectedCode === "SULPHUR_SC" || selectedCode === "SULPHUR_POWDER";
 
     if (isA20_1 && isSulphurProduct) {
-      // Load batches by material (SULPHUR_POWDER, batch_type='fg') — these are
+      // Load all fg-type batches at this factory — these are
       // created by hourly-reading / batch-analysis pages
       supabase
-        .from("materials")
-        .select("id")
-        .eq("code", "SULPHUR_POWDER")
-        .single()
-        .then(({ data: mat }) => {
-          if (!mat) { setLoadingBatches(false); return; }
-          return supabase
-            .from("batches")
-            .select("id, batch_number, lot_number, production_date")
-            .eq("factory_id", activeFactory.id)
-            .eq("material_id", mat.id)
-            .eq("batch_type", "fg")
-            .order("production_date", { ascending: false })
-            .limit(50);
-        })
-        .then(res => {
-          if (res) setBatches((res.data ?? []) as BatchOption[]);
+        .from("batches")
+        .select("id, batch_number, lot_number, production_date")
+        .eq("factory_id", activeFactory.id)
+        .eq("batch_type", "fg")
+        .order("production_date", { ascending: false })
+        .limit(50)
+        .then(({ data }) => {
+          setBatches((data ?? []) as BatchOption[]);
           setLoadingBatches(false);
         });
     } else {

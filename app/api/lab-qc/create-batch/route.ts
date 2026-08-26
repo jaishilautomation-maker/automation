@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 // =============================================================================
@@ -12,12 +13,10 @@ function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!url || !key) throw new Error("Supabase service role env vars missing");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createClient } = require("@supabase/supabase-js");
-  return createClient(url, key);
+  return createServiceClient(url, key);
 }
 
-async function getAuthUser(req: NextRequest) {
+async function getAuthUser() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,7 +33,7 @@ async function getAuthUser(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getAuthUser(req);
+    const user = await getAuthUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -53,41 +52,32 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "batch_number and factory_id required" }, { status: 400 });
       }
 
-      // Check existing
+      // Check existing batch (any batch_type — could be fg from hourly or batch analysis)
       const { data: existing } = await service
         .from("batches")
         .select("id")
         .eq("factory_id", factory_id)
         .eq("batch_number", batch_number)
-        .eq("batch_type", "fg")
         .maybeSingle();
 
       if (existing) {
         return NextResponse.json({ batch_id: existing.id, created: false });
       }
 
-      // Get material — A-20/1 uses SULPHUR_CRUDE, A-20 uses SULPHUR_POWDER
-      // Try SULPHUR_CRUDE first (A-20/1 factory), fallback to SULPHUR_POWDER
-      let mat = null;
-      const { data: crudeMat } = await service
+      // Get SULPHUR_POWDER material — this is the output material at A-20/1
+      const { data: mat, error: matErr } = await service
         .from("materials")
         .select("id")
-        .eq("code", "SULPHUR_CRUDE")
+        .eq("code", "SULPHUR_POWDER")
         .maybeSingle();
 
-      if (crudeMat) {
-        mat = crudeMat;
-      } else {
-        const { data: powderMat } = await service
-          .from("materials")
-          .select("id")
-          .eq("code", "SULPHUR_POWDER")
-          .maybeSingle();
-        mat = powderMat;
-      }
+      // If SULPHUR_POWDER material not found, try without material_id
+      // (batch can exist without material — product-linked batches work this way)
+      const materialId = mat?.id ?? null;
 
-      if (!mat) {
-        return NextResponse.json({ error: "Sulphur material not found" }, { status: 500 });
+      if (!materialId) {
+        // Log but don't block — create batch without material_id
+        console.warn("SULPHUR_POWDER material not found in materials table, creating batch without material_id");
       }
 
       const { data: newBatch, error: batchErr } = await service
@@ -95,7 +85,7 @@ export async function POST(req: NextRequest) {
         .insert({
           batch_number,
           factory_id,
-          material_id: mat.id,
+          material_id: materialId,
           product_id: null,
           batch_type: "fg",
           production_date: new Date().toISOString().slice(0, 10),

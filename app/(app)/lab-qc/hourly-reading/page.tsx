@@ -105,7 +105,6 @@ export default function HourlyReadingPage() {
       .select("id")
       .eq("factory_id", activeFactory.id)
       .eq("batch_number", bn.trim())
-      .eq("batch_type", "fg")
       .maybeSingle();
 
     const bid = data?.id ?? null;
