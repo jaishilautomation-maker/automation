@@ -58,7 +58,7 @@ export default function HourlyReadingPage() {
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
 
   // -------------------------------------------------------------------------
-  // Load test definitions (phase='none' for SULPHUR_POWDER = hourly fields)
+  // Load test definitions (phase='B' for full batch analysis fields)
   // -------------------------------------------------------------------------
   useEffect(() => {
     supabase
@@ -72,7 +72,7 @@ export default function HourlyReadingPage() {
           .from("qc_test_definitions")
           .select("*")
           .eq("material_id", mat.id)
-          .eq("phase", "none")
+          .eq("phase", "B")
           .eq("is_active", true)
           .order("sort_order");
       })
@@ -271,7 +271,10 @@ export default function HourlyReadingPage() {
             <div className="card"><div className="empty">Loading fields…</div></div>
           ) : (
             <div className="card">
-              <h3>Observations</h3>
+              <h3>Test Results</h3>
+              <div className="field-hint" style={{ marginBottom: 12 }}>
+                Green fields are auto-calculated. Enter input values and they update automatically.
+              </div>
               {testDefs.map(def => (
                 <QcFieldRenderer
                   key={def.id}
@@ -281,7 +284,7 @@ export default function HourlyReadingPage() {
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,
-                    entityType:   "rm_qc",
+                    entityType:   "hourly_readings",
                     entityId:     null,
                     userId:       user.id,
                     onUploaded:   (key, path) => handleChange(key, path),
