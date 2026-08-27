@@ -80,15 +80,23 @@ export default function PulveriserLabPage() {
     if (!active || !user) return;
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("pulveriser_job_card_reviews").insert({
-        job_card_id:    active.id,
-        factory_id:     active.factory_id,
-        reviewed_by:    user.id,
-        result,
-        remark:         remark.trim() || null,
-        rejected_stage: result === "not_ok" ? (reopenProduction ? "production" : "operator") : null,
-      });
+      const { data, error } = await supabase
+        .from("pulveriser_job_card_reviews")
+        .insert({
+          job_card_id:    active.id,
+          factory_id:     active.factory_id,
+          reviewed_by:    user.id,
+          result,
+          remark:         remark.trim() || null,
+          rejected_stage: result === "not_ok" ? (reopenProduction ? "production" : "operator") : null,
+        })
+        .select("id")
+        .single();
       if (error) { showToast("Could not submit review: " + error.message, true); return; }
+      if (!data) {
+        showToast("Review was blocked — check your factory access or the card status.", true);
+        return;
+      }
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."
         : "Marked NOT OK — sent back for rework.");

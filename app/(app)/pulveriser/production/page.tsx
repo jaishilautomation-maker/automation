@@ -61,25 +61,35 @@ export default function PulveriserProductionPage() {
 
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("pulveriser_job_cards").insert({
-        factory_id:         activeFactory.id,
-        status:             "pending",
-        machine_number:     machine,
-        job_number:         jobNumber.trim() || null,
-        shift:              shift || null,
-        job_date:           jobDate || null,
-        material_code:      materialCode.trim(),
-        sulphur_supplier:   sulSupplier.trim() || null,
-        sulphur_lot_number: sulLot.trim() || null,
-        sulphur_empty_date: sulEmptyDate || null,
-        oil_supplier:       oilSupplier.trim() || null,
-        oil_batch_number:   oilBatch.trim() || null,
-        oil_quantity:       oilQty.trim() === "" ? null : Number(oilQty),
-        production_by:      user.id,
-        production_at:      new Date().toISOString(),
-      });
+      // Chain .select() so a row blocked by RLS surfaces a real error instead
+      // of PostgREST's silent 204 (which otherwise reports a false success).
+      const { data, error } = await supabase
+        .from("pulveriser_job_cards")
+        .insert({
+          factory_id:         activeFactory.id,
+          status:             "pending",
+          machine_number:     machine,
+          job_number:         jobNumber.trim() || null,
+          shift:              shift || null,
+          job_date:           jobDate || null,
+          material_code:      materialCode.trim(),
+          sulphur_supplier:   sulSupplier.trim() || null,
+          sulphur_lot_number: sulLot.trim() || null,
+          sulphur_empty_date: sulEmptyDate || null,
+          oil_supplier:       oilSupplier.trim() || null,
+          oil_batch_number:   oilBatch.trim() || null,
+          oil_quantity:       oilQty.trim() === "" ? null : Number(oilQty),
+          production_by:      user.id,
+          production_at:      new Date().toISOString(),
+        })
+        .select("id")
+        .single();
 
       if (error) { showToast("Could not create job card: " + error.message, true); return; }
+      if (!data) {
+        showToast("Save was blocked — your account may not have access to this factory.", true);
+        return;
+      }
       showToast("Job card created ✓ — operator will now fill their part.");
       reset();
     } catch {

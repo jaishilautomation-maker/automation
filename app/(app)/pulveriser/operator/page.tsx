@@ -176,7 +176,13 @@ export default function PulveriserOperatorPage() {
       payload.status = "submitted_for_qc";
       payload.operator_submitted_at = new Date().toISOString();
     }
-    return supabase.from("pulveriser_job_cards").update(payload).eq("id", jcId);
+    // .select() so an RLS-blocked / zero-row update surfaces instead of a
+    // silent success (PostgREST returns 204 with no error otherwise).
+    return supabase
+      .from("pulveriser_job_cards")
+      .update(payload)
+      .eq("id", jcId)
+      .select("id");
   };
 
   const syncHourlyRows = async (jc: PulveriserJobCard) => {
@@ -220,8 +226,12 @@ export default function PulveriserOperatorPage() {
     try {
       // Save hourly rows first (they require the card to still be 'pending').
       await syncHourlyRows(active);
-      const { error } = await persistOperatorFields(active.id, submit);
+      const { data, error } = await persistOperatorFields(active.id, submit);
       if (error) { showToast("Could not save: " + error.message, true); return; }
+      if (!data || data.length === 0) {
+        showToast("Save was blocked — check your factory access or the card status.", true);
+        return;
+      }
       showToast(submit ? "Submitted for QC ✓" : "Progress saved ✓");
       goBack();
       loadPending();
