@@ -15,6 +15,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
+import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import { PULVERISER_MACHINES, type PulveriserMachine } from "@/lib/types";
 
@@ -24,6 +25,7 @@ function todayISO() {
 
 export default function PulveriserProductionPage() {
   const { user } = useAuth();
+  const { activeFactory } = useModule();
   const { showToast } = useToast();
   const supabase = createClient();
 
@@ -48,6 +50,10 @@ export default function PulveriserProductionPage() {
 
   const handleCreate = async () => {
     if (!user) { showToast("Session expired — sign in again.", true); return; }
+    if (!activeFactory) {
+      showToast("Select a factory/module first.", true);
+      return;
+    }
     if (!materialCode.trim()) {
       showToast("माल का कोड नंबर (material code) is required — operator waits on it.", true);
       return;
@@ -55,21 +61,8 @@ export default function PulveriserProductionPage() {
 
     setSubmitting(true);
     try {
-      const { data: roleRow } = await supabase
-        .from("user_roles")
-        .select("factory_id")
-        .eq("user_id", user.id)
-        .not("factory_id", "is", null)
-        .limit(1)
-        .single();
-      const factoryId = roleRow?.factory_id ?? null;
-      if (!factoryId) {
-        showToast("No factory assigned to your account.", true);
-        return;
-      }
-
       const { error } = await supabase.from("pulveriser_job_cards").insert({
-        factory_id:         factoryId,
+        factory_id:         activeFactory.id,
         status:             "pending",
         machine_number:     machine,
         job_number:         jobNumber.trim() || null,

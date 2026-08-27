@@ -84,11 +84,7 @@ CREATE TABLE IF NOT EXISTS public.pulveriser_job_cards (
 
     -- Machine dropdown values are fixed by the authority form.
     CONSTRAINT chk_pulveriser_machine CHECK (
-        machine_number IS NULL OR machine_number IN (
-            'M1', 'M2', 'N2 30Nm', 'N2 50Nm',
-            'CP Air Comp', 'CT Air Comp', 'AT Air Comp',
-            'Forklift', 'Screening Machine', 'Crusher'
-        )
+        machine_number IS NULL OR machine_number IN ('M1', 'M2')
     )
 );
 

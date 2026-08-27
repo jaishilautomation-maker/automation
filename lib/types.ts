@@ -931,14 +931,6 @@ export type PulveriserStatus = "pending" | "submitted_for_qc" | "finalized";
 export const PULVERISER_MACHINES = [
   "M1",
   "M2",
-  "N2 30Nm",
-  "N2 50Nm",
-  "CP Air Comp",
-  "CT Air Comp",
-  "AT Air Comp",
-  "Forklift",
-  "Screening Machine",
-  "Crusher",
 ] as const;
 
 export type PulveriserMachine = typeof PULVERISER_MACHINES[number];
