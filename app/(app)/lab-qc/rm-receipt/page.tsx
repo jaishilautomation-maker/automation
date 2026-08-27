@@ -88,12 +88,15 @@ export default function RmReceiptPage() {
       });
   }, []);
 
-  const reset = () => {
+  // Clears all form fields. Optionally also clears the selected material.
+  // On successful submit we clear everything; on dropdown change we keep the
+  // newly selected material and only reset the dependent fields.
+  const reset = (clearMaterial = true) => {
     setInvoiceNumber(""); setQuantityMt(""); setAppearance("");
     setReceivedDate(todayISO()); setCsTruckNumber("");
     setSupplierName(""); setOilDatetime(nowLocalDatetime());
     setOilQuantity(""); setTruckNumber(""); setOilBatchNumber("");
-    if (!isA20_1) setMaterialId("");
+    if (!isA20_1 && clearMaterial) setMaterialId("");
   };
 
   // ── Crude Sulphur submit ──
@@ -280,7 +283,7 @@ export default function RmReceiptPage() {
             {loadingMats ? (
               <div className="field-hint">Loading…</div>
             ) : (
-              <select value={materialId} onChange={e => { setMaterialId(e.target.value); reset(); }}>
+              <select value={materialId} onChange={e => { reset(false); setMaterialId(e.target.value); }}>
                 <option value="">— Select raw material —</option>
                 {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
