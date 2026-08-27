@@ -88,10 +88,21 @@ CREATE TABLE IF NOT EXISTS public.pulveriser_job_cards (
     )
 );
 
+-- Keep the machine CHECK in sync even if the table (and an older 10-value
+-- constraint) already exists from a prior run of this migration.
+ALTER TABLE public.pulveriser_job_cards
+    DROP CONSTRAINT IF EXISTS chk_pulveriser_machine;
+ALTER TABLE public.pulveriser_job_cards
+    ADD CONSTRAINT chk_pulveriser_machine CHECK (
+        machine_number IS NULL OR machine_number IN ('M1', 'M2')
+    );
+
+DROP TRIGGER IF EXISTS trg_pulveriser_job_cards_updated_at ON public.pulveriser_job_cards;
 CREATE TRIGGER trg_pulveriser_job_cards_updated_at
     BEFORE UPDATE ON public.pulveriser_job_cards
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_audit_pulveriser_job_cards ON public.pulveriser_job_cards;
 CREATE TRIGGER trg_audit_pulveriser_job_cards
     AFTER INSERT OR UPDATE OR DELETE ON public.pulveriser_job_cards
     FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
@@ -127,6 +138,7 @@ CREATE TABLE IF NOT EXISTS public.pulveriser_hourly_readings (
     )
 );
 
+DROP TRIGGER IF EXISTS trg_audit_pulveriser_hourly_readings ON public.pulveriser_hourly_readings;
 CREATE TRIGGER trg_audit_pulveriser_hourly_readings
     AFTER INSERT OR UPDATE OR DELETE ON public.pulveriser_hourly_readings
     FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
@@ -148,6 +160,7 @@ CREATE TABLE IF NOT EXISTS public.pulveriser_job_card_reviews (
     reviewed_at   timestamptz NOT NULL DEFAULT now()
 );
 
+DROP TRIGGER IF EXISTS trg_audit_pulveriser_job_card_reviews ON public.pulveriser_job_card_reviews;
 CREATE TRIGGER trg_audit_pulveriser_job_card_reviews
     AFTER INSERT OR UPDATE OR DELETE ON public.pulveriser_job_card_reviews
     FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
@@ -191,6 +204,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_pulveriser_apply_review ON public.pulveriser_job_card_reviews;
 CREATE TRIGGER trg_pulveriser_apply_review
     AFTER INSERT ON public.pulveriser_job_card_reviews
     FOR EACH ROW EXECUTE FUNCTION fn_pulveriser_apply_review();
@@ -215,12 +229,14 @@ ALTER TABLE public.pulveriser_job_card_reviews  ENABLE ROW LEVEL SECURITY;
 
 -- SELECT: any authenticated user scoped to their factory (all three roles
 --         need to see the card at different stages).
+DROP POLICY IF EXISTS "pulv_jc_select" ON public.pulveriser_job_cards;
 CREATE POLICY "pulv_jc_select" ON public.pulveriser_job_cards
     FOR SELECT TO authenticated
     USING (factory_id IN (SELECT fn_user_factory_ids()));
 
 -- INSERT: production_incharge (+ admins) at that factory create the card.
 --         It must start life as 'pending'.
+DROP POLICY IF EXISTS "pulv_jc_insert" ON public.pulveriser_job_cards;
 CREATE POLICY "pulv_jc_insert" ON public.pulveriser_job_cards
     FOR INSERT TO authenticated
     WITH CHECK (
@@ -236,6 +252,7 @@ CREATE POLICY "pulv_jc_insert" ON public.pulveriser_job_cards
 --   the row 'pending' (Production cannot advance the status). Operator-owned
 --   columns are not written by the Production UI. Advancing to
 --   'submitted_for_qc' is done exclusively by the Operator policy below.
+DROP POLICY IF EXISTS "pulv_jc_update_production" ON public.pulveriser_job_cards;
 CREATE POLICY "pulv_jc_update_production" ON public.pulveriser_job_cards
     FOR UPDATE TO authenticated
     USING (
@@ -256,6 +273,7 @@ CREATE POLICY "pulv_jc_update_production" ON public.pulveriser_job_cards
 --   'submitted_for_qc' (the "Submit for QC" action). No other target status
 --   is allowed. This is the only policy that lets a card reach
 --   'submitted_for_qc'.
+DROP POLICY IF EXISTS "pulv_jc_update_operator" ON public.pulveriser_job_cards;
 CREATE POLICY "pulv_jc_update_operator" ON public.pulveriser_job_cards
     FOR UPDATE TO authenticated
     USING (
@@ -274,12 +292,14 @@ CREATE POLICY "pulv_jc_update_operator" ON public.pulveriser_job_cards
 
 -- ── 8.2 pulveriser_hourly_readings ──────────────────────────────────────────
 
+DROP POLICY IF EXISTS "pulv_hourly_select" ON public.pulveriser_hourly_readings;
 CREATE POLICY "pulv_hourly_select" ON public.pulveriser_hourly_readings
     FOR SELECT TO authenticated
     USING (factory_id IN (SELECT fn_user_factory_ids()));
 
 -- INSERT: operator (+ admins), only while the parent card is 'pending' and
 --         Production has filled material_code.
+DROP POLICY IF EXISTS "pulv_hourly_insert" ON public.pulveriser_hourly_readings;
 CREATE POLICY "pulv_hourly_insert" ON public.pulveriser_hourly_readings
     FOR INSERT TO authenticated
     WITH CHECK (
@@ -295,6 +315,7 @@ CREATE POLICY "pulv_hourly_insert" ON public.pulveriser_hourly_readings
 
 -- UPDATE: operator may correct their own readings while the card is still
 --         'pending' (e.g. after a NOT OK rework). Blocked once submitted/final.
+DROP POLICY IF EXISTS "pulv_hourly_update" ON public.pulveriser_hourly_readings;
 CREATE POLICY "pulv_hourly_update" ON public.pulveriser_hourly_readings
     FOR UPDATE TO authenticated
     USING (
@@ -309,6 +330,7 @@ CREATE POLICY "pulv_hourly_update" ON public.pulveriser_hourly_readings
 
 -- DELETE: operator may remove a reading row while the card is 'pending'
 --         (repeatable rows — they may drop one during entry/rework).
+DROP POLICY IF EXISTS "pulv_hourly_delete" ON public.pulveriser_hourly_readings;
 CREATE POLICY "pulv_hourly_delete" ON public.pulveriser_hourly_readings
     FOR DELETE TO authenticated
     USING (
@@ -323,6 +345,7 @@ CREATE POLICY "pulv_hourly_delete" ON public.pulveriser_hourly_readings
 
 -- ── 8.3 pulveriser_job_card_reviews ─────────────────────────────────────────
 
+DROP POLICY IF EXISTS "pulv_reviews_select" ON public.pulveriser_job_card_reviews;
 CREATE POLICY "pulv_reviews_select" ON public.pulveriser_job_card_reviews
     FOR SELECT TO authenticated
     USING (factory_id IN (SELECT fn_user_factory_ids()));
@@ -330,6 +353,7 @@ CREATE POLICY "pulv_reviews_select" ON public.pulveriser_job_card_reviews
 -- INSERT: lab (chemist / lab_manager, + admins), only while the card is
 --         'submitted_for_qc'. reviewed_by must be the current user. The
 --         status-transition trigger then flips the card status.
+DROP POLICY IF EXISTS "pulv_reviews_insert" ON public.pulveriser_job_card_reviews;
 CREATE POLICY "pulv_reviews_insert" ON public.pulveriser_job_card_reviews
     FOR INSERT TO authenticated
     WITH CHECK (
