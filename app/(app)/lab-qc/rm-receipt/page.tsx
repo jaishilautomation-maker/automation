@@ -31,8 +31,9 @@ const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
 type RmType = "crude_sulphur" | "oil";
 
 // A-20 RM materials in display order
+// Note: SULPHUR_POWDER is intentionally excluded here — its batch number is
+// generated in Factory A-20/1 and captured under Raw Material QC instead.
 const A20_RM_CODES = [
-  "SULPHUR_POWDER",
   "ZINC_OXIDE",
   "CALCIUM_CHLORIDE",
   "TEBUCONAZOLE",
@@ -208,7 +209,7 @@ export default function RmReceiptPage() {
   const handleSubmitA20 = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
     if (!materialId) { showToast("Select a material.", true); return; }
-    if (!invoiceNumber.trim()) { showToast("Invoice number is required.", true); return; }
+    if (!invoiceNumber.trim()) { showToast("Batch number is required.", true); return; }
     if (!quantityMt || isNaN(parseFloat(quantityMt))) {
       showToast("Enter a valid quantity.", true); return;
     }
@@ -374,8 +375,8 @@ export default function RmReceiptPage() {
       {/* ── A-20 generic form ── */}
       {!isA20_1 && materialId && selectedMaterial && (
         <div className="card">
-          <label>Invoice Number *</label>
-          <input type="text" placeholder="e.g. INV-2024-001"
+          <label>Batch Number *</label>
+          <input type="text" placeholder="e.g. BATCH-2024-001"
             value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
 
           <label>Quantity Received (MT) *</label>
