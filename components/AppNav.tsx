@@ -87,11 +87,8 @@ export default function AppNav() {
     // ── A-20/1 job_card module (default) ──
     if (role === "operator") {
       links = [
-        { href: "/pulveriser/operator", label: "Pulveriser Job Card" },
-        { href: "/operator",  label: "नई एन्ट्री" },
-        { href: "/pulveriser/records", label: "Job Card Records" },
-        { href: "/records",   label: "मेरी एन्ट्री" },
-        { href: "/dashboard", label: "डैशबोर्ड" },
+        { href: "/pulveriser/operator", label: "पल्वराइज़र जॉब कार्ड" },
+        { href: "/pulveriser/records",  label: "जॉब कार्ड रिकॉर्ड्स" },
       ];
     } else if (role === "production_incharge") {
       links = [

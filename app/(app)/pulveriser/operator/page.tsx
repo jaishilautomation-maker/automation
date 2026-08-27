@@ -89,7 +89,7 @@ export default function PulveriserOperatorPage() {
       .eq("status", "pending")
       .not("material_code", "is", null)
       .order("created_at", { ascending: false });
-    if (error) showToast("Could not load: " + error.message, true);
+    if (error) showToast("लोड नहीं हो सका: " + error.message, true);
     else setPending((data ?? []) as PulveriserJobCard[]);
     setLoadingList(false);
   }, [supabase, showToast]);
@@ -139,13 +139,13 @@ export default function PulveriserOperatorPage() {
   };
   const addRow = () => setRows(prev => [...prev, blankRow()]);
   const removeRow = async (row: HourlyRow) => {
-    if (rows.length === 1) { showToast("At least one hourly reading row.", true); return; }
+    if (rows.length === 1) { showToast("कम से कम एक रीडिंग पंक्ति ज़रूरी है।", true); return; }
     if (row.persistedId) {
       const { error } = await supabase
         .from("pulveriser_hourly_readings")
         .delete()
         .eq("id", row.persistedId);
-      if (error) { showToast("Could not remove row: " + error.message, true); return; }
+      if (error) { showToast("पंक्ति नहीं हटा सके: " + error.message, true); return; }
     }
     setRows(prev => prev.filter(r => r.id !== row.id));
   };
@@ -219,7 +219,7 @@ export default function PulveriserOperatorPage() {
   const handleSave = async (submit: boolean) => {
     if (!active || !user) return;
     if (submit && !canSubmit) {
-      showToast("Fill Classifier VFD, both blower valves and work details before submitting.", true);
+      showToast("भेजने से पहले क्लासिफायर VFD, दोनों ब्लोअर वाल्व और कार्य विवरण भरें।", true);
       return;
     }
     setSubmitting(true);
@@ -227,16 +227,16 @@ export default function PulveriserOperatorPage() {
       // Save hourly rows first (they require the card to still be 'pending').
       await syncHourlyRows(active);
       const { data, error } = await persistOperatorFields(active.id, submit);
-      if (error) { showToast("Could not save: " + error.message, true); return; }
+      if (error) { showToast("सहेजा नहीं जा सका: " + error.message, true); return; }
       if (!data || data.length === 0) {
-        showToast("Save was blocked — check your factory access or the card status.", true);
+        showToast("सहेजना रोका गया — अपनी फ़ैक्टरी पहुँच या कार्ड की स्थिति जाँचें।", true);
         return;
       }
-      showToast(submit ? "Submitted for QC ✓" : "Progress saved ✓");
+      showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");
       goBack();
       loadPending();
     } catch (e: unknown) {
-      showToast("Could not save: " + (e instanceof Error ? e.message : String(e)), true);
+      showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
     } finally {
       setSubmitting(false);
     }
@@ -246,14 +246,14 @@ export default function PulveriserOperatorPage() {
   if (!active) {
     return (
       <div className="card">
-        <h3>Job cards to fill</h3>
+        <h3>भरने के लिए जॉब कार्ड</h3>
         <div className="field-hint" style={{ marginBottom: 10 }}>
-          Production created these. Fill your details and submit for QC.
+          प्रोडक्शन ने ये बनाए हैं। अपनी जानकारी भरें और QC के लिए भेजें।
         </div>
         {loadingList ? (
-          <div className="empty">Loading…</div>
+          <div className="empty">लोड हो रहा है…</div>
         ) : pending.length === 0 ? (
-          <div className="empty">No pending job cards.</div>
+          <div className="empty">कोई लंबित जॉब कार्ड नहीं है।</div>
         ) : (
           pending.map(jc => (
             <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
@@ -262,7 +262,7 @@ export default function PulveriserOperatorPage() {
                 <span>{jc.shift ?? "—"}</span>
               </div>
               <div className="pi-sub">
-                Material: {jc.material_code} · Job: {jc.job_number ?? "—"}
+                माल कोड: {jc.material_code} · जॉब: {jc.job_number ?? "—"}
               </div>
             </div>
           ))
@@ -274,64 +274,64 @@ export default function PulveriserOperatorPage() {
   // ── Fill view ─────────────────────────────────────────────────────────────
   return (
     <>
-      <button className="back-link" type="button" onClick={goBack}>← Back to list</button>
+      <button className="back-link" type="button" onClick={goBack}>← सूची पर वापस जाएँ</button>
 
       {/* Read-only production reference */}
       <div className="readonly-block">
-        <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} shift<br />
-        <b>माल Code:</b> {active.material_code} · Job: {active.job_number ?? "—"}<br />
-        <b>Sulphur:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
-        <b>Oil:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}
+        <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} शिफ्ट<br />
+        <b>माल कोड:</b> {active.material_code} · जॉब: {active.job_number ?? "—"}<br />
+        <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
+        <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}
       </div>
 
       {/* Operator machine settings */}
       <div className="card">
-        <h3>Machine settings</h3>
+        <h3>मशीन सेटिंग्स</h3>
         <div className="row2">
           <div>
-            <label>Classifier VFD *</label>
+            <label>क्लासिफायर VFD *</label>
             <input type="text" value={classifierVfd} onChange={e => setClassifierVfd(e.target.value)} />
           </div>
           <div>
-            <label>Blower Inlet Valve *</label>
+            <label>ब्लोअर इनलेट वाल्व *</label>
             <input type="text" value={blowerIn} onChange={e => setBlowerIn(e.target.value)} />
           </div>
         </div>
-        <label>Blower Outlet Valve *</label>
+        <label>ब्लोअर आउटलेट वाल्व *</label>
         <input type="text" value={blowerOut} onChange={e => setBlowerOut(e.target.value)} />
       </div>
 
       {/* Packing / notes */}
       <div className="card">
-        <h3>Packing & notes</h3>
+        <h3>पैकिंग और नोट्स</h3>
         <div className="row2">
           <div>
-            <label>Finished Goods Bag</label>
+            <label>तैयार माल बैग</label>
             <input type="text" value={fgBag} onChange={e => setFgBag(e.target.value)} />
           </div>
           <div>
-            <label>Packing Size</label>
+            <label>पैकिंग साइज़</label>
             <input type="text" value={packingSize} onChange={e => setPackingSize(e.target.value)} />
           </div>
         </div>
         <div className="row2">
           <div>
-            <label>QC Incharge Note</label>
+            <label>QC इंचार्ज नोट</label>
             <input type="text" value={qcNote} onChange={e => setQcNote(e.target.value)} />
           </div>
           <div>
-            <label>Stores Incharge Note</label>
+            <label>स्टोर्स इंचार्ज नोट</label>
             <input type="text" value={storesNote} onChange={e => setStoresNote(e.target.value)} />
           </div>
         </div>
-        <label>Work Details *</label>
+        <label>कार्य विवरण *</label>
         <textarea rows={2} value={workDetails} onChange={e => setWorkDetails(e.target.value)} />
       </div>
 
       {/* Hourly readings (repeatable) */}
       <div className="card">
         <div className="helper-row">
-          <h3 style={{ margin: 0 }}>Hourly Readings</h3>
+          <h3 style={{ margin: 0 }}>प्रति घंटा रीडिंग</h3>
           <span className="count">{rows.length}</span>
         </div>
         {rows.map((r, i) => {
@@ -342,65 +342,65 @@ export default function PulveriserOperatorPage() {
               padding: 14, marginBottom: 10, background: "var(--surface)",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>Reading {i + 1}</span>
+                <span style={{ fontWeight: 700, fontSize: 13 }}>रीडिंग {i + 1}</span>
                 {rows.length > 1 && (
                   <button type="button" className="btn btn-ghost"
                     style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
                     onClick={() => removeRow(r)}>
-                    Remove
+                    हटाएँ
                   </button>
                 )}
               </div>
 
               <div className="row2">
                 <div>
-                  <label>Machine</label>
+                  <label>मशीन</label>
                   <input type="text" placeholder={active.machine_number ?? ""} value={r.machine}
                     onChange={e => updateRow(r.id, "machine", e.target.value)} />
                 </div>
                 <div>
-                  <label>Reading Date</label>
+                  <label>रीडिंग तारीख</label>
                   <input type="date" value={r.reading_date}
                     onChange={e => updateRow(r.id, "reading_date", e.target.value)} />
                 </div>
               </div>
               <div className="row3">
                 <div>
-                  <label>Start</label>
+                  <label>शुरू</label>
                   <input type="time" value={r.start_time}
                     onChange={e => updateRow(r.id, "start_time", e.target.value)} />
                 </div>
                 <div>
-                  <label>Stop</label>
+                  <label>बंद</label>
                   <input type="time" value={r.stop_time}
                     onChange={e => updateRow(r.id, "stop_time", e.target.value)} />
                 </div>
                 <div>
-                  <label>Total Hours</label>
+                  <label>कुल घंटे</label>
                   <input type="text" disabled value={hours > 0 ? hours.toFixed(2) : ""} placeholder="0.00" />
                 </div>
               </div>
               <div className="row3">
                 <div>
-                  <label>Planned Production</label>
+                  <label>नियोजित उत्पादन</label>
                   <input type="number" min="0" step="0.001" value={r.planned_production}
                     onChange={e => updateRow(r.id, "planned_production", e.target.value)} />
                 </div>
                 <div>
-                  <label>Batch No.</label>
+                  <label>बैच नं.</label>
                   <input type="text" value={r.batch_no}
                     onChange={e => updateRow(r.id, "batch_no", e.target.value)} />
                 </div>
                 <div>
-                  <label>Bags</label>
+                  <label>बैग</label>
                   <input type="number" min="0" value={r.bags}
                     onChange={e => updateRow(r.id, "bags", e.target.value)} />
                 </div>
               </div>
-              <label>Low Production Reason (if any)</label>
+              <label>कम उत्पादन का कारण (यदि कोई हो)</label>
               <select value={r.low_production_reason}
                 onChange={e => updateRow(r.id, "low_production_reason", e.target.value)}>
-                <option value="">— None / target met —</option>
+                <option value="">— कोई नहीं / लक्ष्य पूरा —</option>
                 {PULVERISER_LOW_PROD_REASONS.map(reason => (
                   <option key={reason} value={reason}>{reason}</option>
                 ))}
@@ -409,35 +409,35 @@ export default function PulveriserOperatorPage() {
           );
         })}
         <button type="button" className="btn btn-ghost" onClick={addRow}>
-          + Add hourly reading
+          + प्रति घंटा रीडिंग जोड़ें
         </button>
       </div>
 
       {/* Checkpoints */}
       <div className="card">
-        <h3>Checkpoints</h3>
+        <h3>जाँच बिंदु</h3>
         <div className="checkline">
           <input type="checkbox" checked={chkClean} onChange={e => setChkClean(e.target.checked)} />
-          <span>Machine cleaning (मशीन की सफाई)</span>
+          <span>मशीन की सफाई</span>
         </div>
         <div className="checkline">
           <input type="checkbox" checked={chkRoller} onChange={e => setChkRoller(e.target.checked)} />
-          <span>Roller check (रोलर की जाँच)</span>
+          <span>रोलर की जाँच</span>
         </div>
         <div className="checkline">
           <input type="checkbox" checked={chkMesh} onChange={e => setChkMesh(e.target.checked)} />
-          <span>Mesh cloth check (जाली के कपड़े की जाँच)</span>
+          <span>जाली के कपड़े की जाँच</span>
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="btn btn-ghost" type="button"
           disabled={submitting} onClick={() => handleSave(false)}>
-          {submitting ? "Saving…" : "Save progress"}
+          {submitting ? "सहेजा जा रहा है…" : "प्रगति सहेजें"}
         </button>
         <button className="btn btn-primary" type="button"
           disabled={submitting || !canSubmit} onClick={() => handleSave(true)}>
-          {submitting ? "Submitting…" : "Submit for QC"}
+          {submitting ? "भेजा जा रहा है…" : "QC के लिए भेजें"}
         </button>
       </div>
     </>

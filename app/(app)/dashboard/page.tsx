@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useModule } from "@/lib/module-context";
+import { useAuth } from "@/lib/auth-context";
 import type { FactoryQcSummary } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -111,9 +112,11 @@ function todayISO() { return new Date().toISOString().slice(0, 10); }
 export default function DashboardPage() {
   const { showToast } = useToast();
   const { activeModule, activeFactory } = useModule();
+  const { profile } = useAuth();
   const supabase = createClient();
 
   const isLabQc = activeModule === "lab_qc";
+  const isOperator = profile?.role === "operator";
 
   // ── Job Card state ───────────────────────────────────────────────────────
   const [shifts, setShifts]      = useState<ShiftRow[]>([]);
@@ -137,6 +140,7 @@ export default function DashboardPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (isOperator) return;
     if (isLabQc) {
       loadQcSummary();
     } else {
@@ -147,7 +151,7 @@ export default function DashboardPage() {
 
   // Production dashboard: load the selected source (job card / breakdown / PM)
   useEffect(() => {
-    if (isLabQc || !activeFactory) return;
+    if (isOperator || isLabQc || !activeFactory) return;
     const loadProd = async () => {
       setLoadingProd(true);
       try {
@@ -299,6 +303,15 @@ export default function DashboardPage() {
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
+
+  // Operators must not see aggregate data — blocked even by direct URL.
+  if (isOperator) {
+    return (
+      <div className="card">
+        <div className="empty">यह पेज उपलब्ध नहीं है।</div>
+      </div>
+    );
+  }
 
   // ── Lab QC dashboard ─────────────────────────────────────────────────────
   if (isLabQc) {

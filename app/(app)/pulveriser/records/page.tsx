@@ -10,17 +10,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
+import { useAuth } from "@/lib/auth-context";
 import type {
   PulveriserJobCard,
   PulveriserJobCardReview,
   PulveriserStatus,
 } from "@/lib/types";
-
-const STATUS_LABEL: Record<PulveriserStatus, string> = {
-  pending: "Pending",
-  submitted_for_qc: "Submitted for QC",
-  finalized: "Finalized",
-};
 
 const STATUS_BADGE: Record<PulveriserStatus, string> = {
   pending: "warn",
@@ -28,9 +23,37 @@ const STATUS_BADGE: Record<PulveriserStatus, string> = {
   finalized: "ok",
 };
 
+// English / Hindi label sets. Operators see Hindi; everyone else English.
+const STATUS_LABEL_EN: Record<PulveriserStatus, string> = {
+  pending: "Pending",
+  submitted_for_qc: "Submitted for QC",
+  finalized: "Finalized",
+};
+const STATUS_LABEL_HI: Record<PulveriserStatus, string> = {
+  pending: "लंबित",
+  submitted_for_qc: "QC के लिए भेजा गया",
+  finalized: "अंतिम रूप दिया गया",
+};
+
 export default function PulveriserRecordsPage() {
   const { showToast } = useToast();
+  const { profile } = useAuth();
   const supabase = createClient();
+
+  const hi = profile?.role === "operator";
+  const t = {
+    heading:   hi ? "पल्वराइज़र जॉब कार्ड रिकॉर्ड्स" : "Pulveriser job card records",
+    loading:   hi ? "लोड हो रहा है…" : "Loading…",
+    empty:     hi ? "अभी कोई जॉब कार्ड नहीं है।" : "No job cards yet.",
+    material:  hi ? "माल" : "Material",
+    job:       hi ? "जॉब" : "Job",
+    status:    hi ? "स्थिति" : "Status",
+    trail:     hi ? "समीक्षा इतिहास" : "Review trail",
+    ok:        hi ? "ठीक है" : "OK",
+    notOk:     hi ? "ठीक नहीं" : "NOT OK",
+    reopened:  hi ? "फिर से खोला" : "reopened",
+  };
+  const STATUS_LABEL = hi ? STATUS_LABEL_HI : STATUS_LABEL_EN;
 
   const [cards, setCards]   = useState<PulveriserJobCard[]>([]);
   const [reviews, setReviews] = useState<Record<string, PulveriserJobCardReview[]>>({});
@@ -42,7 +65,7 @@ export default function PulveriserRecordsPage() {
       .from("pulveriser_job_cards")
       .select("*")
       .order("created_at", { ascending: false });
-    if (error) { showToast("Could not load: " + error.message, true); setLoading(false); return; }
+    if (error) { showToast((hi ? "लोड नहीं हो सका: " : "Could not load: ") + error.message, true); setLoading(false); return; }
 
     const list = (cardData ?? []) as PulveriserJobCard[];
     setCards(list);
@@ -62,17 +85,17 @@ export default function PulveriserRecordsPage() {
       setReviews({});
     }
     setLoading(false);
-  }, [supabase, showToast]);
+  }, [supabase, showToast, hi]);
 
   useEffect(() => { load(); }, [load]);
 
   return (
     <div className="card">
-      <h3>Pulveriser job card records</h3>
+      <h3>{t.heading}</h3>
       {loading ? (
-        <div className="empty">Loading…</div>
+        <div className="empty">{t.loading}</div>
       ) : cards.length === 0 ? (
-        <div className="empty">No job cards yet.</div>
+        <div className="empty">{t.empty}</div>
       ) : (
         cards.map(jc => {
           const trail = reviews[jc.id] ?? [];
@@ -82,9 +105,9 @@ export default function PulveriserRecordsPage() {
                 {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
               </span>
               <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                Material: <b>{jc.material_code ?? "—"}</b> · Job: {jc.job_number ?? "—"}
+                {t.material}: <b>{jc.material_code ?? "—"}</b> · {t.job}: {jc.job_number ?? "—"}
                 <br />
-                Status:{" "}
+                {t.status}:{" "}
                 <span className={`badge ${STATUS_BADGE[jc.status]}`}>
                   {STATUS_LABEL[jc.status]}
                 </span>
@@ -93,16 +116,16 @@ export default function PulveriserRecordsPage() {
               {trail.length > 0 && (
                 <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    Review trail ({trail.length})
+                    {t.trail} ({trail.length})
                   </div>
                   {trail.map(r => (
                     <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
                       <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
-                        {r.result === "ok" ? "OK" : "NOT OK"}
+                        {r.result === "ok" ? t.ok : t.notOk}
                       </span>{" "}
                       {new Date(r.reviewed_at).toLocaleString()}
-                      {r.rejected_stage && ` · reopened: ${r.rejected_stage}`}
-                      {r.remark && <div style={{ marginLeft: 4 }}>“{r.remark}”</div>}
+                      {r.rejected_stage && ` · ${t.reopened}: ${r.rejected_stage}`}
+                      {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
                     </div>
                   ))}
                 </div>
