@@ -538,6 +538,22 @@ export interface Database {
         Insert: Omit<BatchEntry, "id">;
         Update: Partial<Omit<BatchEntry, "id">>;
       };
+      // Pulveriser Job Card (Form JSCI/PROD/02) — migration 015
+      pulveriser_job_cards: {
+        Row: PulveriserJobCard;
+        Insert: Omit<PulveriserJobCard, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<PulveriserJobCard, "id">>;
+      };
+      pulveriser_hourly_readings: {
+        Row: PulveriserHourlyReading;
+        Insert: Omit<PulveriserHourlyReading, "id" | "created_at">;
+        Update: Partial<Omit<PulveriserHourlyReading, "id">>;
+      };
+      pulveriser_job_card_reviews: {
+        Row: PulveriserJobCardReview;
+        Insert: Omit<PulveriserJobCardReview, "id" | "reviewed_at">;
+        Update: never;  // append-only
+      };
       // Lab QC — master data
       materials: {
         Row: Material;
@@ -619,6 +635,7 @@ export interface Database {
       qc_phase: QcPhase;
       batch_type: BatchType;
       quantity_unit: QuantityUnit;
+      pulveriser_status: PulveriserStatus;
     };
   };
 }
@@ -898,4 +915,117 @@ export interface PackingBreakdownReport {
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pulveriser Job Card (Form JSCI/PROD/02) — A-20/1
+// Migration 015. Authority-approved 3-role flow:
+//   Production creates (pending) → Operator fills + submits (submitted_for_qc)
+//   → Lab reviews OK (finalized) / NOT OK (back to pending, rework loop).
+// ---------------------------------------------------------------------------
+
+/** Pulveriser job card lifecycle status (Postgres enum pulveriser_status). */
+export type PulveriserStatus = "pending" | "submitted_for_qc" | "finalized";
+
+/** Machine dropdown for pulveriser_job_cards.machine_number (fixed list). */
+export const PULVERISER_MACHINES = [
+  "M1",
+  "M2",
+  "N2 30Nm",
+  "N2 50Nm",
+  "CP Air Comp",
+  "CT Air Comp",
+  "AT Air Comp",
+  "Forklift",
+  "Screening Machine",
+  "Crusher",
+] as const;
+
+export type PulveriserMachine = typeof PULVERISER_MACHINES[number];
+
+/**
+ * Fixed low-production reason list for pulveriser_hourly_readings.
+ * Do not invent others — the DB CHECK constraint rejects anything else.
+ */
+export const PULVERISER_LOW_PROD_REASONS = [
+  "Mesh clogging (जाली भरना)",
+  "Machine breakdown (मशीन खराब होना)",
+  "Power off (बिजली बंद होना)",
+  "Raw material issue (कच्चे माल की समस्या)",
+  "Roller jam (रोलर जाम होना)",
+  "Nitrogen unit issue (नाइट्रोजन यूनिट की समस्या)",
+] as const;
+
+export type PulveriserLowProdReason = typeof PULVERISER_LOW_PROD_REASONS[number];
+
+/** Which stage a NOT-OK review reopened. Default reopening target is operator. */
+export type PulveriserRejectedStage = "operator" | "production";
+
+/** pulveriser_job_cards — one row per pulveriser job card. */
+export interface PulveriserJobCard {
+  id: string;
+  factory_id: string;
+  status: PulveriserStatus;
+
+  // Production-owned
+  machine_number: PulveriserMachine | null;
+  job_number: string | null;
+  shift: string | null;
+  job_date: string | null;              // ISO date
+  material_code: string | null;         // माल का कोड नंबर
+  sulphur_supplier: string | null;
+  sulphur_lot_number: string | null;
+  sulphur_empty_date: string | null;    // ISO date — खाली करने की तारीख
+  oil_supplier: string | null;
+  oil_batch_number: string | null;
+  oil_quantity: number | null;
+  production_by: string | null;         // auth.users.id
+  production_at: string | null;         // timestamptz ISO
+
+  // Operator-owned
+  classifier_vfd: string | null;
+  blower_inlet_valve: string | null;
+  blower_outlet_valve: string | null;
+  finished_goods_bag: string | null;
+  packing_size: string | null;
+  qc_incharge_note: string | null;
+  stores_incharge_note: string | null;
+  work_details: string | null;
+  checkpoint_machine_cleaning: boolean;
+  checkpoint_roller_check: boolean;
+  checkpoint_mesh_cloth_check: boolean;
+  operator_by: string | null;           // auth.users.id
+  operator_submitted_at: string | null; // timestamptz ISO
+
+  created_at: string;
+  updated_at: string;
+}
+
+/** pulveriser_hourly_readings — repeating operator-filled rows per job card. */
+export interface PulveriserHourlyReading {
+  id: string;
+  job_card_id: string;
+  factory_id: string;
+  machine: string | null;
+  start_time: string | null;            // HH:MM[:SS]
+  stop_time: string | null;             // HH:MM[:SS]
+  total_hours: number | null;
+  planned_production: number | null;
+  low_production_reason: PulveriserLowProdReason | null;
+  batch_no: string | null;
+  bags: number | null;
+  reading_date: string | null;          // ISO date
+  created_at: string;
+}
+
+/** pulveriser_job_card_reviews — append-only Lab review history. */
+export interface PulveriserJobCardReview {
+  id: string;
+  job_card_id: string;
+  factory_id: string;
+  reviewed_by: string;                  // auth.users.id
+  result: "ok" | "not_ok";
+  remark: string | null;
+  rejected_stage: PulveriserRejectedStage | null;
+  reviewed_at: string;                  // timestamptz ISO
 }

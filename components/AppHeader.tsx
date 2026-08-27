@@ -14,6 +14,7 @@ function useModuleTitle(): { title: string; sub: string } {
     };
   }
   if (
+    pathname.startsWith("/pulveriser")  ||
     pathname.startsWith("/operator")    ||
     pathname.startsWith("/production")  ||
     pathname.startsWith("/breakdown")   ||

@@ -87,26 +87,33 @@ export default function AppNav() {
     // ── A-20/1 job_card module (default) ──
     if (role === "operator") {
       links = [
+        { href: "/pulveriser/operator", label: "Pulveriser Job Card" },
         { href: "/operator",  label: "नई एन्ट्री" },
+        { href: "/pulveriser/records", label: "Job Card Records" },
         { href: "/records",   label: "मेरी एन्ट्री" },
         { href: "/dashboard", label: "डैशबोर्ड" },
       ];
     } else if (role === "production_incharge") {
       links = [
+        { href: "/pulveriser/production", label: "New Pulveriser Job Card" },
         { href: "/production",  label: "Pending shifts" },
         { href: "/breakdown",   label: "Breakdown Register" },
         { href: "/maintenance", label: "Preventive Maintenance" },
+        { href: "/pulveriser/records", label: "Job Card Records" },
         { href: "/records",     label: "My submissions" },
         { href: "/dashboard",   label: "Dashboard" },
       ];
     } else if (role === "chemist" || role === "lab_manager") {
       links = [
+        { href: "/pulveriser/lab", label: "Pulveriser QC Review" },
         { href: "/lab",       label: "Pending shifts" },
+        { href: "/pulveriser/records", label: "Job Card Records" },
         { href: "/records",   label: "My submissions" },
         { href: "/dashboard", label: "Dashboard" },
       ];
     } else if (role === "factory_admin" || role === "company_admin") {
       links = [
+        { href: "/pulveriser/records", label: "Pulveriser Job Cards" },
         { href: "/dashboard", label: "Dashboard" },
       ];
     }
