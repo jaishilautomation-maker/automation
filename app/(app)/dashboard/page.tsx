@@ -45,6 +45,34 @@ interface ShiftRow {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Production dashboard source filter types
+// ---------------------------------------------------------------------------
+type ProdSource = "job_card" | "breakdown" | "preventive";
+
+interface JobCardRow {
+  id: string;
+  status: "pending" | "submitted_for_qc" | "finalized";
+  machine_number: string | null;
+  job_date: string | null;
+  shift: string | null;
+  material_code: string | null;
+  created_at: string;
+}
+interface BreakdownDashRow {
+  id: string;
+  sr_no: number | null;
+  machine_name: string;
+  start_at: string;
+  finish_at: string | null;
+  nature_of_breakdown: string | null;
+}
+interface PmDashRow {
+  id: string;
+  completed_at: string;
+  pm_schedule_items: { machine: string; component: string; task: string } | null;
+}
+
 const EXPORT_COLS: [keyof ShiftRow, string][] = [
   ["shift_date","Date"], ["machine","Machine"], ["shift_type","Shift"],
   ["operator","Operator"], ["jobno","Job No"],
@@ -92,6 +120,13 @@ export default function DashboardPage() {
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [xlsxBusy, setXlsxBusy] = useState(false);
 
+  // ── Production dashboard source filter (job_card | breakdown | preventive) ─
+  const [prodSource, setProdSource] = useState<ProdSource>("job_card");
+  const [jobCards, setJobCards]     = useState<JobCardRow[]>([]);
+  const [breakdowns, setBreakdowns] = useState<BreakdownDashRow[]>([]);
+  const [pmItems, setPmItems]       = useState<PmDashRow[]>([]);
+  const [loadingProd, setLoadingProd] = useState(false);
+
   // ── Lab QC state ─────────────────────────────────────────────────────────
   const [qcSummary, setQcSummary]       = useState<FactoryQcSummary[]>([]);
   const [loadingQc, setLoadingQc]       = useState(false);
@@ -109,6 +144,42 @@ export default function DashboardPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLabQc, activeFactory, qcDateRange]);
+
+  // Production dashboard: load the selected source (job card / breakdown / PM)
+  useEffect(() => {
+    if (isLabQc || !activeFactory) return;
+    const loadProd = async () => {
+      setLoadingProd(true);
+      try {
+        if (prodSource === "job_card") {
+          const { data } = await supabase
+            .from("pulveriser_job_cards")
+            .select("id, status, machine_number, job_date, shift, material_code, created_at")
+            .eq("factory_id", activeFactory.id)
+            .order("created_at", { ascending: false });
+          setJobCards((data ?? []) as JobCardRow[]);
+        } else if (prodSource === "breakdown") {
+          const { data } = await supabase
+            .from("breakdown_register")
+            .select("id, sr_no, machine_name, start_at, finish_at, nature_of_breakdown")
+            .eq("factory_id", activeFactory.id)
+            .order("created_at", { ascending: false });
+          setBreakdowns((data ?? []) as BreakdownDashRow[]);
+        } else {
+          const { data } = await supabase
+            .from("pm_completions")
+            .select("id, completed_at, pm_schedule_items(machine, component, task)")
+            .order("completed_at", { ascending: false })
+            .limit(200);
+          setPmItems((data ?? []) as unknown as PmDashRow[]);
+        }
+      } finally {
+        setLoadingProd(false);
+      }
+    };
+    loadProd();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLabQc, activeFactory, prodSource]);
 
   const loadShifts = async () => {
     setLoadingShifts(true);
@@ -332,78 +403,187 @@ export default function DashboardPage() {
     );
   }
 
-  // ── Job Card dashboard (original) ────────────────────────────────────────
+  // ── Production dashboard (source-filtered: Job Card / Breakdown / Preventive)
+  const PROD_SOURCES: { key: ProdSource; label: string }[] = [
+    { key: "job_card",   label: "Job Card" },
+    { key: "breakdown",  label: "Breakdown" },
+    { key: "preventive", label: "Preventive" },
+  ];
+
+  const jcFinalized = jobCards.filter(j => j.status === "finalized").length;
+  const jcPending   = jobCards.filter(j => j.status !== "finalized").length;
+  const bdOngoing   = breakdowns.filter(b => !b.finish_at).length;
+
   return (
     <>
-      <div className="metric-grid">
-        <div className="metric">
-          <div className="num">{loadingShifts ? "…" : shifts.length}</div>
-          <div className="lbl">Shifts logged</div>
-        </div>
-        <div className="metric">
-          <div className="num">{loadingShifts ? "…" : totalBags}</div>
-          <div className="lbl">Total bags</div>
-        </div>
-        <div className="metric">
-          <div className="num">{loadingShifts ? "…" : flagged}</div>
-          <div className="lbl">Below target</div>
+      {/* Source filter */}
+      <div className="card" style={{ padding: "10px 16px", marginBottom: 12 }}>
+        <div className="helper-row" style={{ margin: 0 }}>
+          <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+            {activeFactory?.name ?? ""} · Dashboard
+          </span>
+          <div className="chip-group" style={{ margin: 0 }}>
+            {PROD_SOURCES.map(s => (
+              <div
+                key={s.key}
+                className={`chip${prodSource === s.key ? " selected" : ""}`}
+                style={{ padding: "5px 12px", fontSize: 12 }}
+                onClick={() => setProdSource(s.key)}
+              >
+                {s.label}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="card">
-        <div className="helper-row">
-          <h3 style={{ margin: 0 }}>All shift records</h3>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table className="dash">
-            <thead>
-              <tr>
-                <th>Date</th><th>Machine</th><th>Shift</th>
-                <th>Operator</th><th>Planned</th><th>Actual</th><th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loadingShifts && shifts.map(r => {
-                const below = (r.planned ?? 0) > 0 && (r.actual ?? 0) < (r.planned ?? 0);
-                return (
-                  <tr key={r.id}>
-                    <td>{r.shift_date}</td>
-                    <td>{r.machine}</td>
-                    <td>{r.shift_type}</td>
-                    <td>{r.operator ?? "—"}</td>
-                    <td>{r.planned ?? 0}</td>
-                    <td>{r.actual ?? 0}</td>
-                    <td>
-                      <span className="badge ok">Op ✓</span>
-                      <span className={`badge ${r.production_submitted ? "ok" : "warn"}`}>
-                        Prod {r.production_submitted ? "✓" : "⏳"}
-                      </span>
-                      <span className={`badge ${r.lab_submitted ? "ok" : "warn"}`}>
-                        Lab {r.lab_submitted ? "✓" : "⏳"}
-                      </span>
-                      {below && <span className="badge warn">Below target</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {loadingShifts && <div className="empty">Loading…</div>}
-        {!loadingShifts && shifts.length === 0 && <div className="empty">No records yet.</div>}
+      {/* ── Job Card view ── */}
+      {prodSource === "job_card" && (
+        <>
+          <div className="metric-grid">
+            <div className="metric">
+              <div className="num">{loadingProd ? "…" : jobCards.length}</div>
+              <div className="lbl">Job cards</div>
+            </div>
+            <div className="metric">
+              <div className="num" style={{ color: "var(--ok)" }}>{loadingProd ? "…" : jcFinalized}</div>
+              <div className="lbl">Finalized</div>
+            </div>
+            <div className="metric">
+              <div className="num" style={{ color: jcPending > 0 ? "var(--warn)" : "var(--ink)" }}>
+                {loadingProd ? "…" : jcPending}
+              </div>
+              <div className="lbl">In progress</div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="helper-row"><h3 style={{ margin: 0 }}>Pulveriser job cards</h3></div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash">
+                <thead>
+                  <tr><th>Date</th><th>Machine</th><th>Shift</th><th>Material</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {!loadingProd && jobCards.map(j => (
+                    <tr key={j.id}>
+                      <td>{j.job_date ?? "—"}</td>
+                      <td>{j.machine_number ?? "—"}</td>
+                      <td>{j.shift ?? "—"}</td>
+                      <td>{j.material_code ?? "—"}</td>
+                      <td>
+                        <span className={`badge ${j.status === "finalized" ? "ok" : "warn"}`}>
+                          {j.status === "finalized" ? "Finalized" : j.status === "submitted_for_qc" ? "Submitted" : "Pending"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {loadingProd && <div className="empty">Loading…</div>}
+            {!loadingProd && jobCards.length === 0 && <div className="empty">No job cards yet.</div>}
+          </div>
+        </>
+      )}
 
-        <button className="btn btn-secondary" type="button" onClick={handleCSV} style={{ marginTop: 12 }}>
-          ↙ Download CSV
-        </button>
-        <button className="btn btn-secondary" type="button" onClick={handleXLSX} disabled={xlsxBusy}>
-          {xlsxBusy ? "Preparing file…" : "↙ Download Excel (.xlsx)"}
-        </button>
-      </div>
+      {/* ── Breakdown view ── */}
+      {prodSource === "breakdown" && (
+        <>
+          <div className="metric-grid">
+            <div className="metric">
+              <div className="num">{loadingProd ? "…" : breakdowns.length}</div>
+              <div className="lbl">Breakdowns</div>
+            </div>
+            <div className="metric">
+              <div className="num" style={{ color: bdOngoing > 0 ? "var(--warn)" : "var(--ink)" }}>
+                {loadingProd ? "…" : bdOngoing}
+              </div>
+              <div className="lbl">Ongoing</div>
+            </div>
+            <div className="metric">
+              <div className="num" style={{ color: "var(--ok)" }}>
+                {loadingProd ? "…" : breakdowns.length - bdOngoing}
+              </div>
+              <div className="lbl">Resolved</div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="helper-row"><h3 style={{ margin: 0 }}>Breakdown register</h3></div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash">
+                <thead>
+                  <tr><th>SR</th><th>Machine</th><th>Start</th><th>Nature</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {!loadingProd && breakdowns.map(b => (
+                    <tr key={b.id}>
+                      <td>{b.sr_no ?? "—"}</td>
+                      <td>{b.machine_name}</td>
+                      <td>{new Date(b.start_at).toLocaleDateString("en-IN")}</td>
+                      <td>{b.nature_of_breakdown ?? "—"}</td>
+                      <td>
+                        <span className={`badge ${b.finish_at ? "ok" : "warn"}`}>
+                          {b.finish_at ? "Resolved" : "Ongoing"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {loadingProd && <div className="empty">Loading…</div>}
+            {!loadingProd && breakdowns.length === 0 && <div className="empty">No breakdown entries yet.</div>}
+          </div>
+        </>
+      )}
 
-      <div className="small-note">
-        Status shows Op / Prod / Lab completion for each shift. Downloads include every shift and
-        batch entry currently in the database, not just what&apos;s shown on screen.
-      </div>
+      {/* ── Preventive view ── */}
+      {prodSource === "preventive" && (
+        <>
+          <div className="metric-grid">
+            <div className="metric">
+              <div className="num">{loadingProd ? "…" : pmItems.length}</div>
+              <div className="lbl">Completions</div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="helper-row"><h3 style={{ margin: 0 }}>Preventive maintenance — completions</h3></div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash">
+                <thead>
+                  <tr><th>Date</th><th>Machine</th><th>Component</th><th>Task</th></tr>
+                </thead>
+                <tbody>
+                  {!loadingProd && pmItems.map(c => (
+                    <tr key={c.id}>
+                      <td>{new Date(c.completed_at).toLocaleDateString("en-IN")}</td>
+                      <td>{c.pm_schedule_items?.machine ?? "—"}</td>
+                      <td>{c.pm_schedule_items?.component ?? "—"}</td>
+                      <td>{c.pm_schedule_items?.task ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {loadingProd && <div className="empty">Loading…</div>}
+            {!loadingProd && pmItems.length === 0 && <div className="empty">No maintenance completions yet.</div>}
+          </div>
+        </>
+      )}
+
+      {/* Legacy shift export kept available under Job Card view */}
+      {prodSource === "job_card" && shifts.length > 0 && (
+        <div className="card">
+          <div className="helper-row"><h3 style={{ margin: 0 }}>Legacy shift export</h3></div>
+          <div className="field-hint" style={{ marginBottom: 8 }}>
+            {shifts.length} legacy shift record(s) · {totalBags} bags · {flagged} below target
+          </div>
+          <button className="btn btn-secondary" type="button" onClick={handleCSV}>↙ Download CSV</button>
+          <button className="btn btn-secondary" type="button" onClick={handleXLSX} disabled={xlsxBusy}>
+            {xlsxBusy ? "Preparing file…" : "↙ Download Excel (.xlsx)"}
+          </button>
+        </div>
+      )}
     </>
   );
 }
