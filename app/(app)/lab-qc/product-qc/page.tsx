@@ -54,6 +54,10 @@ export default function ProductQcPage() {
   const [batchId, setBatchId]           = useState("");
   const [loadingBatches, setLoadingBatches] = useState(false);
 
+  // A-20 direct batch entry (no batch-analysis / hourly-reading in this factory)
+  const [directBatchNumber, setDirectBatchNumber] = useState("");
+  const [directLotNumber, setDirectLotNumber]     = useState("");
+
   // Test definitions for selected product + phase
   const [testDefs, setTestDefs]         = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs]   = useState(false);
@@ -73,12 +77,15 @@ export default function ProductQcPage() {
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
 
+  // A-20 uses direct batch/lot entry (batch analysis & hourly reading do not
+  // exist in this factory). A-20/1 keeps the batch dropdown.
+  const isA20 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20";
+
   // -------------------------------------------------------------------------
   // Load products — A-20: filter to 5 known Lab QC products by code
   //                 A-20/1: all non-trial active products
   // -------------------------------------------------------------------------
   const A20_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "ZIDDI", "LIQUID_CALCIUM", "LIQUID_BORON"];
-  const isA20 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20";
 
   useEffect(() => {
     const q = supabase.from("products").select("*").eq("is_active", true);
@@ -98,6 +105,8 @@ export default function ProductQcPage() {
   useEffect(() => {
     setPhase(isPhaseAware ? "A" : "none");
     setBatchId("");
+    setDirectBatchNumber("");
+    setDirectLotNumber("");
     setExistingRecord(null);
     setValues({});
     setRemarks("");
@@ -109,6 +118,8 @@ export default function ProductQcPage() {
   // since hourly-reading / batch-analysis create them with material_id
   // -------------------------------------------------------------------------
   useEffect(() => {
+    // A-20 uses direct batch/lot entry — no dropdown to populate.
+    if (isA20) { setBatches([]); return; }
     if (!productId || !activeFactory) { setBatches([]); return; }
 
     setLoadingBatches(true);
@@ -241,13 +252,74 @@ export default function ProductQcPage() {
   const handleSubmit = async () => {
     if (!user || !activeFactory)       { showToast("Session error — refresh.", true); return; }
     if (!productId)                    { showToast("Select a product.", true); return; }
-    if (!batchId)                      { showToast("Select a batch.", true); return; }
+    if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
+    if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
     if (!chemistName.trim() && !existingRecord) {
       showToast("Enter chemist name.", true); return;
     }
 
     setSubmitting(true);
     try {
+      // A-20: resolve (or create) the fg batch from the typed batch/lot number.
+      // The chemist enters these directly since batch analysis / hourly reading
+      // do not exist in this factory.
+      let effectiveBatchId = batchId;
+      if (isA20) {
+        const bn = directBatchNumber.trim();
+        const ln = directLotNumber.trim() || null;
+
+        const { data: existingBatch } = await supabase
+          .from("batches")
+          .select("id")
+          .eq("factory_id", activeFactory.id)
+          .eq("product_id", productId)
+          .eq("batch_number", bn)
+          .maybeSingle();
+
+        if (existingBatch) {
+          effectiveBatchId = existingBatch.id;
+        } else {
+          const { data: newBatch, error: batchErr } = await supabase
+            .from("batches")
+            .insert({
+              batch_number:    bn,
+              lot_number:      ln,
+              factory_id:      activeFactory.id,
+              material_id:     null,
+              product_id:      productId,
+              batch_type:      "fg",
+              production_date: testDate,
+              quantity:        null,
+              unit:            null,
+              source_batch_id: null,
+              created_by:      user.id,
+            })
+            .select("id")
+            .single();
+
+          if (batchErr || !newBatch) {
+            showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
+            setSubmitting(false);
+            return;
+          }
+          effectiveBatchId = newBatch.id;
+        }
+
+        // Guard against a duplicate QC record for this batch/product/phase.
+        const { data: dup } = await supabase
+          .from("product_qc")
+          .select("id")
+          .eq("batch_id", effectiveBatchId)
+          .eq("product_id", productId)
+          .eq("phase", phase)
+          .maybeSingle();
+        if (dup) {
+          showToast("A QC record already exists for this batch, product and phase.", true);
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const testResults: Record<string, number | string | boolean> = {};
       testDefs.forEach(d => {
         const raw = values[d.test_key];
@@ -287,7 +359,7 @@ export default function ProductQcPage() {
         const { data: newRow, error } = await supabase
           .from("product_qc")
           .insert({
-            batch_id:      batchId,
+            batch_id:      effectiveBatchId,
             factory_id:    activeFactory.id,
             product_id:    productId,
             phase,
@@ -305,6 +377,8 @@ export default function ProductQcPage() {
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
         showToast("Product QC saved ✓");
         setBatchId("");
+        setDirectBatchNumber("");
+        setDirectLotNumber("");
         setExistingRecord(null);
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
@@ -358,8 +432,37 @@ export default function ProductQcPage() {
         )}
       </div>
 
-      {/* Step 3: batch — references batch numbers from hourly reading / batch analysis */}
-      {productId && (
+      {/* Step 3 (A-20): direct batch number + lot number entry.
+          No batch analysis / hourly reading exists in this factory, so the
+          chemist enters the batch and lot numbers straight from the product. */}
+      {isA20 && productId && (
+        <div className="card">
+          <h3>Batch</h3>
+          <div className="row2">
+            <div>
+              <label>Batch Number *</label>
+              <input
+                type="text"
+                placeholder="e.g. SSC-260824-001"
+                value={directBatchNumber}
+                onChange={e => setDirectBatchNumber(e.target.value)}
+              />
+            </div>
+            <div>
+              <label>Lot Number</label>
+              <input
+                type="text"
+                placeholder="e.g. LOT-01"
+                value={directLotNumber}
+                onChange={e => setDirectLotNumber(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3 (A-20/1): batch dropdown from hourly reading / batch analysis */}
+      {!isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
           <label>Batch Number *</label>
@@ -400,7 +503,7 @@ export default function ProductQcPage() {
       )}
 
       {/* Step 4: form */}
-      {productId && batchId && !checkingExisting && (
+      {productId && (isA20 ? directBatchNumber.trim() !== "" : (batchId && !checkingExisting)) && (
         <>
           <div className="card">
             <h3>Test Details</h3>

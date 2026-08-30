@@ -657,6 +657,7 @@ export default function RmQcPage() {
                   <div className="field-hint" style={{ marginBottom: 12 }}>
                     All test fields are optional unless marked *.
                     Leave blank if the test was not performed.
+                    Green fields are auto-calculated from the values you enter.
                   </div>
                   {testDefs.map(def => (
                     <QcFieldRenderer
