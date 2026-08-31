@@ -18,6 +18,7 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
+import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
@@ -239,6 +240,16 @@ export default function BatchAnalysisPage() {
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
+        void notifyQcFinalized({
+          sourceTable:   "batch_analysis",
+          sourceRecordId: existingAnalysis.id,
+          factoryId:     activeFactory.id,
+          batchId:       batchId!,
+          overallResult: appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending",
+          testDate:      analysisDate,
+          testResults:   testResults,
+          extra:         { appearance: appearanceVal, remarks: remarks.trim() || null },
+        });
         showToast("Batch analysis updated ✓");
       } else {
         const { data: newRow, error } = await supabase
@@ -258,6 +269,16 @@ export default function BatchAnalysisPage() {
 
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        void notifyQcFinalized({
+          sourceTable:   "batch_analysis",
+          sourceRecordId: newRow.id,
+          factoryId:     activeFactory.id,
+          batchId:       batchId!,
+          overallResult: appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending",
+          testDate:      analysisDate,
+          testResults:   testResults,
+          extra:         { appearance: appearanceVal, remarks: remarks.trim() || null },
+        });
         showToast("Batch analysis saved ✓");
       }
 

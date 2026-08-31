@@ -18,13 +18,11 @@
   --foreground: var(--ink);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* The app is a light "paper" theme. Pin the color scheme so browsers on a
+     dark-mode device don't auto-invert form control text (which produced
+     white-on-white, i.e. invisible, typed text in inputs). */
+  color-scheme: light;
 }
 
 /* ── Reset & base ────────────────────────────────────────────────────────── */

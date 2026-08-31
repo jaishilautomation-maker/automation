@@ -21,6 +21,7 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
+import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
@@ -354,6 +355,21 @@ export default function ProductQcPage() {
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingRecord.id)));
+        {
+          const { data: fresh } = await supabase
+            .from("product_qc").select("overall_result").eq("id", existingRecord.id).maybeSingle();
+          void notifyQcFinalized({
+            sourceTable:   "product_qc",
+            sourceRecordId: existingRecord.id,
+            factoryId:     activeFactory.id,
+            batchId:       existingRecord.batch_id,
+            phase,
+            overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
+            testDate:      testDate,
+            testResults:   testResults,
+            extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+          });
+        }
         showToast("Product QC updated ✓");
       } else {
         const { data: newRow, error } = await supabase
@@ -375,6 +391,21 @@ export default function ProductQcPage() {
 
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        {
+          const { data: fresh } = await supabase
+            .from("product_qc").select("overall_result").eq("id", newRow.id).maybeSingle();
+          void notifyQcFinalized({
+            sourceTable:   "product_qc",
+            sourceRecordId: newRow.id,
+            factoryId:     activeFactory.id,
+            batchId:       effectiveBatchId,
+            phase,
+            overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
+            testDate:      testDate,
+            testResults:   testResults,
+            extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+          });
+        }
         showToast("Product QC saved ✓");
         setBatchId("");
         setDirectBatchNumber("");

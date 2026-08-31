@@ -19,6 +19,7 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { evalFormula } from "@/lib/formula";
+import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material, QcTestDefinition } from "@/lib/types";
@@ -267,6 +268,17 @@ export default function RmQcPage() {
         .filter(Boolean).map(ref => ref!.flush(newRow.id));
       await Promise.all(flushPromises);
 
+      void notifyQcFinalized({
+        sourceTable:   "rm_qc",
+        sourceRecordId: newRow.id,
+        factoryId:     activeFactory.id,
+        batchId:       batchId,
+        overallResult: "pending",
+        testDate:      testDate,
+        testResults:   testResults,
+        extra:         { material_name: selectedMaterial?.name ?? null, appearance: values["appearance"] ?? null, remarks: remarks.trim() || null },
+      });
+
       showToast("QC results saved ✓");
       setBatchId("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
@@ -476,7 +488,7 @@ export default function RmQcPage() {
                 if (oilDensity) testResults["density_g_ml"] = parseFloat(oilDensity);
                 if (oilViscosity) testResults["viscosity"] = parseFloat(oilViscosity);
 
-                const { error } = await supabase.from("rm_qc").insert({
+                const { data: oilRow, error } = await supabase.from("rm_qc").insert({
                   batch_id: bId,
                   factory_id: activeFactory.id,
                   material_id: null,
@@ -486,9 +498,19 @@ export default function RmQcPage() {
                   appearance_ok: null,
                   test_results: testResults,
                   remarks: null,
-                });
+                }).select("id").single();
 
-                if (error) { showToast("Could not save: " + error.message, true); return; }
+                if (error || !oilRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+                void notifyQcFinalized({
+                  sourceTable:   "rm_qc",
+                  sourceRecordId: oilRow.id,
+                  factoryId:     activeFactory.id,
+                  batchId:       bId,
+                  overallResult: "pending",
+                  testDate:      new Date().toISOString().slice(0, 10),
+                  testResults:   testResults,
+                  extra:         { material_name: "Oil", appearance: oilAppearance || null },
+                });
                 showToast("Oil QC saved ✓");
                 setOilBatchNumber(""); setOilAppearance("");
                 setOilMass(""); setOilVolume(""); setOilViscosity("");
