@@ -16,6 +16,7 @@ export type AppRole =
   | "chemist"
   | "production_incharge"
   | "operator"
+  | "stores"          // A-20/1 pulveriser: issues oil to the batch (migration 016b/017)
   | "viewer";
 
 /** Phase A / B apply to Sulphur SC and Zinc SC; all others use 'none'. */
@@ -554,6 +555,12 @@ export interface Database {
         Insert: Omit<PulveriserJobCardReview, "id" | "reviewed_at">;
         Update: never;  // append-only
       };
+      // VFD / oil-dosing standard master (Form JSCI/PRD/10) — migration 017
+      vfd_parameters: {
+        Row: VfdParameter;
+        Insert: Omit<VfdParameter, "id">;
+        Update: Partial<Omit<VfdParameter, "id">>;
+      };
       // Lab QC — master data
       materials: {
         Row: Material;
@@ -924,8 +931,17 @@ export interface PackingBreakdownReport {
 //   → Lab reviews OK (finalized) / NOT OK (back to pending, rework loop).
 // ---------------------------------------------------------------------------
 
-/** Pulveriser job card lifecycle status (Postgres enum pulveriser_status). */
-export type PulveriserStatus = "pending" | "submitted_for_qc" | "finalized";
+/**
+ * Pulveriser job card lifecycle status (Postgres enum pulveriser_status).
+ * 'pending_stores' (migration 016b): Production filled the card; awaiting Stores
+ * to issue oil before the Operator can run the batch. NOT-OK reviews return the
+ * card here for a full Stores → Operator → Lab rework cycle.
+ */
+export type PulveriserStatus =
+  | "pending_stores"
+  | "pending"
+  | "submitted_for_qc"
+  | "finalized";
 
 /** Machine dropdown for pulveriser_job_cards.machine_number (fixed list). */
 export const PULVERISER_MACHINES = [
@@ -971,10 +987,18 @@ export interface PulveriserJobCard {
   oil_supplier: string | null;
   oil_batch_number: string | null;
   oil_quantity: number | null;
+  planned_production_mt: number | null;   // Production-entered (migration 017)
+  oil_required_kg: number | null;         // computed: planned_production_mt*1000*oil_feed_std
   production_by: string | null;         // auth.users.id
   production_at: string | null;         // timestamptz ISO
 
+  // Stores-owned (migration 017) — issued after Production, before Operator
+  oil_issued_kg: number | null;
+  oil_issued_by: string | null;         // auth.users.id
+  oil_issued_at: string | null;         // timestamptz ISO
+
   // Operator-owned
+  actual_production_mt: number | null;     // Operator-entered (migration 017)
   classifier_vfd: string | null;
   blower_inlet_valve: string | null;
   blower_outlet_valve: string | null;
@@ -988,6 +1012,15 @@ export interface PulveriserJobCard {
   checkpoint_mesh_cloth_check: boolean;
   operator_by: string | null;           // auth.users.id
   operator_submitted_at: string | null; // timestamptz ISO
+
+  // Calculated by DB trigger fn_pulveriser_recompute_oil (migration 017) —
+  // never entered manually. oil_feed_std is looked up from vfd_parameters by
+  // material_code (machine_type='mill').
+  expected_oil_kg: number | null;               // actual_production_mt*1000*oil_feed_std
+  actual_oil_consumption_kg: number | null;      // MIN(oil_issued_kg, expected_oil_kg)
+  oil_variance_kg: number | null;                // oil_issued_kg - expected_oil_kg
+  oil_extra_leftover_balance_kg: number | null;  // MAX(oil_issued_kg - expected_oil_kg, 0)
+  oil_consumption_percent: number | null;        // consumption / (actual_mt*1000) * 100
 
   created_at: string;
   updated_at: string;
@@ -1020,4 +1053,49 @@ export interface PulveriserJobCardReview {
   remark: string | null;
   rejected_stage: PulveriserRejectedStage | null;
   reviewed_at: string;                  // timestamptz ISO
+}
+
+// ---------------------------------------------------------------------------
+// VFD / oil-dosing standard (Form JSCI/PRD/10) — migration 017
+// Master lookup keyed by party_code, which is the SAME code stored as
+// pulveriser_job_cards.material_code. Two machine types per code.
+//   - 'mill' rows carry the oil ratio (oil_feed_std) used for all oil calcs
+//     plus the expected classifier/feeder VFD the Operator sees as reference.
+//   - 'oil_dosing_pump' rows carry classifier/feeder only (no oil ratio).
+// ---------------------------------------------------------------------------
+
+export type VfdMachineType = "mill" | "oil_dosing_pump";
+
+export interface VfdParameter {
+  id: string;
+  party_code: string;                   // == pulveriser_job_cards.material_code
+  machine_type: VfdMachineType;
+  classifier_vfd: string | null;        // expected setting or range, e.g. "50" / "16-17"
+  feeder_vfd: string | null;            // expected setting or range, e.g. "18-20"
+  oil_feed_std: number | null;          // oil ratio (mill rows only); null = NA
+  oil_feed_min: number | null;
+  oil_feed_max: number | null;
+  pump_flow: string | null;             // e.g. "10 LPH"; null = NA
+  mesh_size_200: string | null;
+  mesh_size_300: string | null;
+  rev_no: number;
+  effective_date: string;               // ISO date
+}
+
+/**
+ * Parse a VFD reference string ("50" or "16-18") into a numeric [min,max] range.
+ * Returns null for NA / non-numeric values (e.g. "NA", "Nil"). Used to flag —
+ * not block — an operator reading that falls outside the expected band.
+ */
+export function parseVfdRange(ref: string | null | undefined): [number, number] | null {
+  if (!ref) return null;
+  const cleaned = ref.trim();
+  const m = cleaned.match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/);
+  if (m) {
+    const lo = Number(m[1]);
+    const hi = Number(m[2]);
+    return [Math.min(lo, hi), Math.max(lo, hi)];
+  }
+  const single = Number(cleaned);
+  return Number.isFinite(single) ? [single, single] : null;
 }

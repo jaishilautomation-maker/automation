@@ -5,6 +5,7 @@
 //
 // Factory A-20/1 (FACTORY_CODE=A20_1):
 //   operator          → A-20/1 shift entry (/operator)
+//   stores            → pulveriser oil-issue queue (/pulveriser/stores)
 //   production_incharge → production sign-off + Breakdown + PM
 //   chemist/lab_manager → lab sign-off (job_card) + Lab QC (lab_qc)
 //
@@ -89,6 +90,11 @@ export default function AppNav() {
       links = [
         { href: "/pulveriser/operator", label: "पल्वराइज़र जॉब कार्ड" },
         { href: "/pulveriser/records",  label: "जॉब कार्ड रिकॉर्ड्स" },
+      ];
+    } else if (role === "stores") {
+      links = [
+        { href: "/pulveriser/stores",  label: "तेल जारी करें (Stores)" },
+        { href: "/pulveriser/records", label: "जॉब कार्ड रिकॉर्ड्स" },
       ];
     } else if (role === "production_incharge") {
       links = [

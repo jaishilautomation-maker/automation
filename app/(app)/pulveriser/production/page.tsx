@@ -12,12 +12,16 @@
 //   oil_supplier, oil_batch_number, oil_quantity
 // =============================================================================
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
-import { PULVERISER_MACHINES, type PulveriserMachine } from "@/lib/types";
+import {
+  PULVERISER_MACHINES,
+  type PulveriserMachine,
+  type VfdParameter,
+} from "@/lib/types";
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -34,6 +38,7 @@ export default function PulveriserProductionPage() {
   const [shift, setShift]               = useState<"Day" | "Night" | "">("");
   const [jobDate, setJobDate]           = useState(todayISO());
   const [materialCode, setMaterialCode] = useState("");
+  const [plannedMt, setPlannedMt]       = useState("");
   const [sulSupplier, setSulSupplier]   = useState("");
   const [sulLot, setSulLot]             = useState("");
   const [sulEmptyDate, setSulEmptyDate] = useState("");
@@ -42,8 +47,36 @@ export default function PulveriserProductionPage() {
   const [oilQty, setOilQty]             = useState("");
   const [submitting, setSubmitting]     = useState(false);
 
+  // Mill-type VFD rows drive the material-code dropdown + oil standard lookup.
+  const [millParams, setMillParams] = useState<VfdParameter[]>([]);
+
+  const loadParams = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("vfd_parameters")
+      .select("*")
+      .eq("machine_type", "mill")
+      .order("party_code");
+    if (error) { showToast("VFD codes load nahi hue: " + error.message, true); return; }
+    setMillParams((data ?? []) as VfdParameter[]);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadParams(); }, [loadParams]);
+
+  // Selected code's oil standard → live oil_required_kg preview.
+  const selectedParam = useMemo(
+    () => millParams.find(p => p.party_code === materialCode) ?? null,
+    [millParams, materialCode],
+  );
+  const oilStd = selectedParam?.oil_feed_std ?? null;
+  const plannedMtNum = plannedMt.trim() === "" ? null : Number(plannedMt);
+  const oilRequiredPreview =
+    plannedMtNum !== null && oilStd !== null && Number.isFinite(plannedMtNum)
+      ? plannedMtNum * 1000 * oilStd
+      : null;
+
   const reset = () => {
     setJobNumber(""); setShift(""); setJobDate(todayISO()); setMaterialCode("");
+    setPlannedMt("");
     setSulSupplier(""); setSulLot(""); setSulEmptyDate("");
     setOilSupplier(""); setOilBatch(""); setOilQty("");
   };
@@ -54,25 +87,30 @@ export default function PulveriserProductionPage() {
       showToast("Select a factory/module first.", true);
       return;
     }
-    if (!materialCode.trim()) {
+    if (!materialCode) {
       showToast("माल का कोड नंबर (material code) is required — operator waits on it.", true);
       return;
     }
 
     setSubmitting(true);
     try {
+      // oil_required_kg is also recomputed by the DB trigger from the
+      // vfd_parameters oil_feed_std lookup; we send our client value too so the
+      // row is correct even if read back before the trigger result is fetched.
       // Chain .select() so a row blocked by RLS surfaces a real error instead
       // of PostgREST's silent 204 (which otherwise reports a false success).
       const { data, error } = await supabase
         .from("pulveriser_job_cards")
         .insert({
           factory_id:         activeFactory.id,
-          status:             "pending",
+          status:             "pending_stores",
           machine_number:     machine,
           job_number:         jobNumber.trim() || null,
           shift:              shift || null,
           job_date:           jobDate || null,
-          material_code:      materialCode.trim(),
+          material_code:      materialCode,
+          planned_production_mt: plannedMtNum,
+          oil_required_kg:    oilRequiredPreview,
           sulphur_supplier:   sulSupplier.trim() || null,
           sulphur_lot_number: sulLot.trim() || null,
           sulphur_empty_date: sulEmptyDate || null,
@@ -90,7 +128,7 @@ export default function PulveriserProductionPage() {
         showToast("Save was blocked — your account may not have access to this factory.", true);
         return;
       }
-      showToast("Job card created ✓ — operator will now fill their part.");
+      showToast("Job card created ✓ — Stores will issue oil, then the operator fills their part.");
       reset();
     } catch {
       showToast("Network error — try again.", true);
@@ -140,8 +178,39 @@ export default function PulveriserProductionPage() {
         </div>
 
         <label>माल का कोड नंबर (Material Code) *</label>
-        <input type="text" placeholder="e.g. SC-001" value={materialCode}
-          onChange={e => setMaterialCode(e.target.value)} />
+        <select value={materialCode} onChange={e => setMaterialCode(e.target.value)}>
+          <option value="">— select code —</option>
+          {millParams.map(p => (
+            <option key={p.id} value={p.party_code}>{p.party_code}</option>
+          ))}
+        </select>
+        {materialCode && selectedParam && (
+          <div className="field-hint" style={{ marginTop: 6 }}>
+            Oil standard (oil_feed_std): {oilStd ?? "NA"}
+            {" · "}Classifier VFD: {selectedParam.classifier_vfd ?? "—"}
+            {" · "}Feeder VFD: {selectedParam.feeder_vfd ?? "—"}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Production Plan</h3>
+        <label>Planned Production (MT)</label>
+        <input type="number" min="0" step="0.001" placeholder="0"
+          value={plannedMt} onChange={e => setPlannedMt(e.target.value)} />
+        <div className="field-hint" style={{ marginTop: 8 }}>
+          Oil required (auto): {" "}
+          {oilRequiredPreview !== null ? (
+            <b>{oilRequiredPreview.toFixed(3)} kg</b>
+          ) : oilStd === null && materialCode ? (
+            <span>— no oil standard for this code (NA)</span>
+          ) : (
+            <span>— enter planned MT and select a code</span>
+          )}
+        </div>
+        <div className="field-hint">
+          = Planned MT × 1000 × oil standard. Stores issues this oil before the operator can run the batch.
+        </div>
       </div>
 
       <div className="card">

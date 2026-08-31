@@ -10,16 +10,18 @@ const factoryName = FACTORY_NAME;
 
 // Simplified role labels shown during self-registration.
 // These map to the app_role enum values that require no factory_admin grant.
-type SignupRole = "operator" | "production" | "lab";
+type SignupRole = "operator" | "stores" | "production" | "lab";
 
 const ROLE_MAP: Record<SignupRole, AppRole> = {
   operator:   "operator",
+  stores:     "stores",
   production: "production_incharge",
   lab:        "chemist",
 };
 
 const ROLES: { value: SignupRole; label: string }[] = [
   { value: "operator",   label: "Operator / ऑपरेटर" },
+  { value: "stores",     label: "Stores / स्टोर्स" },
   { value: "production", label: "Production" },
   { value: "lab",        label: "Lab / QC" },
 ];

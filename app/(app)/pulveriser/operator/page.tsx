@@ -16,13 +16,15 @@
 // correction and resubmission (rework loop).
 // =============================================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import {
   PULVERISER_LOW_PROD_REASONS,
+  parseVfdRange,
   type PulveriserJobCard,
+  type VfdParameter,
 } from "@/lib/types";
 
 interface HourlyRow {
@@ -68,6 +70,7 @@ export default function PulveriserOperatorPage() {
   const [submitting, setSubmitting]   = useState(false);
 
   // Operator-owned fields
+  const [actualMt, setActualMt]           = useState("");
   const [classifierVfd, setClassifierVfd] = useState("");
   const [blowerIn, setBlowerIn]           = useState("");
   const [blowerOut, setBlowerOut]         = useState("");
@@ -80,6 +83,9 @@ export default function PulveriserOperatorPage() {
   const [chkRoller, setChkRoller]         = useState(false);
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
+
+  // Mill VFD standard for the active card's material_code — reference only.
+  const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
 
   const loadPending = useCallback(async () => {
     setLoadingList(true);
@@ -99,6 +105,7 @@ export default function PulveriserOperatorPage() {
   const openCard = async (jc: PulveriserJobCard) => {
     setActive(jc);
     // Pre-fill operator fields (may already hold values from a prior rework)
+    setActualMt(jc.actual_production_mt?.toString() ?? "");
     setClassifierVfd(jc.classifier_vfd ?? "");
     setBlowerIn(jc.blower_inlet_valve ?? "");
     setBlowerOut(jc.blower_outlet_valve ?? "");
@@ -110,6 +117,18 @@ export default function PulveriserOperatorPage() {
     setChkClean(jc.checkpoint_machine_cleaning);
     setChkRoller(jc.checkpoint_roller_check);
     setChkMesh(jc.checkpoint_mesh_cloth_check);
+
+    // Load the mill VFD standard for this material_code (reference values).
+    setVfdParam(null);
+    if (jc.material_code) {
+      const { data: vp } = await supabase
+        .from("vfd_parameters")
+        .select("*")
+        .eq("machine_type", "mill")
+        .eq("party_code", jc.material_code)
+        .maybeSingle();
+      setVfdParam((vp as VfdParameter | null) ?? null);
+    }
 
     // Load any existing hourly readings (rework case)
     const { data } = await supabase
@@ -132,7 +151,19 @@ export default function PulveriserOperatorPage() {
     setRows(existing.length ? existing : [blankRow()]);
   };
 
-  const goBack = () => { setActive(null); setRows([blankRow()]); };
+  const goBack = () => { setActive(null); setRows([blankRow()]); setVfdParam(null); setActualMt(""); };
+
+  // Classifier VFD mismatch flag — reference only, never blocks submission.
+  const classifierRange = useMemo(
+    () => parseVfdRange(vfdParam?.classifier_vfd),
+    [vfdParam],
+  );
+  const classifierReadingNum = classifierVfd.trim() === "" ? null : Number(classifierVfd);
+  const classifierMismatch =
+    classifierRange !== null &&
+    classifierReadingNum !== null &&
+    Number.isFinite(classifierReadingNum) &&
+    (classifierReadingNum < classifierRange[0] || classifierReadingNum > classifierRange[1]);
 
   const updateRow = (id: string, field: keyof HourlyRow, val: string) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: val } : r));
@@ -159,6 +190,7 @@ export default function PulveriserOperatorPage() {
 
   const persistOperatorFields = async (jcId: string, submit: boolean) => {
     const payload: Record<string, unknown> = {
+      actual_production_mt: actualMt.trim() === "" ? null : Number(actualMt),
       classifier_vfd:      classifierVfd.trim() || null,
       blower_inlet_valve:  blowerIn.trim() || null,
       blower_outlet_valve: blowerOut.trim() || null,
@@ -276,12 +308,32 @@ export default function PulveriserOperatorPage() {
     <>
       <button className="back-link" type="button" onClick={goBack}>← सूची पर वापस जाएँ</button>
 
-      {/* Read-only production reference */}
+      {/* Read-only production + stores reference */}
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} शिफ्ट<br />
         <b>माल कोड:</b> {active.material_code} · जॉब: {active.job_number ?? "—"}<br />
         <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
-        <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}
+        <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}<br />
+        <b>नियोजित उत्पादन:</b> {active.planned_production_mt ?? "—"} MT ·{" "}
+        <b>तेल जारी (Stores):</b> {active.oil_issued_kg != null ? `${active.oil_issued_kg} kg` : "—"}
+        {vfdParam && (
+          <>
+            <br />
+            <b>VFD मानक ({active.material_code}):</b>{" "}
+            Classifier {vfdParam.classifier_vfd ?? "—"} · Feeder {vfdParam.feeder_vfd ?? "—"}
+          </>
+        )}
+      </div>
+
+      {/* Actual production — drives all oil-consumption calculations (DB trigger) */}
+      <div className="card">
+        <h3>वास्तविक उत्पादन</h3>
+        <label>वास्तविक उत्पादन (MT)</label>
+        <input type="number" min="0" step="0.001" placeholder="0"
+          value={actualMt} onChange={e => setActualMt(e.target.value)} />
+        <div className="field-hint" style={{ marginTop: 6 }}>
+          तेल की खपत के आँकड़े इसी से अपने-आप गणना होते हैं (सहेजने पर)।
+        </div>
       </div>
 
       {/* Operator machine settings */}
@@ -291,6 +343,16 @@ export default function PulveriserOperatorPage() {
           <div>
             <label>क्लासिफायर VFD *</label>
             <input type="text" value={classifierVfd} onChange={e => setClassifierVfd(e.target.value)} />
+            {vfdParam?.classifier_vfd && (
+              <div className="field-hint" style={{ marginTop: 4 }}>
+                अपेक्षित (VFD मानक): {vfdParam.classifier_vfd}
+              </div>
+            )}
+            {classifierMismatch && (
+              <div className="field-hint" style={{ marginTop: 4, color: "var(--warn)" }}>
+                ⚠ आपका मान अपेक्षित सीमा ({vfdParam?.classifier_vfd}) से बाहर है — जाँच लें।
+              </div>
+            )}
           </div>
           <div>
             <label>ब्लोअर इनलेट वाल्व *</label>

@@ -99,7 +99,7 @@ export default function PulveriserLabPage() {
       }
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."
-        : "Marked NOT OK — sent back for rework.");
+        : "Marked NOT OK — sent back to Stores for a full rework cycle.");
       goBack();
       loadPending();
     } catch (e: unknown) {
@@ -177,6 +177,23 @@ export default function PulveriserLabPage() {
         <F label="Oil Supplier" value={active.oil_supplier} />
         <F label="Oil Batch" value={active.oil_batch_number} />
         <F label="Oil Quantity" value={active.oil_quantity} />
+        <F label="Planned Production (MT)" value={active.planned_production_mt} />
+        <F label="Oil Required (kg)" value={active.oil_required_kg} />
+      </div>
+
+      <div className="card">
+        <h3>Stores &amp; oil consumption</h3>
+        <F label="Oil Issued (kg)" value={active.oil_issued_kg} />
+        <F label="Actual Production (MT)" value={active.actual_production_mt} />
+        <F label="Expected Oil (kg)" value={active.expected_oil_kg} />
+        <F label="Actual Oil Consumption (kg)" value={active.actual_oil_consumption_kg} />
+        <F label="Oil Variance (kg)" value={active.oil_variance_kg} />
+        <F label="Extra / Leftover Balance (kg)" value={active.oil_extra_leftover_balance_kg} />
+        <F label="Oil Consumption %" value={
+          active.oil_consumption_percent != null
+            ? `${active.oil_consumption_percent.toFixed(2)}%`
+            : null
+        } />
       </div>
 
       <div className="card">

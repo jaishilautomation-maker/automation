@@ -53,7 +53,7 @@ type ProdSource = "job_card" | "breakdown" | "preventive";
 
 interface JobCardRow {
   id: string;
-  status: "pending" | "submitted_for_qc" | "finalized";
+  status: "pending_stores" | "pending" | "submitted_for_qc" | "finalized";
   machine_number: string | null;
   job_date: string | null;
   shift: string | null;
@@ -485,7 +485,7 @@ export default function DashboardPage() {
                       <td>{j.material_code ?? "—"}</td>
                       <td>
                         <span className={`badge ${j.status === "finalized" ? "ok" : "warn"}`}>
-                          {j.status === "finalized" ? "Finalized" : j.status === "submitted_for_qc" ? "Submitted" : "Pending"}
+                          {j.status === "finalized" ? "Finalized" : j.status === "submitted_for_qc" ? "Submitted" : j.status === "pending_stores" ? "Awaiting Stores" : "Pending"}
                         </span>
                       </td>
                     </tr>
