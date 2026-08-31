@@ -250,6 +250,20 @@ $$;
 -- 7. RLS UPDATES
 -- ---------------------------------------------------------------------------
 
+-- 7-0. Production INSERT — the card must now start life as 'pending_stores'
+--      (Production → Stores → Operator flow), not 'pending'. The 015 policy
+--      only allowed 'pending', which rejects every new card under the new flow.
+DROP POLICY IF EXISTS "pulv_jc_insert" ON public.pulveriser_job_cards;
+CREATE POLICY "pulv_jc_insert" ON public.pulveriser_job_cards
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        factory_id IN (SELECT fn_user_factory_ids())
+        AND status = 'pending_stores'
+        AND fn_has_role(ARRAY[
+            'production_incharge', 'factory_admin', 'company_admin'
+        ]::app_role[])
+    );
+
 -- 7a. Production UPDATE — must now leave the card either 'pending' (draft) OR
 --     advance it to 'pending_stores' (their "submit to Stores" action). It may
 --     start from 'pending' (fresh) OR 'pending_stores' (editing before Stores
