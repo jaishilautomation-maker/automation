@@ -118,14 +118,14 @@ export default function PulveriserOperatorPage() {
     setChkRoller(jc.checkpoint_roller_check);
     setChkMesh(jc.checkpoint_mesh_cloth_check);
 
-    // Load the mill VFD standard for this material_code (reference values).
+    // Load the mill VFD standard for this card's Party/CODE (reference values).
     setVfdParam(null);
-    if (jc.material_code) {
+    if (jc.party_code) {
       const { data: vp } = await supabase
         .from("vfd_parameters")
         .select("*")
         .eq("machine_type", "mill")
-        .eq("party_code", jc.material_code)
+        .eq("party_code", jc.party_code)
         .maybeSingle();
       setVfdParam((vp as VfdParameter | null) ?? null);
     }
@@ -294,7 +294,7 @@ export default function PulveriserOperatorPage() {
                 <span>{jc.shift ?? "—"}</span>
               </div>
               <div className="pi-sub">
-                माल कोड: {jc.material_code} · जॉब: {jc.job_number ?? "—"}
+                माल कोड: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · जॉब: {jc.job_number ?? "—"}
               </div>
             </div>
           ))
@@ -311,7 +311,7 @@ export default function PulveriserOperatorPage() {
       {/* Read-only production + stores reference */}
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} शिफ्ट<br />
-        <b>माल कोड:</b> {active.material_code} · जॉब: {active.job_number ?? "—"}<br />
+        <b>माल कोड:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · जॉब: {active.job_number ?? "—"}<br />
         <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
         <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}<br />
         <b>नियोजित उत्पादन:</b> {active.planned_production_mt ?? "—"} MT ·{" "}
@@ -319,7 +319,7 @@ export default function PulveriserOperatorPage() {
         {vfdParam && (
           <>
             <br />
-            <b>VFD मानक ({active.material_code}):</b>{" "}
+            <b>VFD मानक ({active.party_code}):</b>{" "}
             Classifier {vfdParam.classifier_vfd ?? "—"} · Feeder {vfdParam.feeder_vfd ?? "—"}
           </>
         )}

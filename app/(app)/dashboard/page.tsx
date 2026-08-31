@@ -58,6 +58,7 @@ interface JobCardRow {
   job_date: string | null;
   shift: string | null;
   material_code: string | null;
+  party_code: string | null;
   created_at: string;
 }
 interface BreakdownDashRow {
@@ -158,7 +159,7 @@ export default function DashboardPage() {
         if (prodSource === "job_card") {
           const { data } = await supabase
             .from("pulveriser_job_cards")
-            .select("id, status, machine_number, job_date, shift, material_code, created_at")
+            .select("id, status, machine_number, job_date, shift, material_code, party_code, created_at")
             .eq("factory_id", activeFactory.id)
             .order("created_at", { ascending: false });
           setJobCards((data ?? []) as JobCardRow[]);
@@ -474,7 +475,7 @@ export default function DashboardPage() {
             <div style={{ overflowX: "auto" }}>
               <table className="dash">
                 <thead>
-                  <tr><th>Date</th><th>Machine</th><th>Shift</th><th>Material</th><th>Status</th></tr>
+                  <tr><th>Date</th><th>Machine</th><th>Shift</th><th>Material</th><th>Party/CODE</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {!loadingProd && jobCards.map(j => (
@@ -483,6 +484,7 @@ export default function DashboardPage() {
                       <td>{j.machine_number ?? "—"}</td>
                       <td>{j.shift ?? "—"}</td>
                       <td>{j.material_code ?? "—"}</td>
+                      <td>{j.party_code ?? "—"}</td>
                       <td>
                         <span className={`badge ${j.status === "finalized" ? "ok" : "warn"}`}>
                           {j.status === "finalized" ? "Finalized" : j.status === "submitted_for_qc" ? "Submitted" : j.status === "pending_stores" ? "Awaiting Stores" : "Pending"}

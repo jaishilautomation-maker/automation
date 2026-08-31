@@ -177,7 +177,7 @@ export default function MySubmissionsPage() {
                     {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
                   </span>
                   <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                    Material: <b>{jc.material_code ?? "—"}</b> · Job: {jc.job_number ?? "—"}
+                    Material: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"} · Job: {jc.job_number ?? "—"}
                     <br />
                     Status:{" "}
                     <span className={`badge ${JC_STATUS_BADGE[jc.status]}`}>

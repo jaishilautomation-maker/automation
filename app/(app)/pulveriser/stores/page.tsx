@@ -106,7 +106,7 @@ export default function PulveriserStoresPage() {
                 <span>{jc.shift ?? "—"}</span>
               </div>
               <div className="pi-sub">
-                माल कोड: {jc.material_code} · Oil required:{" "}
+                माल कोड: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · Oil required:{" "}
                 {jc.oil_required_kg != null ? `${jc.oil_required_kg} kg` : "NA"}
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function PulveriserStoresPage() {
 
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} shift<br />
-        <b>माल कोड:</b> {active.material_code} · Job: {active.job_number ?? "—"}<br />
+        <b>माल कोड:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · Job: {active.job_number ?? "—"}<br />
         <b>Planned production:</b> {active.planned_production_mt ?? "—"} MT<br />
         <b>Oil required (auto):</b>{" "}
         {active.oil_required_kg != null ? `${active.oil_required_kg} kg` : "NA (no oil standard for this code)"}

@@ -38,6 +38,7 @@ export default function PulveriserProductionPage() {
   const [shift, setShift]               = useState<"Day" | "Night" | "">("");
   const [jobDate, setJobDate]           = useState(todayISO());
   const [materialCode, setMaterialCode] = useState("");
+  const [partyCode, setPartyCode]       = useState("");
   const [plannedMt, setPlannedMt]       = useState("");
   const [sulSupplier, setSulSupplier]   = useState("");
   const [sulLot, setSulLot]             = useState("");
@@ -62,10 +63,10 @@ export default function PulveriserProductionPage() {
 
   useEffect(() => { loadParams(); }, [loadParams]);
 
-  // Selected code's oil standard → live oil_required_kg preview.
+  // Selected Party/CODE's oil standard → live oil_required_kg preview.
   const selectedParam = useMemo(
-    () => millParams.find(p => p.party_code === materialCode) ?? null,
-    [millParams, materialCode],
+    () => millParams.find(p => p.party_code === partyCode) ?? null,
+    [millParams, partyCode],
   );
   const oilStd = selectedParam?.oil_feed_std ?? null;
   const plannedMtNum = plannedMt.trim() === "" ? null : Number(plannedMt);
@@ -75,7 +76,8 @@ export default function PulveriserProductionPage() {
       : null;
 
   const reset = () => {
-    setJobNumber(""); setShift(""); setJobDate(todayISO()); setMaterialCode("");
+    setJobNumber(""); setShift(""); setJobDate(todayISO());
+    setMaterialCode(""); setPartyCode("");
     setPlannedMt("");
     setSulSupplier(""); setSulLot(""); setSulEmptyDate("");
     setOilSupplier(""); setOilBatch(""); setOilQty("");
@@ -87,8 +89,12 @@ export default function PulveriserProductionPage() {
       showToast("Select a factory/module first.", true);
       return;
     }
-    if (!materialCode) {
+    if (!materialCode.trim()) {
       showToast("माल का कोड नंबर (material code) is required — operator waits on it.", true);
+      return;
+    }
+    if (!partyCode) {
+      showToast("Party/CODE is required — it drives the oil standard.", true);
       return;
     }
 
@@ -108,7 +114,8 @@ export default function PulveriserProductionPage() {
           job_number:         jobNumber.trim() || null,
           shift:              shift || null,
           job_date:           jobDate || null,
-          material_code:      materialCode,
+          material_code:      materialCode.trim(),
+          party_code:         partyCode,
           planned_production_mt: plannedMtNum,
           oil_required_kg:    oilRequiredPreview,
           sulphur_supplier:   sulSupplier.trim() || null,
@@ -177,14 +184,23 @@ export default function PulveriserProductionPage() {
           </div>
         </div>
 
-        <label>माल का कोड नंबर (Material Code) *</label>
-        <select value={materialCode} onChange={e => setMaterialCode(e.target.value)}>
-          <option value="">— select code —</option>
-          {millParams.map(p => (
-            <option key={p.id} value={p.party_code}>{p.party_code}</option>
-          ))}
-        </select>
-        {materialCode && selectedParam && (
+        <div className="row2">
+          <div>
+            <label>माल का कोड नंबर (Material Code) *</label>
+            <input type="text" placeholder="e.g. SC-001" value={materialCode}
+              onChange={e => setMaterialCode(e.target.value)} />
+          </div>
+          <div>
+            <label>Party / CODE *</label>
+            <select value={partyCode} onChange={e => setPartyCode(e.target.value)}>
+              <option value="">— select party/code —</option>
+              {millParams.map(p => (
+                <option key={p.id} value={p.party_code}>{p.party_code}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {partyCode && selectedParam && (
           <div className="field-hint" style={{ marginTop: 6 }}>
             Oil standard (oil_feed_std): {oilStd ?? "NA"}
             {" · "}Classifier VFD: {selectedParam.classifier_vfd ?? "—"}

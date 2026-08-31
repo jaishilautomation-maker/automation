@@ -980,7 +980,8 @@ export interface PulveriserJobCard {
   job_number: string | null;
   shift: string | null;
   job_date: string | null;              // ISO date
-  material_code: string | null;         // माल का कोड नंबर
+  material_code: string | null;         // माल का कोड नंबर (free text)
+  party_code: string | null;            // Party/CODE — dropdown; drives oil/VFD lookup (== vfd_parameters.party_code)
   sulphur_supplier: string | null;
   sulphur_lot_number: string | null;
   sulphur_empty_date: string | null;    // ISO date — खाली करने की तारीख

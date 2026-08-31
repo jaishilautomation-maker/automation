@@ -108,7 +108,7 @@ export default function PulveriserRecordsPage() {
                 {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
               </span>
               <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                {t.material}: <b>{jc.material_code ?? "—"}</b> · {t.job}: {jc.job_number ?? "—"}
+                {t.material}: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"} · {t.job}: {jc.job_number ?? "—"}
                 <br />
                 {t.status}:{" "}
                 <span className={`badge ${STATUS_BADGE[jc.status]}`}>

@@ -129,7 +129,7 @@ export default function PulveriserLabPage() {
                 <span>{jc.shift ?? "—"}</span>
               </div>
               <div className="pi-sub">
-                Material: {jc.material_code} · Job: {jc.job_number ?? "—"}
+                Material: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · Job: {jc.job_number ?? "—"}
               </div>
             </div>
           ))
@@ -171,6 +171,7 @@ export default function PulveriserLabPage() {
         <F label="Shift" value={active.shift} />
         <F label="Job Date" value={active.job_date} />
         <F label="माल Code" value={active.material_code} />
+        <F label="Party / CODE" value={active.party_code} />
         <F label="Sulphur Supplier" value={active.sulphur_supplier} />
         <F label="Sulphur Lot" value={active.sulphur_lot_number} />
         <F label="Sulphur Empty Date" value={active.sulphur_empty_date} />
