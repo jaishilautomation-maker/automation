@@ -194,17 +194,21 @@ export default function RmQcPage() {
     setSpImport(null);
     setSpNotFound(false);
 
+    // Match on batch number. Use a case-insensitive exact match and take the
+    // most recent active row — there can be more than one if the source QC was
+    // re-sent, and requiring exactly one would otherwise error.
     const { data, error } = await supabase
       .from("qc_imports")
       .select("*")
-      .eq("source_batch_number", q)
+      .ilike("source_batch_number", q)
       .eq("status", "active")
-      .maybeSingle();
+      .order("transferred_at", { ascending: false })
+      .limit(1);
 
     setSpSearching(false);
     if (error) { showToast("Search failed: " + error.message, true); return; }
-    if (data) {
-      setSpImport(data as QcImportRow);
+    if (data && data.length > 0) {
+      setSpImport(data[0] as QcImportRow);
     } else {
       setSpNotFound(true);
     }
@@ -533,20 +537,21 @@ export default function RmQcPage() {
           </div>
 
           <label>Batch Number *</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
             <input
               type="text"
               placeholder="e.g. SP-260824-001"
               value={spBatchSearch}
               onChange={e => { setSpBatchSearch(e.target.value); setSpImport(null); setSpNotFound(false); }}
               onKeyDown={e => e.key === "Enter" && searchSulphurQc()}
-              style={{ flex: 1 }}
+              style={{ flex: "1 1 auto", width: "auto", minWidth: 0 }}
             />
             <button
               className="btn btn-secondary"
               type="button"
               disabled={spSearching}
               onClick={searchSulphurQc}
+              style={{ flexShrink: 0, whiteSpace: "nowrap" }}
             >
               {spSearching ? "Searching…" : "Look up"}
             </button>
