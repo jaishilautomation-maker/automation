@@ -22,6 +22,7 @@ import type {
   PulveriserJobCardReview,
   PulveriserStatus,
 } from "@/lib/types";
+import { groupByJobNumber } from "@/lib/types";
 
 type Source = "job_card" | "breakdown" | "preventive";
 
@@ -169,41 +170,51 @@ export default function MySubmissionsPage() {
           jobCards.length === 0 ? (
             <div className="empty">No job cards yet.</div>
           ) : (
-            jobCards.map(jc => {
-              const trail = jcReviews[jc.id] ?? [];
-              return (
-                <div className="batch-block" key={jc.id}>
-                  <span className="batch-label">
-                    {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
-                  </span>
-                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                    Material: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"} · Job: {jc.job_number ?? "—"}
-                    <br />
-                    Status:{" "}
-                    <span className={`badge ${JC_STATUS_BADGE[jc.status]}`}>
-                      {JC_STATUS_LABEL[jc.status]}
-                    </span>
-                  </div>
-                  {trail.length > 0 && (
-                    <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                        Review trail ({trail.length})
-                      </div>
-                      {trail.map(r => (
-                        <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
-                          <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
-                            {r.result === "ok" ? "OK" : "NOT OK"}
-                          </span>{" "}
-                          {fmtDate(r.reviewed_at)}
-                          {r.rejected_stage && ` · reopened: ${r.rejected_stage}`}
-                          {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            groupByJobNumber(jobCards).map(group => (
+              <div key={group.jobNumber ?? group.entries[0].id}
+                style={{ marginBottom: 16, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "2px 0 6px" }}>
+                  Job: {group.jobNumber ?? "—"}
+                  {group.entries.length > 1 && ` · ${group.entries.length} entries`}
                 </div>
-              );
-            })
+                {group.entries.map((jc, idx) => {
+                  const trail = jcReviews[jc.id] ?? [];
+                  return (
+                    <div className="batch-block" key={jc.id}>
+                      <span className="batch-label">
+                        {group.entries.length > 1 ? `Entry ${idx + 1} · ` : ""}
+                        {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
+                      </span>
+                      <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                        Batch: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"}
+                        <br />
+                        Status:{" "}
+                        <span className={`badge ${JC_STATUS_BADGE[jc.status]}`}>
+                          {JC_STATUS_LABEL[jc.status]}
+                        </span>
+                      </div>
+                      {trail.length > 0 && (
+                        <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                            Review trail ({trail.length})
+                          </div>
+                          {trail.map(r => (
+                            <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
+                              <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
+                                {r.result === "ok" ? "OK" : "NOT OK"}
+                              </span>{" "}
+                              {fmtDate(r.reviewed_at)}
+                              {r.rejected_stage && ` · reopened: ${r.rejected_stage}`}
+                              {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))
           )
         ) : source === "breakdown" ? (
           breakdowns.length === 0 ? (

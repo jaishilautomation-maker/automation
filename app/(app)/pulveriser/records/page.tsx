@@ -11,10 +11,11 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useAuth } from "@/lib/auth-context";
-import type {
-  PulveriserJobCard,
-  PulveriserJobCardReview,
-  PulveriserStatus,
+import {
+  groupByJobNumber,
+  type PulveriserJobCard,
+  type PulveriserJobCardReview,
+  type PulveriserStatus,
 } from "@/lib/types";
 
 const STATUS_BADGE: Record<PulveriserStatus, string> = {
@@ -48,7 +49,7 @@ export default function PulveriserRecordsPage() {
     heading:   hi ? "पल्वराइज़र जॉब कार्ड रिकॉर्ड्स" : "Pulveriser job card records",
     loading:   hi ? "लोड हो रहा है…" : "Loading…",
     empty:     hi ? "अभी कोई जॉब कार्ड नहीं है।" : "No job cards yet.",
-    material:  hi ? "माल" : "Material",
+    material:  hi ? "बैच नंबर" : "Batch",
     job:       hi ? "जॉब" : "Job",
     status:    hi ? "स्थिति" : "Status",
     trail:     hi ? "समीक्षा इतिहास" : "Review trail",
@@ -100,42 +101,52 @@ export default function PulveriserRecordsPage() {
       ) : cards.length === 0 ? (
         <div className="empty">{t.empty}</div>
       ) : (
-        cards.map(jc => {
-          const trail = reviews[jc.id] ?? [];
-          return (
-            <div className="batch-block" key={jc.id}>
-              <span className="batch-label">
-                {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
-              </span>
-              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                {t.material}: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"} · {t.job}: {jc.job_number ?? "—"}
-                <br />
-                {t.status}:{" "}
-                <span className={`badge ${STATUS_BADGE[jc.status]}`}>
-                  {STATUS_LABEL[jc.status]}
-                </span>
-              </div>
-
-              {trail.length > 0 && (
-                <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                    {t.trail} ({trail.length})
-                  </div>
-                  {trail.map(r => (
-                    <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
-                      <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
-                        {r.result === "ok" ? t.ok : t.notOk}
-                      </span>{" "}
-                      {new Date(r.reviewed_at).toLocaleString()}
-                      {r.rejected_stage && ` · ${t.reopened}: ${r.rejected_stage}`}
-                      {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
+        groupByJobNumber(cards).map(group => (
+          <div key={group.jobNumber ?? group.entries[0].id}
+            style={{ marginBottom: 16, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "2px 0 6px" }}>
+              {t.job}: {group.jobNumber ?? "—"}
+              {group.entries.length > 1 && ` · ${group.entries.length} entries`}
             </div>
-          );
-        })
+            {group.entries.map((jc, idx) => {
+              const trail = reviews[jc.id] ?? [];
+              return (
+                <div className="batch-block" key={jc.id}>
+                  <span className="batch-label">
+                    {group.entries.length > 1 ? `Entry ${idx + 1} · ` : ""}
+                    {jc.job_date ?? "—"} · {jc.machine_number} · {jc.shift ?? "—"}
+                  </span>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    {t.material}: <b>{jc.material_code ?? "—"}</b> · Party/CODE: {jc.party_code ?? "—"}
+                    <br />
+                    {t.status}:{" "}
+                    <span className={`badge ${STATUS_BADGE[jc.status]}`}>
+                      {STATUS_LABEL[jc.status]}
+                    </span>
+                  </div>
+
+                  {trail.length > 0 && (
+                    <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                        {t.trail} ({trail.length})
+                      </div>
+                      {trail.map(r => (
+                        <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
+                          <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
+                            {r.result === "ok" ? t.ok : t.notOk}
+                          </span>{" "}
+                          {new Date(r.reviewed_at).toLocaleString()}
+                          {r.rejected_stage && ` · ${t.reopened}: ${r.rejected_stage}`}
+                          {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))
       )}
     </div>
   );

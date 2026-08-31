@@ -17,10 +17,11 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
-import type {
-  PulveriserJobCard,
-  PulveriserHourlyReading,
-  PulveriserJobCardReview,
+import {
+  groupByJobNumber,
+  type PulveriserJobCard,
+  type PulveriserHourlyReading,
+  type PulveriserJobCardReview,
 } from "@/lib/types";
 
 /** Read-only labelled field row. */
@@ -122,15 +123,23 @@ export default function PulveriserLabPage() {
         ) : pending.length === 0 ? (
           <div className="empty">No job cards awaiting review.</div>
         ) : (
-          pending.map(jc => (
-            <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
-              <div className="pi-top">
-                <span>{jc.machine_number} · {jc.job_date ?? "—"}</span>
-                <span>{jc.shift ?? "—"}</span>
+          groupByJobNumber(pending).map(group => (
+            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+                Job: {group.jobNumber ?? "—"}
+                {group.entries.length > 1 && ` · ${group.entries.length} entries`}
               </div>
-              <div className="pi-sub">
-                Material: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · Job: {jc.job_number ?? "—"}
-              </div>
+              {group.entries.map((jc, i) => (
+                <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
+                  <div className="pi-top">
+                    <span>Entry {i + 1} · {jc.machine_number} · {jc.job_date ?? "—"}</span>
+                    <span>{jc.shift ?? "—"}</span>
+                  </div>
+                  <div className="pi-sub">
+                    Batch: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
+                  </div>
+                </div>
+              ))}
             </div>
           ))
         )}
@@ -170,7 +179,7 @@ export default function PulveriserLabPage() {
         <F label="Job Number" value={active.job_number} />
         <F label="Shift" value={active.shift} />
         <F label="Job Date" value={active.job_date} />
-        <F label="माल Code" value={active.material_code} />
+        <F label="Batch Number" value={active.material_code} />
         <F label="Party / CODE" value={active.party_code} />
         <F label="Sulphur Supplier" value={active.sulphur_supplier} />
         <F label="Sulphur Lot" value={active.sulphur_lot_number} />

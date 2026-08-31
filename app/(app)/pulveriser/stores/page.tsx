@@ -18,7 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
-import type { PulveriserJobCard } from "@/lib/types";
+import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
 
 export default function PulveriserStoresPage() {
   const { user } = useAuth();
@@ -99,16 +99,24 @@ export default function PulveriserStoresPage() {
         ) : pending.length === 0 ? (
           <div className="empty">Koi card oil issue ke liye pending nahi hai.</div>
         ) : (
-          pending.map(jc => (
-            <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
-              <div className="pi-top">
-                <span>{jc.machine_number} · {jc.job_date ?? "—"}</span>
-                <span>{jc.shift ?? "—"}</span>
+          groupByJobNumber(pending).map(group => (
+            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+                Job: {group.jobNumber ?? "—"}
+                {group.entries.length > 1 && ` · ${group.entries.length} entries`}
               </div>
-              <div className="pi-sub">
-                माल कोड: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · Oil required:{" "}
-                {jc.oil_required_kg != null ? `${jc.oil_required_kg} kg` : "NA"}
-              </div>
+              {group.entries.map((jc, i) => (
+                <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
+                  <div className="pi-top">
+                    <span>Entry {i + 1} · {jc.machine_number} · {jc.job_date ?? "—"}</span>
+                    <span>{jc.shift ?? "—"}</span>
+                  </div>
+                  <div className="pi-sub">
+                    Batch: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · Oil required:{" "}
+                    {jc.oil_required_kg != null ? `${jc.oil_required_kg} kg` : "NA"}
+                  </div>
+                </div>
+              ))}
             </div>
           ))
         )}
@@ -123,7 +131,7 @@ export default function PulveriserStoresPage() {
 
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} shift<br />
-        <b>माल कोड:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · Job: {active.job_number ?? "—"}<br />
+        <b>Batch:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · Job: {active.job_number ?? "—"}<br />
         <b>Planned production:</b> {active.planned_production_mt ?? "—"} MT<br />
         <b>Oil required (auto):</b>{" "}
         {active.oil_required_kg != null ? `${active.oil_required_kg} kg` : "NA (no oil standard for this code)"}

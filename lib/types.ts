@@ -1065,6 +1065,28 @@ export interface PulveriserJobCardReview {
 //   - 'oil_dosing_pump' rows carry classifier/feeder only (no oil ratio).
 // ---------------------------------------------------------------------------
 
+/**
+ * Group pulveriser job-card rows by their shared job_number so every role can
+ * see all entries created together (Production may file up to 3 per job number).
+ * Rows with a null/empty job_number are each treated as their own group (keyed
+ * by row id) so they still render. Groups preserve the input order.
+ */
+export function groupByJobNumber<T extends { id: string; job_number: string | null }>(
+  rows: T[],
+): { jobNumber: string | null; entries: T[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, { jobNumber: string | null; entries: T[] }>();
+  for (const r of rows) {
+    const key = r.job_number && r.job_number.trim() !== "" ? `j:${r.job_number}` : `id:${r.id}`;
+    if (!map.has(key)) {
+      map.set(key, { jobNumber: r.job_number ?? null, entries: [] });
+      order.push(key);
+    }
+    map.get(key)!.entries.push(r);
+  }
+  return order.map(k => map.get(k)!);
+}
+
 export type VfdMachineType = "mill" | "oil_dosing_pump";
 
 export interface VfdParameter {

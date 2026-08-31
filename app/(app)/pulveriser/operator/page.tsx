@@ -23,6 +23,7 @@ import { useToast } from "@/lib/toast-context";
 import {
   PULVERISER_LOW_PROD_REASONS,
   parseVfdRange,
+  groupByJobNumber,
   type PulveriserJobCard,
   type VfdParameter,
 } from "@/lib/types";
@@ -310,15 +311,23 @@ export default function PulveriserOperatorPage() {
         ) : pending.length === 0 ? (
           <div className="empty">कोई लंबित जॉब कार्ड नहीं है।</div>
         ) : (
-          pending.map(jc => (
-            <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
-              <div className="pi-top">
-                <span>{jc.machine_number} · {jc.job_date ?? "—"}</span>
-                <span>{jc.shift ?? "—"}</span>
+          groupByJobNumber(pending).map(group => (
+            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+                जॉब: {group.jobNumber ?? "—"}
+                {group.entries.length > 1 && ` · ${group.entries.length} entries`}
               </div>
-              <div className="pi-sub">
-                माल कोड: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"} · जॉब: {jc.job_number ?? "—"}
-              </div>
+              {group.entries.map((jc, i) => (
+                <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
+                  <div className="pi-top">
+                    <span>Entry {i + 1} · {jc.machine_number} · {jc.job_date ?? "—"}</span>
+                    <span>{jc.shift ?? "—"}</span>
+                  </div>
+                  <div className="pi-sub">
+                    बैच नंबर: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
+                  </div>
+                </div>
+              ))}
             </div>
           ))
         )}
@@ -334,7 +343,7 @@ export default function PulveriserOperatorPage() {
       {/* Read-only production + stores reference */}
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} शिफ्ट<br />
-        <b>माल कोड:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · जॉब: {active.job_number ?? "—"}<br />
+        <b>बैच नंबर:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · जॉब: {active.job_number ?? "—"}<br />
         <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
         <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}<br />
         <b>नियोजित उत्पादन:</b> {active.planned_production_mt ?? "—"} MT ·{" "}
