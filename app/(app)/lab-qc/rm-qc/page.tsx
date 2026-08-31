@@ -15,6 +15,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import { createLabQcClient } from "@/lib/supabase/lab-qc-client";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -194,10 +195,17 @@ export default function RmQcPage() {
     setSpImport(null);
     setSpNotFound(false);
 
+    // Read qc_imports from the SAME database the /receive route writes to.
+    // The receive route uses NEXT_PUBLIC_LAB_QC_SUPABASE_URL (falling back to
+    // NEXT_PUBLIC_SUPABASE_URL); using the plain browser client here could read
+    // a different project and miss synced rows. createLabQcClient() mirrors the
+    // receive route's URL resolution.
+    const labQc = createLabQcClient();
+
     // Match on batch number. Use a case-insensitive exact match and take the
     // most recent active row — there can be more than one if the source QC was
     // re-sent, and requiring exactly one would otherwise error.
-    const { data, error } = await supabase
+    const { data, error } = await labQc
       .from("qc_imports")
       .select("*")
       .ilike("source_batch_number", q)
