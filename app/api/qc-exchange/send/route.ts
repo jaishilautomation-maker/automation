@@ -85,18 +85,22 @@ export async function POST(request: NextRequest) {
   const receiveUrl = process.env.A20_RECEIVE_URL;
   const secret     = process.env.QC_EXCHANGE_SECRET;
 
-  if (!receiveUrl || !secret) {
-    // A-20 not configured in this deployment — log only, no send
-    return NextResponse.json({
-      status: "no_target",
-      message: "A20_RECEIVE_URL / QC_EXCHANGE_SECRET not configured. Entry logged only.",
-    });
+  // -------------------------------------------------------------------------
+  // 3. Write exchange log row FIRST (upsert — idempotent if called twice).
+  //    We always persist the queue entry, even if the A-20 target is not yet
+  //    configured. This makes qc_exchange_log a reliable signal that this
+  //    endpoint was reached, and lets the retry-pending cron flush the backlog
+  //    the moment A20_RECEIVE_URL / QC_EXCHANGE_SECRET are added.
+  // -------------------------------------------------------------------------
+  let admin: ReturnType<typeof getServiceClient>;
+  try {
+    admin = getServiceClient();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[qc-exchange/send] Service client init failed:", msg);
+    return NextResponse.json({ error: "Server misconfigured: " + msg }, { status: 500 });
   }
 
-  // -------------------------------------------------------------------------
-  // 3. Write exchange log row (upsert — idempotent if called twice)
-  // -------------------------------------------------------------------------
-  const admin = getServiceClient();
   const logEntry = {
     source_table,
     source_record_id,
@@ -114,11 +118,23 @@ export async function POST(request: NextRequest) {
 
   if (logErr || !logRow) {
     console.error("[qc-exchange/send] Failed to write log:", logErr?.message);
-    return NextResponse.json({ error: "Failed to write exchange log" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to write exchange log: " + (logErr?.message ?? "unknown") }, { status: 500 });
   }
 
   // -------------------------------------------------------------------------
-  // 4. Attempt first send (non-blocking — failure updates log, doesn't throw)
+  // 4. If the A-20 target is not configured, leave the row as SYNC_PENDING.
+  //    The retry cron will send it once the env vars are present.
+  // -------------------------------------------------------------------------
+  if (!receiveUrl || !secret) {
+    return NextResponse.json({
+      log_id:  logRow.id,
+      status:  "queued_no_target",
+      message: "Logged as SYNC_PENDING. Set A20_RECEIVE_URL / QC_EXCHANGE_SECRET to enable sending.",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // 5. Attempt first send (non-blocking — failure updates log, doesn't throw)
   // -------------------------------------------------------------------------
   const sendResult = await attemptSend({
     admin,

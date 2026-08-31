@@ -19,6 +19,7 @@
 // =============================================================================
 
 import { createClient } from "@/lib/supabase-browser";
+import { FACTORY_CODE } from "@/lib/factory-config";
 
 type SourceTable = "product_qc" | "rm_qc" | "batch_analysis";
 
@@ -44,9 +45,13 @@ interface NotifyArgs {
  */
 export async function notifyQcFinalized(args: NotifyArgs): Promise<void> {
   // Only A-20/1 pushes QC to A-20. On A-20 this is a no-op.
-  if (process.env.NEXT_PUBLIC_FACTORY_CODE !== "A20_1") return;
+  if (FACTORY_CODE !== "A20_1") {
+    console.info(`[qc-exchange/notify] skipped — factory code is "${FACTORY_CODE}", expected "A20_1".`);
+    return;
+  }
 
   try {
+    console.info("[qc-exchange/notify] pushing QC to A-20:", args.sourceTable, args.sourceRecordId);
     const supabase = createClient();
 
     // Resolve the batch number + any linked material/product names so the
@@ -85,7 +90,7 @@ export async function notifyQcFinalized(args: NotifyArgs): Promise<void> {
 
     // Fire-and-forget. We intentionally do not await UI-blocking behaviour;
     // failures are retried by the cron. keepalive lets it survive navigation.
-    await fetch("/api/qc-exchange/send", {
+    const res = await fetch("/api/qc-exchange/send", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -96,6 +101,8 @@ export async function notifyQcFinalized(args: NotifyArgs): Promise<void> {
       }),
       keepalive: true,
     });
+    const info = await res.json().catch(() => ({}));
+    console.info("[qc-exchange/notify] send response:", res.status, info);
   } catch (err) {
     // Never surface to the user — the retry cron will re-attempt.
     console.error("[qc-exchange/notify] send failed (will retry via cron):", err);
