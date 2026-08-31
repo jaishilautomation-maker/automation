@@ -42,6 +42,7 @@ function landingPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
     if (FACTORY_CODE === "A20") return "/production-job-card";
     if (role === "operator")                          return "/operator";
+    if (role === "stores")                            return "/pulveriser/stores";
     if (role === "production_incharge")               return "/production";
     if (role === "chemist" || role === "lab_manager") return "/lab";
     return "/dashboard";
@@ -96,7 +97,7 @@ export default function SelectModulePage() {
 
     // Roles that go directly without showing any picker
     const directRoles: AppRole[] = [
-      "operator", "production_incharge",
+      "operator", "stores", "production_incharge",
       "factory_admin", "company_admin", "viewer",
     ];
 

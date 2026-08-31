@@ -310,6 +310,7 @@ export function modulesForUser(
     switch (role) {
       case "operator":
       case "production_incharge":
+      case "stores":
         seen.add("job_card");
         break;
       case "chemist":
@@ -336,6 +337,7 @@ export function modulesForUser(
     switch (a.role) {
       case "operator":
       case "production_incharge":
+      case "stores":
         seen.add("job_card");
         break;
       case "chemist":
