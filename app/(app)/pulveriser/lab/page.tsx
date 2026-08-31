@@ -221,7 +221,7 @@ export default function PulveriserLabPage() {
             <div className="batch-block" key={r.id}>
               <span className="batch-label">Reading {i + 1} · {r.reading_date ?? "—"}</span>
               <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                {r.machine ?? "—"} · {r.start_time ?? "—"}–{r.stop_time ?? "—"} ·{" "}
+                {r.machine ?? "—"} · reading {r.start_time ?? "—"}→{r.stop_time ?? "—"} ·{" "}
                 {r.total_hours ?? "—"} hrs · Planned {r.planned_production ?? "—"} ·{" "}
                 Batch {r.batch_no ?? "—"} · {r.bags ?? "—"} bags
                 {r.low_production_reason && (

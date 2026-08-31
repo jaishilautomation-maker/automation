@@ -40,13 +40,35 @@ interface HourlyRow {
   reading_date: string;
 }
 
-function calcHours(start: string, stop: string): number {
-  if (!start || !stop) return 0;
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = stop.split(":").map(Number);
-  let diff = eh * 60 + em - (sh * 60 + sm);
-  if (diff < 0) diff += 24 * 60;
-  return diff / 60;
+// The pulveriser hour meter is a CODED reading, not a wall clock.
+// Operator enters plain numbers, e.g. start 780, stop 930.
+//   raw diff      = stop - start                     (930 - 780 = 250)
+//   hours         = whole part of (diff / 100)        (2)
+//   minutes       = (last two digits / 100) * 60       (50/100*60 = 30)
+// Real decimal running hours = diff / 100  (2.50), which equals hours+min/60.
+function codedDiff(start: string, stop: string): number | null {
+  const s = start.trim();
+  const e = stop.trim();
+  if (s === "" || e === "") return null;
+  const sn = Number(s);
+  const en = Number(e);
+  if (!Number.isFinite(sn) || !Number.isFinite(en)) return null;
+  const diff = en - sn;
+  if (diff <= 0) return null;
+  return diff;
+}
+
+/** Convert a coded diff (e.g. 250) to decimal running hours (2.50). */
+function codedToHours(diff: number): number {
+  return diff / 100;
+}
+
+/** Format a coded diff (e.g. 250) as "H घं M मि" (2 घं 30 मि). */
+function formatCodedHM(diff: number): string {
+  const hours = Math.trunc(diff / 100);
+  const lastTwo = diff % 100;                 // hundredths of an hour
+  const minutes = Math.round((lastTwo / 100) * 60);
+  return `${hours} घं ${minutes} मि`;
 }
 
 function blankRow(): HourlyRow {
@@ -219,14 +241,15 @@ export default function PulveriserOperatorPage() {
 
   const syncHourlyRows = async (jc: PulveriserJobCard) => {
     for (const r of rows) {
-      const hours = calcHours(r.start_time, r.stop_time);
+      const diff = codedDiff(r.start_time, r.stop_time);
+      const hours = diff !== null ? codedToHours(diff) : null;
       const body = {
         job_card_id:           jc.id,
         factory_id:            jc.factory_id,
         machine:               r.machine.trim() || jc.machine_number,
-        start_time:            r.start_time || null,
-        stop_time:             r.stop_time || null,
-        total_hours:           hours > 0 ? hours : null,
+        start_time:            r.start_time.trim() || null,
+        stop_time:             r.stop_time.trim() || null,
+        total_hours:           hours,
         planned_production:    r.planned_production.trim() === "" ? null : Number(r.planned_production),
         low_production_reason: r.low_production_reason || null,
         batch_no:              r.batch_no.trim() || null,
@@ -397,7 +420,7 @@ export default function PulveriserOperatorPage() {
           <span className="count">{rows.length}</span>
         </div>
         {rows.map((r, i) => {
-          const hours = calcHours(r.start_time, r.stop_time);
+          const diff = codedDiff(r.start_time, r.stop_time);
           return (
             <div key={r.id} style={{
               border: "1px solid var(--line)", borderRadius: 8,
@@ -428,18 +451,19 @@ export default function PulveriserOperatorPage() {
               </div>
               <div className="row3">
                 <div>
-                  <label>शुरू</label>
-                  <input type="time" value={r.start_time}
+                  <label>शुरू रीडिंग</label>
+                  <input type="number" inputMode="numeric" placeholder="जैसे 780" value={r.start_time}
                     onChange={e => updateRow(r.id, "start_time", e.target.value)} />
                 </div>
                 <div>
-                  <label>बंद</label>
-                  <input type="time" value={r.stop_time}
+                  <label>बंद रीडिंग</label>
+                  <input type="number" inputMode="numeric" placeholder="जैसे 930" value={r.stop_time}
                     onChange={e => updateRow(r.id, "stop_time", e.target.value)} />
                 </div>
                 <div>
                   <label>कुल घंटे</label>
-                  <input type="text" disabled value={hours > 0 ? hours.toFixed(2) : ""} placeholder="0.00" />
+                  <input type="text" disabled
+                    value={diff !== null ? formatCodedHM(diff) : ""} placeholder="0 घं 0 मि" />
                 </div>
               </div>
               <div className="row3">

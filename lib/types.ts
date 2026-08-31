@@ -1033,9 +1033,9 @@ export interface PulveriserHourlyReading {
   job_card_id: string;
   factory_id: string;
   machine: string | null;
-  start_time: string | null;            // HH:MM[:SS]
-  stop_time: string | null;             // HH:MM[:SS]
-  total_hours: number | null;
+  start_time: string | null;            // coded hour-meter reading, e.g. "780" (migration 020)
+  stop_time: string | null;             // coded hour-meter reading, e.g. "930"
+  total_hours: number | null;           // decimal running hours = (stop-start)/100
   planned_production: number | null;
   low_production_reason: PulveriserLowProdReason | null;
   batch_no: string | null;
