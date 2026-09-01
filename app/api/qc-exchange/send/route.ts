@@ -212,6 +212,24 @@ export async function attemptSend(params: {
       throw new Error(`HTTP ${response.status}: ${errText}`);
     }
 
+    // Verify the response actually came from our /receive route (JSON with
+    // received:true). If A20_RECEIVE_URL points at the wrong place (e.g. the
+    // Vercel dashboard at vercel.com), it returns 200 + HTML, which must NOT be
+    // treated as a successful sync.
+    const rawText = await response.text().catch(() => "");
+    let ack: { received?: boolean } | null = null;
+    try { ack = JSON.parse(rawText); } catch { ack = null; }
+
+    if (!ack || ack.received !== true) {
+      const ct = response.headers.get("content-type") ?? "unknown";
+      const snippet = rawText.slice(0, 120).replace(/\s+/g, " ");
+      throw new Error(
+        `Receive endpoint did not acknowledge (content-type: ${ct}). ` +
+        `Check A20_RECEIVE_URL points at https://<A-20-app>/api/qc-exchange/receive. ` +
+        `Response: ${snippet}`
+      );
+    }
+
     // Success
     await admin.from("qc_exchange_log").update({
       status:           "SYNC_SENT",
