@@ -23,8 +23,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifyHmacSignature } from "@/lib/qc-exchange/hmac";
 
 function getServiceClient() {
-  const url = process.env.NEXT_PUBLIC_LAB_QC_SUPABASE_URL
-           ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  // Use the SAME project the A-20 UI reads from (NEXT_PUBLIC_SUPABASE_URL).
+  // The lookup page reads qc_imports via that URL, so the receive route must
+  // write into the same project. Previously this preferred
+  // NEXT_PUBLIC_LAB_QC_SUPABASE_URL, which — if set to a different project —
+  // caused records to be written where the UI could never read them
+  // ("sent successfully" but "Source QC not found"). This factory uses a single
+  // Supabase project, so we bind read + write to NEXT_PUBLIC_SUPABASE_URL.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!url || !key) throw new Error("Supabase service role env vars missing");
   // eslint-disable-next-line @typescript-eslint/no-require-imports
