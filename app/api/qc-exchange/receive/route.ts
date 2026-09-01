@@ -52,6 +52,18 @@ function deriveQcType(sourceTable: string, payload: Record<string, unknown>): st
   return sourceTable;
 }
 
+// Health probe: GET confirms the route is deployed and shows what it expects.
+// Safe (no secrets). Hitting this in a browser proves POST should work too.
+export async function GET() {
+  return NextResponse.json({
+    route: "qc-exchange/receive",
+    ok: true,
+    factory_code: process.env.NEXT_PUBLIC_FACTORY_CODE ?? "(unset)",
+    accepts: "POST",
+    gated_to: "A20",
+  });
+}
+
 export async function POST(request: NextRequest) {
   // -------------------------------------------------------------------------
   // Gate: only run on A-20 deployment
