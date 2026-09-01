@@ -638,7 +638,9 @@ export default function RmQcPage() {
               type="button"
               disabled={spSearching}
               onClick={searchSulphurQc}
-              style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+              // .btn is width:100% globally; override so it sizes to its label
+              // and lets the input take the remaining width in this flex row.
+              style={{ flex: "0 0 auto", width: "auto", whiteSpace: "nowrap" }}
             >
               {spSearching ? "Searching…" : "Look up"}
             </button>
