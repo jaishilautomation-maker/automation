@@ -96,16 +96,18 @@ DROP TRIGGER IF EXISTS trg_audit_vfd_parameters ON public.vfd_parameters;
 INSERT INTO public.vfd_parameters
     (party_code, machine_type, classifier_vfd, feeder_vfd, oil_feed_std, oil_feed_min, oil_feed_max, pump_flow, mesh_size_300)
 VALUES
-    ('Shakti',  'mill', '16-17', '35-37', NULL,  NULL,  NULL,  NULL,     'Nil'),
-    ('108',     'mill', '48',    '18-20', NULL,  NULL,  NULL,  NULL,     '-'),
+    -- Shakti / 108 / Rubber / 2615: no oil dosing → std = 0 (so oil_required = 0,
+    -- not NA). The other codes carry a real oil ratio.
+    ('Shakti',  'mill', '16-17', '35-37', 0,     NULL,  NULL,  NULL,     'Nil'),
+    ('108',     'mill', '48',    '18-20', 0,     NULL,  NULL,  NULL,     '-'),
     ('R5299',   'mill', '50',    '16-18', 0.01,  0.009, 0.011, '10 LPH', '-'),
     ('M-2615',  'mill', '50',    '16-18', 0.01,  0.009, 0.011, '10 LPH', '-'),
-    ('Rubber',  'mill', '48',    '20-22', NULL,  NULL,  NULL,  NULL,     '-'),
+    ('Rubber',  'mill', '48',    '20-22', 0,     NULL,  NULL,  NULL,     '-'),
     ('Lanxess', 'mill', '48',    '18-20', 0.02,  0.018, 0.022, '10 LPH', '-'),
     ('160108',  'mill', '40',    '20-22', 0.005, 0.004, 0.006, '5 LPH',  '-'),
     ('JKI108',  'mill', '45',    '20-22', 0.01,  0.009, 0.011, NULL,     '-'),
     ('BKT',     'mill', '50',    '16-18', 0.01,  0.008, 0.012, NULL,     '-'),
-    ('2615',    'mill', '50',    '16-18', NULL,  NULL,  NULL,  NULL,     '-')
+    ('2615',    'mill', '50',    '16-18', 0,     NULL,  NULL,  NULL,     '-')
 ON CONFLICT (party_code, machine_type) DO UPDATE SET
     classifier_vfd = EXCLUDED.classifier_vfd,
     feeder_vfd     = EXCLUDED.feeder_vfd,
