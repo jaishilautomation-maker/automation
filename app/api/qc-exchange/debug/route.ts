@@ -42,6 +42,12 @@ export async function GET() {
     has_service_role_key:    !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     has_qc_exchange_secret:  !!process.env.QC_EXCHANGE_SECRET,
     has_a20_receive_url:     !!process.env.A20_RECEIVE_URL,
+    // Non-secret: the HOST of the receive URL, so we can confirm A-20/1 is
+    // pointing at the CURRENT A-20 deployment (not an old/preview URL).
+    a20_receive_host:        (() => {
+      try { return process.env.A20_RECEIVE_URL ? new URL(process.env.A20_RECEIVE_URL).host : null; }
+      catch { return "(invalid URL)"; }
+    })(),
   };
 
   // Count qc_imports rows visible to the service role (bypasses RLS).
