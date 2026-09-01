@@ -102,6 +102,8 @@ export default function RmQcPage() {
   const [spSearching, setSpSearching]           = useState(false);
   const [spImport, setSpImport]                 = useState<QcImportRow | null>(null);
   const [spNotFound, setSpNotFound]             = useState(false);
+  const [spImporting, setSpImporting]           = useState(false);
+  const [spImportedBatchId, setSpImportedBatchId] = useState<string | null>(null);
 
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
@@ -217,10 +219,87 @@ export default function RmQcPage() {
     if (error) { showToast("Search failed: " + error.message, true); return; }
     if (data && data.length > 0) {
       setSpImport(data[0] as QcImportRow);
+      // Has this Sulphur Powder batch already been registered locally in A-20?
+      if (activeFactory) {
+        const { data: existing } = await supabase
+          .from("batches")
+          .select("id")
+          .eq("factory_id", activeFactory.id)
+          .ilike("batch_number", q)
+          .maybeSingle();
+        setSpImportedBatchId(existing?.id ?? null);
+      }
     } else {
       setSpNotFound(true);
     }
-  }, [spBatchSearch, supabase, showToast]);
+  }, [spBatchSearch, supabase, showToast, activeFactory]);
+
+  // ---------------------------------------------------------------------------
+  // Sulphur Powder: register the looked-up A-20/1 batch locally in A-20.
+  //
+  // A-20 does NOT create its own rm_qc row for Sulphur Powder (QC is owned by
+  // A-20/1). Instead we register the batch as an A-20 `batches` row so it is
+  // usable downstream (Product QC, production), traceable to the A-20/1 source
+  // by batch number. No FK to the A-20/1 batch is possible (separate project),
+  // so the link is the shared batch number.
+  // ---------------------------------------------------------------------------
+  const importSulphurBatch = useCallback(async () => {
+    if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
+    if (!spImport) return;
+    if (!isSulphurPowder || !materialId) { showToast("Select Sulphur Powder first.", true); return; }
+
+    const bn = (spImport.source_batch_number ?? spBatchSearch).trim();
+    if (!bn) { showToast("No batch number to import.", true); return; }
+
+    setSpImporting(true);
+    try {
+      // Idempotent: reuse an existing local batch with the same number.
+      const { data: existing } = await supabase
+        .from("batches")
+        .select("id")
+        .eq("factory_id", activeFactory.id)
+        .ilike("batch_number", bn)
+        .maybeSingle();
+
+      if (existing) {
+        setSpImportedBatchId(existing.id);
+        showToast("Batch already registered in A-20 ✓");
+        return;
+      }
+
+      const prodDate = spImport.tested_at
+        ? String(spImport.tested_at).slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+      const { data: newBatch, error } = await supabase
+        .from("batches")
+        .insert({
+          batch_number:    bn,
+          factory_id:      activeFactory.id,
+          material_id:     materialId,       // Sulphur Powder
+          product_id:      null,
+          batch_type:      "rm",
+          production_date: prodDate,
+          quantity:        null,
+          unit:            null,
+          source_batch_id: null,             // A-20/1 batch lives in another project
+          created_by:      user.id,
+        })
+        .select("id")
+        .single();
+
+      if (error || !newBatch) {
+        showToast("Could not register batch: " + (error?.message ?? "unknown"), true);
+        return;
+      }
+      setSpImportedBatchId(newBatch.id);
+      showToast("Sulphur Powder batch registered in A-20 ✓");
+    } catch {
+      showToast("Network error — try again.", true);
+    } finally {
+      setSpImporting(false);
+    }
+  }, [user, activeFactory, spImport, isSulphurPowder, materialId, spBatchSearch, supabase, showToast]);
 
   // ---------------------------------------------------------------------------
   // Field change
@@ -339,7 +418,7 @@ export default function RmQcPage() {
             ) : (
               <select value={materialId} onChange={e => {
                 setMaterialId(e.target.value);
-                setSpImport(null); setSpNotFound(false); setSpBatchSearch("");
+                setSpImport(null); setSpNotFound(false); setSpBatchSearch(""); setSpImportedBatchId(null);
                 setBatchId(""); setValues({});
               }}>
                 <option value="">— Select raw material —</option>
@@ -550,7 +629,7 @@ export default function RmQcPage() {
               type="text"
               placeholder="e.g. SP-260824-001"
               value={spBatchSearch}
-              onChange={e => { setSpBatchSearch(e.target.value); setSpImport(null); setSpNotFound(false); }}
+              onChange={e => { setSpBatchSearch(e.target.value); setSpImport(null); setSpNotFound(false); setSpImportedBatchId(null); }}
               onKeyDown={e => e.key === "Enter" && searchSulphurQc()}
               style={{ flex: "1 1 auto", width: "auto", minWidth: 0 }}
             />
@@ -616,7 +695,36 @@ export default function RmQcPage() {
               </details>
 
               <div className="field-hint" style={{ marginTop: 8, color: "var(--ok)" }}>
-                This record is read-only. It was finalized by Factory A-20/1 and cannot be modified here.
+                This QC record is read-only. It was finalized by Factory A-20/1 and cannot be modified here.
+              </div>
+
+              {/* Register the batch locally in A-20 so it is usable downstream */}
+              <div style={{ marginTop: 12 }}>
+                {spImportedBatchId ? (
+                  <div style={{
+                    padding: "8px 12px", background: "var(--ok-soft)",
+                    border: "1px solid var(--ok)", borderRadius: 8,
+                    fontSize: 13, color: "var(--ok)", fontWeight: 600,
+                  }}>
+                    ✓ This batch is registered in A-20 (batch number {spImport.source_batch_number}).
+                    It can now be used in A-20 Product QC / production.
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      disabled={spImporting}
+                      onClick={importSulphurBatch}
+                    >
+                      {spImporting ? "Registering…" : "Register batch in A-20"}
+                    </button>
+                    <div className="field-hint" style={{ marginTop: 4 }}>
+                      Creates a Sulphur Powder batch record in A-20 under this batch number,
+                      linked to the A-20/1 source QC above.
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
