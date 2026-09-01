@@ -6,7 +6,7 @@
 // A-20/1 deployment (FACTORY_CODE=A20_1):
 //   The factory is fixed — no picker shown. Navigate immediately by role:
 //     operator            → /operator
-//     production_incharge → /production
+//     production_incharge → /pulveriser/production
 //     chemist/lab_manager → choose Job Card or Lab QC (two tiles)
 //     admin/viewer        → /dashboard
 //
