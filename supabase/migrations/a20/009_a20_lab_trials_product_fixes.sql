@@ -1,5 +1,5 @@
 -- =============================================================================
--- A-20 Migration 018: Lab Trials product dropdown fixes
+-- A-20 Migration 009: Lab Trials product dropdown fixes
 --
 --   1. Correct spelling: "INSTABORE 150" -> "INSTABOR 150"
 --   2. Remove K Gum from the Lab Trials (and all other) product dropdowns by

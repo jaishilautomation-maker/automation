@@ -1,5 +1,5 @@
 -- =============================================================================
--- A-20 Migration 017: Product QC auto-calculation formulas
+-- A-20 Migration 008: Product QC auto-calculation formulas
 --
 -- Adds the SOP-provided calculation formulas for the 5 A-20 products so the
 -- Product QC form computes results live from raw titration/weighing inputs.
