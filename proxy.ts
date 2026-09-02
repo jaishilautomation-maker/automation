@@ -62,8 +62,14 @@ export default async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  // Public routes — do not require authentication
+  // Public routes — do not require authentication.
+  // API routes are excluded from the session redirect: they are called
+  // server-to-server (e.g. the QC exchange /receive endpoint, authenticated by
+  // HMAC signature, and cron routes by CRON_SECRET) and have no browser cookie.
+  // Redirecting them to /login turned POSTs into 405s. API routes enforce their
+  // own auth internally.
   const isPublic =
+    pathname.startsWith("/api/") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
