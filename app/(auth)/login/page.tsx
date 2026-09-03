@@ -30,13 +30,15 @@ const OTP_RESEND_COOLDOWN_S = 30; // seconds before "Resend OTP" is enabled
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Normalise a raw phone input to E.164 (+91XXXXXXXXXX).
+/** Normalise a raw phone input to E.164 digits only (no + prefix).
+ *  Supabase stores phone without the leading + internally, so we strip it
+ *  to ensure signInWithOtp and verifyOtp use the exact same format.
  *  Accepts: 10-digit local, 91XXXXXXXXXX, +91XXXXXXXXXX */
 function toE164(raw: string): string | null {
   const digits = raw.replace(/\D/g, "");
-  if (digits.length === 10)                              return `+91${digits}`;
-  if (digits.length === 12 && digits.startsWith("91"))   return `+${digits}`;
-  if (digits.length === 13 && raw.startsWith("+91"))     return raw.trim();
+  if (digits.length === 10)                            return `91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return digits;
+  if (digits.length === 13 && raw.startsWith("+91"))   return digits; // strip +
   return null; // unrecognised format
 }
 
@@ -236,7 +238,7 @@ export default function LoginPage() {
         {step === "otp" && (
           <>
             <p style={{ fontSize: 14, margin: "0 0 12px", color: "var(--ink-secondary, #71717a)" }}>
-              A 6-digit code was sent to <strong>{e164}</strong> via WhatsApp.
+              A 6-digit code was sent to <strong>+{e164}</strong> via WhatsApp.
             </p>
 
             <label>OTP code / कोड</label>

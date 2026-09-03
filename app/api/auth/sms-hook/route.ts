@@ -70,31 +70,27 @@ function getServiceClient() {
 // ---------------------------------------------------------------------------
 
 /**
- * Split an E.164 number into { countryCode, localNumber } for Interakt's API.
+ * Split a phone number into { countryCode, localNumber } for Interakt's API.
  * Interakt wants:
- *   countryCode: "+91"       (with the leading +)
+ *   countryCode: "+91"        (with the leading +)
  *   phoneNumber: "9876543210" (no country code, no leading zero)
  *
- * We support any country code by matching the leading + and digits before the
- * 10-digit subscriber number.  For all Indian numbers (+91XXXXXXXXXX) this is
- * deterministic; for other countries we fall back to assuming 10-digit local.
+ * Input may be E.164 with or without leading + (Supabase stores without +).
  */
-function splitPhone(e164: string): { countryCode: string; localNumber: string } {
-  // Strip the leading + and work with digits only
-  const digits = e164.startsWith("+") ? e164.slice(1) : e164;
+function splitPhone(phone: string): { countryCode: string; localNumber: string } {
+  // Normalise: strip leading + if present, work with digits only
+  const digits = phone.replace(/\D/g, "");
 
-  // India (+91) — 12 digits total: 2 CC + 10 local
+  // India (91) — 12 digits total: 2 CC + 10 local
   if (digits.startsWith("91") && digits.length === 12) {
     return { countryCode: "+91", localNumber: digits.slice(2) };
   }
 
   // Generic fallback: assume last 10 digits are local, rest is country code
   if (digits.length > 10) {
-    const ccDigits = digits.slice(0, digits.length - 10);
-    return { countryCode: `+${ccDigits}`, localNumber: digits.slice(-10) };
+    return { countryCode: `+${digits.slice(0, digits.length - 10)}`, localNumber: digits.slice(-10) };
   }
 
-  // No country code detectable — return as-is (will likely fail at Interakt)
   return { countryCode: "+91", localNumber: digits };
 }
 
