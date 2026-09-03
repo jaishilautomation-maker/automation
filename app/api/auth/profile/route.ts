@@ -33,23 +33,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  console.log("[profile-api] user.id:", user.id, "user.phone:", user.phone);
+
   // 2. Fetch profile + role via service role (bypasses RLS)
   const admin = getServiceClient();
   const userPhone = user.phone ?? null;
 
   const [{ data: profileData }, { data: roleData }] = await Promise.all([
-    userPhone
-      ? admin
-          .from("profiles")
-          .select("id, full_name, phone_number")
-          .or(`phone_number.eq.${userPhone},id.eq.${user.id}`)
-          .limit(1)
-          .maybeSingle()
-      : admin
-          .from("profiles")
-          .select("id, full_name, phone_number")
-          .eq("id", user.id)
-          .maybeSingle(),
+    // Look up by id first (always reliable), phone_number as secondary check
+    admin
+      .from("profiles")
+      .select("id, full_name, phone_number")
+      .eq("id", user.id)
+      .maybeSingle(),
     admin
       .from("user_roles")
       .select("role")
@@ -60,6 +56,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   if (!profileData) {
+    console.log("[profile-api] No profile found for id:", user.id, "phone:", userPhone);
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
