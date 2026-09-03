@@ -6,9 +6,10 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import { createClient } from "./supabase-browser";
-import type { Session, User } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import type { AppRole } from "./types";
 
 export type { AppRole };
@@ -56,72 +57,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileError, setProfileError] = useState<"not_found" | null>(null);
   const [loading, setLoading]           = useState(true);
 
+  // Prevent re-entrant loadProfile calls
+  const loadingProfile = useRef(false);
+
   // ── Profile loader ─────────────────────────────────────────────────────────
-  // Receives the full session so we can call setSession() before querying —
-  // this guarantees auth.uid() is set on the client and RLS passes.
-  const loadProfile = useCallback(async (session: Session) => {
-    const supabase = createClient();
-    const u = session.user;
+  // Fetches via /api/auth/profile (service-role, bypasses RLS timing issues).
+  const loadProfile = useCallback(async (u: User) => {
+    if (loadingProfile.current) return;
+    loadingProfile.current = true;
 
-    // Set the session explicitly so RLS (auth.uid()) works correctly even
-    // when this runs immediately inside onAuthStateChange before cookies persist.
-    await supabase.auth.setSession({
-      access_token:  session.access_token,
-      refresh_token: session.refresh_token,
-    });
+    try {
+      const resp = await fetch("/api/auth/profile", { credentials: "include" });
 
-    const userPhone = u.phone ?? null;
+      if (resp.status === 404) {
+        // No profiles row — not an admin-provisioned account
+        console.warn("[auth-context] No profile found for user", u.id, "— signing out.");
+        const supabase = createClient();
+        await supabase.auth.signOut();
+        setUser(null);
+        setProfile(null);
+        setProfileError("not_found");
+        return;
+      }
 
-    const [{ data: profileData }, { data: roleData }] = await Promise.all([
-      userPhone
-        ? supabase
-            .from("profiles")
-            .select("id, full_name, phone_number")
-            .or(`phone_number.eq.${userPhone},id.eq.${u.id}`)
-            .limit(1)
-            .maybeSingle()
-        : supabase
-            .from("profiles")
-            .select("id, full_name, phone_number")
-            .eq("id", u.id)
-            .maybeSingle(),
-      supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", u.id)
-        .order("granted_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+      if (!resp.ok) {
+        // 401 or server error — leave profile null, don't sign out
+        console.error("[auth-context] /api/auth/profile returned", resp.status);
+        return;
+      }
 
-    if (!profileData) {
-      console.warn(
-        "[auth-context] No profiles row found for user",
-        u.id,
-        "phone",
-        userPhone,
-        "— signing out.",
-      );
-      await supabase.auth.signOut();
-      setUser(null);
-      setProfile(null);
-      setProfileError("not_found");
-      return;
+      const data = await resp.json() as Profile;
+      setProfileError(null);
+      setProfile(data);
+    } finally {
+      loadingProfile.current = false;
     }
-
-    setProfileError(null);
-    setProfile({
-      id:           profileData.id,
-      full_name:    profileData.full_name,
-      phone_number: profileData.phone_number ?? userPhone,
-      role:         (roleData?.role as AppRole) ?? null,
-    });
   }, []);
 
   const refreshProfile = useCallback(async () => {
     const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) await loadProfile(session);
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (u) await loadProfile(u);
   }, [loadProfile]);
 
   // ── Session bootstrap + live subscription ─────────────────────────────────
@@ -130,21 +106,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session) await loadProfile(session);
+      if (session?.user) await loadProfile(session.user);
       setLoading(false);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user ?? null);
-      if (session) {
-        await loadProfile(session);
-      } else {
-        setProfile(null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await loadProfile(session.user);
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
     return () => subscription.unsubscribe();
   }, [loadProfile]);
