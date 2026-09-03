@@ -208,7 +208,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     template: {
       name:         templateName,
       languageCode: "en",
-      bodyValues:   [otp], // {{1}} in the jsci_login_otp template
+      bodyValues:   [otp], // {{1}} in the template body
+      buttonValues: {
+        "0": [otp], // "Copy Code" button at index 0 — same OTP value
+      },
     },
   };
 
