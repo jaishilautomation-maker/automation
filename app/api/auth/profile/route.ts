@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   const admin = getServiceClient();
   const userPhone = user.phone ?? null;
 
-  const [{ data: profileData }, { data: roleData }] = await Promise.all([
+  const [{ data: profileData, error: profileErr }, { data: roleData, error: roleErr }] = await Promise.all([
     // Look up by id first (always reliable), phone_number as secondary check
     admin
       .from("profiles")
@@ -54,6 +54,9 @@ export async function GET(request: NextRequest) {
       .limit(1)
       .maybeSingle(),
   ]);
+
+  console.log("[profile-api] profileData:", JSON.stringify(profileData), "profileErr:", profileErr?.message);
+  console.log("[profile-api] roleData:", JSON.stringify(roleData), "roleErr:", roleErr?.message);
 
   if (!profileData) {
     console.log("[profile-api] No profile found for id:", user.id, "phone:", userPhone);
