@@ -26,6 +26,11 @@ import { FACTORY_NAME } from "@/lib/factory-config";
 
 const OTP_RESEND_COOLDOWN_S = 30; // seconds before "Resend OTP" is enabled
 
+// Supabase client created ONCE outside the component so the same instance
+// is used for both signInWithOtp and verifyOtp — a new instance on re-render
+// loses the pending OTP session state and causes "token expired" errors.
+const supabase = createClient();
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -47,7 +52,6 @@ function toE164(raw: string): string | null {
 // ---------------------------------------------------------------------------
 
 export default function LoginPage() {
-  const supabase = createClient();
   const { profileError } = useAuth();
 
   // ── Form state ────────────────────────────────────────────────────────────
