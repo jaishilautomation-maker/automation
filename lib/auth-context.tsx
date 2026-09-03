@@ -1,31 +1,5 @@
 "use client";
 
-// =============================================================================
-// AuthContext — session state for the entire app.
-//
-// Auth method: phone number + WhatsApp OTP (Supabase phone auth).
-//   - signInWithOtp({ phone }) + verifyOtp({ phone, token, type: "sms" })
-//     are called directly from the login page — no auth helpers needed here.
-//   - This context observes the resulting session via onAuthStateChange and
-//     loads the profile once the session is live.
-//
-// Profile lookup strategy:
-//   After a successful OTP verification, Supabase gives us a User object whose
-//   u.phone is the E.164 number used to log in.  We look up the profiles row
-//   by phone_number (the column added in migration 023) rather than by id,
-//   because admin-provisioned accounts are created with the phone pre-set —
-//   the profiles.id will always match auth.users.id (FK constraint), but
-//   checking by phone_number is the right signal that this person was
-//   intentionally provisioned.
-//
-//   - Profile found  → proceed, load role from user_roles.
-//   - Profile NOT found → sign out immediately, set profileError so the login
-//     page can show "Account not found — contact admin".  This is the
-//     admin-provisioned-only guard: even if someone creates a Supabase auth
-//     user manually (e.g. via the seed script without inserting a profiles row),
-//     they cannot proceed past login.
-// =============================================================================
-
 import React, {
   createContext,
   useContext,
@@ -34,7 +8,7 @@ import React, {
   useCallback,
 } from "react";
 import { createClient } from "./supabase-browser";
-import type { User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 import type { AppRole } from "./types";
 
 export type { AppRole };
@@ -45,7 +19,7 @@ export type { AppRole };
 
 interface Profile {
   id: string;
-  role: AppRole | null; // null until an admin assigns a factory role
+  role: AppRole | null;
   full_name: string;
   phone_number: string | null;
 }
@@ -53,7 +27,6 @@ interface Profile {
 interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
-  /** Set when OTP succeeds but no profiles row matches the phone number. */
   profileError: "not_found" | null;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -78,23 +51,27 @@ const AuthContext = createContext<AuthContextValue>({
 // ---------------------------------------------------------------------------
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]               = useState<User | null>(null);
-  const [profile, setProfile]         = useState<Profile | null>(null);
+  const [user, setUser]                 = useState<User | null>(null);
+  const [profile, setProfile]           = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState<"not_found" | null>(null);
-  const [loading, setLoading]         = useState(true);
+  const [loading, setLoading]           = useState(true);
 
-  // ── Profile loader ────────────────────────────────────────────────────────
-  // Looks up profiles by phone_number (E.164) AND by id (FK) in parallel —
-  // uses whichever has data.  The phone_number lookup is the canonical path
-  // for OTP-login users; the id fallback handles edge cases like admin accounts
-  // that were created before migration 023.
-  const loadProfile = useCallback(async (u: User) => {
+  // ── Profile loader ─────────────────────────────────────────────────────────
+  // Receives the full session so we can call setSession() before querying —
+  // this guarantees auth.uid() is set on the client and RLS passes.
+  const loadProfile = useCallback(async (session: Session) => {
     const supabase = createClient();
+    const u = session.user;
 
-    // The phone on the auth.users row is the E.164 used during OTP sign-in
+    // Set the session explicitly so RLS (auth.uid()) works correctly even
+    // when this runs immediately inside onAuthStateChange before cookies persist.
+    await supabase.auth.setSession({
+      access_token:  session.access_token,
+      refresh_token: session.refresh_token,
+    });
+
     const userPhone = u.phone ?? null;
 
-    // Run profile lookup and role fetch concurrently
     const [{ data: profileData }, { data: roleData }] = await Promise.all([
       userPhone
         ? supabase
@@ -118,9 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ]);
 
     if (!profileData) {
-      // No profiles row → this phone number was never provisioned by an admin.
-      // Sign out so the session doesn't linger, then surface the error to the
-      // login page via profileError state.
       console.warn(
         "[auth-context] No profiles row found for user",
         u.id,
@@ -145,31 +119,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    if (user) await loadProfile(user);
-  }, [user, loadProfile]);
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) await loadProfile(session);
+  }, [loadProfile]);
 
   // ── Session bootstrap + live subscription ─────────────────────────────────
   useEffect(() => {
     const supabase = createClient();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) await loadProfile(u);
+      setUser(session?.user ?? null);
+      if (session) await loadProfile(session);
       setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        await loadProfile(u);
+      setUser(session?.user ?? null);
+      if (session) {
+        await loadProfile(session);
       } else {
         setProfile(null);
-        // Don't clear profileError here — login page needs to read it after
-        // the forced sign-out in loadProfile above.
       }
       setLoading(false);
     });
