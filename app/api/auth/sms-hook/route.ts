@@ -221,7 +221,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
-        Authorization:   `Basic ${interaktApiKey}`,
+        // Interakt Basic Auth: base64("<api_key>:") — key as username, empty password
+        Authorization:   `Basic ${Buffer.from(`${interaktApiKey}:`).toString("base64")}`,
       },
       body: JSON.stringify(interaktBody),
     });
