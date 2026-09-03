@@ -9,12 +9,13 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
+export const runtime = "nodejs";
+
 function getServiceClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log("[profile-api] service key present:", !!key, "starts with eyJ:", key?.startsWith("eyJ"));
+  return createClient(url!, key!, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
 export async function GET() {
