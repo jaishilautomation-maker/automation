@@ -179,7 +179,7 @@ export default function SelectModulePage() {
         <div className="module-header">
           <div className="title">JSCI · {FACTORY_NAME}</div>
           <div className="sub">
-            {profile?.full_name ?? profile?.email} ·{" "}
+            {profile?.full_name ?? profile?.phone_number} ·{" "}
             <span className="role-pill">{role ?? "—"}</span>
           </div>
         </div>
@@ -218,7 +218,7 @@ export default function SelectModulePage() {
         <div className="module-header">
           <div className="title">JSCI — Job Card &amp; Lab QC</div>
           <div className="sub">
-            {profile?.full_name ?? profile?.email} ·{" "}
+            {profile?.full_name ?? profile?.phone_number} ·{" "}
             <span className="role-pill">{role ?? "—"}</span>
           </div>
         </div>

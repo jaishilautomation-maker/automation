@@ -53,7 +53,7 @@ export default function AppHeader() {
       </div>
       <div className="user-badge">
         <div className="who">
-          <b>{profile?.full_name ?? profile?.email ?? "—"}</b>
+          <b>{profile?.full_name ?? "—"}</b>
           <span className="role-pill">{profile?.role ?? "—"}</span>
         </div>
         <button className="logout-btn" type="button" onClick={handleLogout}>

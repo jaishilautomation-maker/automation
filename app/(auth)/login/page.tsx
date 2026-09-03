@@ -1,89 +1,106 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+// =============================================================================
+// Login page — phone number + WhatsApp OTP (2-step)
+//
+// Step 1: Enter phone number → "Send OTP" → supabase.auth.signInWithOtp({ phone })
+//         Supabase fires the Send SMS Hook → Interakt delivers OTP via WhatsApp.
+//
+// Step 2: Enter 6-digit OTP → "Verify" → supabase.auth.verifyOtp({ phone, token, type: "sms" })
+//         On success: auth-context picks up the new session via onAuthStateChange,
+//         loads the profile, and the root page.tsx redirects to /select-module.
+//
+// Self-registration is intentionally removed. Accounts are admin-provisioned only.
+// If a valid OTP is entered but no profiles row matches the phone, auth-context
+// signs the session back out and shows "Account not found — contact admin".
+// =============================================================================
+
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/lib/auth-context";
 import { FACTORY_NAME } from "@/lib/factory-config";
-import type { AppRole } from "@/lib/types";
 
-const factoryName = FACTORY_NAME;
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
-// Simplified role labels shown during self-registration.
-// These map to the app_role enum values that require no factory_admin grant.
-type SignupRole = "operator" | "stores" | "production" | "lab";
+const OTP_RESEND_COOLDOWN_S = 30; // seconds before "Resend OTP" is enabled
 
-const ROLE_MAP: Record<SignupRole, AppRole> = {
-  operator:   "operator",
-  stores:     "stores",
-  production: "production_incharge",
-  lab:        "chemist",
-};
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const ROLES: { value: SignupRole; label: string }[] = [
-  { value: "operator",   label: "Operator / ऑपरेटर" },
-  { value: "stores",     label: "Stores / स्टोर्स" },
-  { value: "production", label: "Production" },
-  { value: "lab",        label: "Lab / QC" },
-];
-
-function isValidEmail(v: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+/** Normalise a raw phone input to E.164 (+91XXXXXXXXXX).
+ *  Accepts: 10-digit local, 91XXXXXXXXXX, +91XXXXXXXXXX */
+function toE164(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10)                              return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91"))   return `+${digits}`;
+  if (digits.length === 13 && raw.startsWith("+91"))     return raw.trim();
+  return null; // unrecognised format
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function LoginPage() {
-  const router = useRouter();
   const supabase = createClient();
+  const { profileError } = useAuth();
 
-  const [isSignup, setIsSignup]     = useState(false);
-  const [email, setEmail]           = useState("");
-  const [password, setPassword]     = useState("");
-  const [confirm, setConfirm]       = useState("");
-  const [fullName, setFullName]     = useState("");
-  const [role, setRole]             = useState<SignupRole | null>(null);
-  const [error, setError]           = useState("");
-  const [loading, setLoading]       = useState(false);
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [step, setStep]       = useState<"phone" | "otp">("phone");
+  const [phone, setPhone]     = useState("");     // raw user input
+  const [e164, setE164]       = useState("");     // normalised E.164 for Supabase
+  const [otp, setOtp]         = useState("");
+  const [error, setError]     = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const toggle = () => {
-    setIsSignup(v => !v);
+  // ── Resend cooldown ───────────────────────────────────────────────────────
+  const [cooldown, setCooldown]         = useState(0);
+  const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function startCooldown() {
+    setCooldown(OTP_RESEND_COOLDOWN_S);
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    cooldownTimer.current = setInterval(() => {
+      setCooldown(prev => {
+        if (prev <= 1) {
+          clearInterval(cooldownTimer.current!);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  useEffect(() => () => {
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+  }, []);
+
+  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
+  const handleSendOtp = async () => {
     setError("");
-  };
-
-  const handleSubmit = async () => {
-    setError("");
-    if (!isValidEmail(email)) { setError("Enter a valid email address."); return; }
-    if (password.length < 6)  { setError("Password must be at least 6 characters."); return; }
+    const normalised = toE164(phone.trim());
+    if (!normalised) {
+      setError("Enter a valid 10-digit mobile number.");
+      return;
+    }
 
     setLoading(true);
     try {
-      if (isSignup) {
-        if (password !== confirm) { setError("Passwords do not match."); return; }
-        if (!role)                { setError("Please select your role."); return; }
-        if (!fullName.trim())     { setError("Please enter your full name."); return; }
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        phone: normalised,
+      });
 
-        // Pass full_name and initial role in metadata.
-        // The DB trigger fn_handle_new_user() will create both the profiles
-        // row and the user_roles row as SECURITY DEFINER, bypassing RLS.
-        const { data, error: signUpErr } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name: fullName.trim(), role: ROLE_MAP[role!] } },
-        });
-        if (signUpErr) { setError(signUpErr.message); return; }
-
-        if (data.session && data.user) {
-          router.push("/");
-          router.refresh();
-        } else {
-          setError(
-            "Account created. If email confirmation is enabled, check your inbox before signing in."
-          );
-        }
-      } else {
-        const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInErr) { setError(signInErr.message); return; }
-        router.push("/");
-        router.refresh();
+      if (otpErr) {
+        setError(otpErr.message);
+        return;
       }
+
+      setE164(normalised);
+      setStep("otp");
+      startCooldown();
     } catch {
       setError("Could not reach the server. Check your internet connection.");
     } finally {
@@ -91,89 +108,184 @@ export default function LoginPage() {
     }
   };
 
+  // ── Step 2: Verify OTP ────────────────────────────────────────────────────
+  const handleVerifyOtp = async () => {
+    setError("");
+    if (otp.trim().length !== 6 || !/^\d{6}$/.test(otp.trim())) {
+      setError("Enter the 6-digit code from WhatsApp.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: verifyErr } = await supabase.auth.verifyOtp({
+        phone: e164,
+        token: otp.trim(),
+        type:  "sms",
+      });
+
+      if (verifyErr) {
+        // Common case: wrong/expired code
+        setError(verifyErr.message);
+        return;
+      }
+
+      // Session is now active. auth-context's onAuthStateChange will fire,
+      // load the profile, and the root redirect (app/page.tsx) will push
+      // the user to /select-module. No manual router.push needed here.
+    } catch {
+      setError("Could not reach the server. Check your internet connection.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Resend ────────────────────────────────────────────────────────────────
+  const handleResend = async () => {
+    if (cooldown > 0) return;
+    setOtp("");
+    setError("");
+    // Re-use handleSendOtp but with the already-normalised number
+    setLoading(true);
+    try {
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        phone: e164,
+      });
+      if (otpErr) { setError(otpErr.message); return; }
+      startCooldown();
+    } catch {
+      setError("Could not reach the server. Check your internet connection.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <h2>{isSignup ? "Create account / खाता बनाएं" : "Sign in / लॉगिन"}</h2>
-        <div className="auth-sub">JSCI · {factoryName}</div>
+
+        <h2>Sign in / लॉगिन</h2>
+        <div className="auth-sub">JSCI · {FACTORY_NAME}</div>
 
         {error && <div className="auth-error">{error}</div>}
 
-        <label>Email / ईमेल</label>
-        <input
-          type="email"
-          placeholder="name@company.com"
-          autoComplete="username"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && handleSubmit()}
-        />
+        {/* Account-not-found guard: shown after OTP succeeds but no profile exists */}
+        {profileError === "not_found" && (
+          <div className="auth-error" style={{ marginBottom: 12 }}>
+            Account not found — contact your admin to get access.
+          </div>
+        )}
 
-        <label>Password / पासवर्ड</label>
-        <input
-          type="password"
-          placeholder="Password"
-          autoComplete={isSignup ? "new-password" : "current-password"}
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && handleSubmit()}
-        />
-
-        {isSignup && (
+        {/* ── Step 1: phone entry ── */}
+        {step === "phone" && (
           <>
-            <label>Confirm password / पासवर्ड की पुष्टि करें</label>
-            <input
-              type="password"
-              placeholder="Confirm password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-            />
+            <label>Mobile number / मोबाइल नंबर</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <span
+                style={{
+                  padding: "10px 12px",
+                  background: "var(--surface-raised, #f4f4f5)",
+                  border: "1px solid var(--border, #e4e4e7)",
+                  borderRadius: 6,
+                  fontSize: 14,
+                  color: "var(--ink-secondary, #71717a)",
+                  whiteSpace: "nowrap",
+                  lineHeight: "1.4",
+                }}
+              >
+                +91
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                placeholder="9876543210"
+                autoComplete="tel"
+                maxLength={13}
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSendOtp()}
+                style={{ flex: 1 }}
+              />
+            </div>
 
-            <label>Full name / पूरा नाम</label>
-            <input
-              type="text"
-              placeholder="Your name"
-              value={fullName}
-              onChange={e => setFullName(e.target.value)}
-            />
+            <button
+              className="btn btn-primary"
+              type="button"
+              style={{ marginTop: 16 }}
+              disabled={loading}
+              onClick={handleSendOtp}
+            >
+              {loading ? "Sending…" : "Send OTP via WhatsApp"}
+            </button>
 
-            <label>Your role / आपकी भूमिका</label>
-            <div className="role-chip-group">
-              {ROLES.map(r => (
-                <div
-                  key={r.value}
-                  className={`role-chip${role === r.value ? " selected" : ""}`}
-                  onClick={() => setRole(r.value)}
-                >
-                  {r.label}
-                </div>
-              ))}
+            <div className="small-note" style={{ marginTop: 14 }}>
+              You will receive a 6-digit code on WhatsApp.
+              Accounts are set up by your admin — contact admin if you can&apos;t log in.
             </div>
           </>
         )}
 
-        <button
-          className="btn btn-primary"
-          type="button"
-          style={{ marginTop: 16 }}
-          disabled={loading}
-          onClick={handleSubmit}
-        >
-          {loading
-            ? isSignup ? "Creating…" : "Signing in…"
-            : isSignup ? "Create account / खाता बनाएं" : "Sign in / लॉगिन करें"}
-        </button>
+        {/* ── Step 2: OTP entry ── */}
+        {step === "otp" && (
+          <>
+            <p style={{ fontSize: 14, margin: "0 0 12px", color: "var(--ink-secondary, #71717a)" }}>
+              A 6-digit code was sent to <strong>{e164}</strong> via WhatsApp.
+            </p>
 
-        <div className="auth-toggle">
-          {isSignup
-            ? <>Already have an account? / पहले से खाता है? <a onClick={toggle}>Sign in / लॉगिन</a></>
-            : <>New here? / नए हैं? <a onClick={toggle}>Create an account / खाता बनाएं</a></>}
-        </div>
+            <label>OTP code / कोड</label>
+            <input
+              type="tel"
+              inputMode="numeric"
+              placeholder="123456"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={e => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              onKeyDown={e => e.key === "Enter" && handleVerifyOtp()}
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
 
-        <div className="small-note" style={{ marginTop: 14 }}>
-          Your role decides what part of the job card you fill and in which language the form shows.
-        </div>
+            <button
+              className="btn btn-primary"
+              type="button"
+              style={{ marginTop: 16 }}
+              disabled={loading || otp.length !== 6}
+              onClick={handleVerifyOtp}
+            >
+              {loading ? "Verifying…" : "Verify / जाँचें"}
+            </button>
+
+            <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                disabled={cooldown > 0 || loading}
+                onClick={handleResend}
+                style={{ fontSize: 13 }}
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend OTP"}
+              </button>
+
+              <button
+                className="btn btn-ghost"
+                type="button"
+                disabled={loading}
+                onClick={() => { setStep("phone"); setOtp(""); setError(""); }}
+                style={{ fontSize: 13 }}
+              >
+                ← Change number
+              </button>
+            </div>
+
+            <div className="small-note" style={{ marginTop: 12 }}>
+              Didn&apos;t receive the code? Check your WhatsApp (not SMS).
+              Wait {OTP_RESEND_COOLDOWN_S}s before requesting again.
+            </div>
+          </>
+        )}
+
       </div>
     </div>
   );

@@ -43,7 +43,7 @@ function todayISO() {
 }
 
 export default function PackingMaintenancePage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -375,7 +375,7 @@ export default function PackingMaintenancePage() {
               <input
                 type="text"
                 disabled
-                value={user?.email ?? "Current user"}
+                value={profile?.full_name ?? user?.phone ?? "Current user"}
                 style={{ background: "var(--surface)" }}
               />
             </div>

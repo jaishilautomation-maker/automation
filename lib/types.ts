@@ -72,6 +72,7 @@ export interface Profile {
   id: string;            // matches auth.users.id
   full_name: string;
   phone: string | null;
+  phone_number: string | null; // E.164, unique login identifier (migration 023)
   employee_id: string | null;
   created_at: string;
   updated_at: string;
