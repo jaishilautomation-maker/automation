@@ -9,14 +9,10 @@ import React, {
   useRef,
 } from "react";
 import { createClient } from "./supabase-browser";
-import type { User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 import type { AppRole } from "./types";
 
 export type { AppRole };
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 interface Profile {
   id: string;
@@ -34,10 +30,6 @@ interface AuthContextValue {
   refreshProfile: () => Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   profile: null,
@@ -47,32 +39,46 @@ const AuthContext = createContext<AuthContextValue>({
   refreshProfile: async () => {},
 });
 
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]                 = useState<User | null>(null);
   const [profile, setProfile]           = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState<"not_found" | null>(null);
   const [loading, setLoading]           = useState(true);
+  const loadingProfile                  = useRef(false);
 
-  // Prevent re-entrant loadProfile calls
-  const loadingProfile = useRef(false);
-
-  // ── Profile loader ─────────────────────────────────────────────────────────
-  // Fetches via /api/auth/profile (service-role, bypasses RLS timing issues).
-  const loadProfile = useCallback(async (u: User) => {
+  const loadProfile = useCallback(async (session: Session) => {
     if (loadingProfile.current) return;
     loadingProfile.current = true;
 
     try {
-      const resp = await fetch("/api/auth/profile", { credentials: "include" });
+      const u = session.user;
 
-      if (resp.status === 404) {
-        // No profiles row — not an admin-provisioned account
-        console.warn("[auth-context] No profile found for user", u.id, "— signing out.");
-        const supabase = createClient();
+      // Create a fresh client and inject the access token directly.
+      // This ensures auth.uid() resolves correctly in RLS regardless of
+      // cookie timing — the JWT is passed explicitly in the Authorization header.
+      const supabase = createClient();
+      await supabase.auth.setSession({
+        access_token:  session.access_token,
+        refresh_token: session.refresh_token,
+      });
+
+      const [{ data: profileData }, { data: roleData }] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, phone_number")
+          .eq("id", u.id)
+          .maybeSingle(),
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", u.id)
+          .order("granted_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (!profileData) {
+        console.warn("[auth-context] No profile for", u.id, "— signing out");
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
@@ -80,15 +86,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (!resp.ok) {
-        // 401 or server error — leave profile null, don't sign out
-        console.error("[auth-context] /api/auth/profile returned", resp.status);
-        return;
-      }
-
-      const data = await resp.json() as Profile;
       setProfileError(null);
-      setProfile(data);
+      setProfile({
+        id:           profileData.id,
+        full_name:    profileData.full_name,
+        phone_number: profileData.phone_number ?? u.phone ?? null,
+        role:         (roleData?.role as AppRole) ?? null,
+      });
     } finally {
       loadingProfile.current = false;
     }
@@ -96,28 +100,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     const supabase = createClient();
-    const { data: { user: u } } = await supabase.auth.getUser();
-    if (u) await loadProfile(u);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) await loadProfile(session);
   }, [loadProfile]);
 
-  // ── Session bootstrap + live subscription ─────────────────────────────────
   useEffect(() => {
     const supabase = createClient();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) await loadProfile(session.user);
+      if (session) await loadProfile(session);
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await loadProfile(session.user);
-        } else {
+      async (event, session) => {
+        // SIGNED_IN fires after verifyOtp — this is when we load the profile.
+        // TOKEN_REFRESHED also carries a valid session.
+        // Ignore other events to prevent re-entrant calls.
+        if (event === "SIGNED_OUT") {
+          setUser(null);
           setProfile(null);
+          setLoading(false);
+          return;
         }
+        if (!session) {
+          setLoading(false);
+          return;
+        }
+        setUser(session.user);
+        await loadProfile(session);
         setLoading(false);
       }
     );
@@ -125,7 +137,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  // ── Sign-out ───────────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -142,10 +153,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     </AuthContext.Provider>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
 
 export function useAuth() {
   return useContext(AuthContext);
