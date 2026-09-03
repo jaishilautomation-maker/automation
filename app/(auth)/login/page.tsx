@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { FACTORY_NAME } from "@/lib/factory-config";
@@ -52,6 +53,7 @@ function toE164(raw: string): string | null {
 // ---------------------------------------------------------------------------
 
 export default function LoginPage() {
+  const router = useRouter();
   const { profileError } = useAuth();
 
   // ── Form state ────────────────────────────────────────────────────────────
@@ -142,9 +144,9 @@ export default function LoginPage() {
         return;
       }
 
-      // Session is now active. auth-context's onAuthStateChange will fire,
-      // load the profile, and the root redirect (app/page.tsx) will push
-      // the user to /select-module. No manual router.push needed here.
+      // Session is live — navigate to root which server-redirects to /select-module
+      router.push("/");
+      router.refresh();
     } catch {
       setError("Could not reach the server. Check your internet connection.");
     } finally {
