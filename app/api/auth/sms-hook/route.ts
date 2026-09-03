@@ -234,14 +234,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const respText = await resp.text().catch(() => "");
     providerMsg    = respText.slice(0, 512);
 
-    if (resp.ok) {
+    // Interakt returns HTTP 200 for both success AND failure.
+    // Must check the JSON body's `result` field for true success.
+    let resultJson: { result?: boolean } = {};
+    try { resultJson = JSON.parse(respText); } catch { /* non-JSON body */ }
+
+    if (resp.ok && resultJson.result === true) {
       success = true;
       console.log(
         `[sms-hook] OTP sent via Interakt to ${phoneMasked} (${providerStatus})`,
       );
     } else {
       console.error(
-        `[sms-hook] Interakt returned ${providerStatus} for ${phoneMasked}:`,
+        `[sms-hook] Interakt returned ${providerStatus} result=${resultJson.result} for ${phoneMasked}:`,
         providerMsg,
       );
     }

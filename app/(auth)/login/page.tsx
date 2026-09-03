@@ -116,6 +116,12 @@ export default function LoginPage() {
       return;
     }
 
+    if (!e164) {
+      // Should never happen, but guard against state loss on re-render
+      setError("Session expired — please go back and re-enter your number.");
+      return;
+    }
+
     setLoading(true);
     try {
       const { error: verifyErr } = await supabase.auth.verifyOtp({
