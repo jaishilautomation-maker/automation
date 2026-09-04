@@ -22,9 +22,11 @@ import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 
 export default function BatchAnalysisPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -250,6 +252,21 @@ export default function BatchAnalysisPage() {
           testResults:   testResults,
           extra:         { appearance: appearanceVal, remarks: remarks.trim() || null },
         });
+
+        // Fire-and-forget email (UPDATE path)
+        const baUpdateISO = new Date().toISOString();
+        const { subject: baUpdSubj, html: baUpdHtml } = buildBatchAnalysisEmail({
+          batchNumber:     batchNumber.trim(),
+          analysisDate,
+          appearance:      appearanceVal,
+          testResults:     testResults as Record<string, unknown>,
+          remarks:         remarks.trim() || null,
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     baUpdateISO,
+          isUpdate:        true,
+        });
+        void notifyEvent({ eventType: "lab_qc_batch_analysis", subject: baUpdSubj, html: baUpdHtml, factoryId: activeFactory.id, referenceId: existingAnalysis.id });
+
         showToast("Batch analysis updated ✓");
       } else {
         const { data: newRow, error } = await supabase
@@ -279,6 +296,21 @@ export default function BatchAnalysisPage() {
           testResults:   testResults,
           extra:         { appearance: appearanceVal, remarks: remarks.trim() || null },
         });
+
+        // Fire-and-forget email (INSERT path)
+        const baInsertISO = new Date().toISOString();
+        const { subject: baInsSubj, html: baInsHtml } = buildBatchAnalysisEmail({
+          batchNumber:     batchNumber.trim(),
+          analysisDate,
+          appearance:      appearanceVal,
+          testResults:     testResults as Record<string, unknown>,
+          remarks:         remarks.trim() || null,
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     baInsertISO,
+          isUpdate:        false,
+        });
+        void notifyEvent({ eventType: "lab_qc_batch_analysis", subject: baInsSubj, html: baInsHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+
         showToast("Batch analysis saved ✓");
       }
 

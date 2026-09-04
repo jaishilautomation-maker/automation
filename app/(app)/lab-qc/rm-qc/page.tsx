@@ -23,6 +23,8 @@ import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material, QcTestDefinition } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,7 +64,7 @@ const A20_RM_CODES = [
 ];
 
 export default function RmQcPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -366,6 +368,21 @@ export default function RmQcPage() {
         extra:         { material_name: selectedMaterial?.name ?? null, appearance: values["appearance"] ?? null, remarks: remarks.trim() || null },
       });
 
+      // Fire-and-forget email
+      const nowISO = new Date().toISOString();
+      const selectedBatch = batches.find(b => b.id === batchId);
+      const { subject: rmqcSubj, html: rmqcHtml } = buildRmQcEmail({
+        materialName:    selectedMaterial?.name ?? "Raw Material",
+        batchNumber:     selectedBatch?.batch_number,
+        testDate:        testDate,
+        chemistName:     chemistName.trim() || null,
+        testResults,
+        remarks:         remarks.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO,
+      });
+      void notifyEvent({ eventType: "lab_qc_rm_qc", subject: rmqcSubj, html: rmqcHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+
       showToast("QC results saved ✓");
       setBatchId("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
@@ -598,6 +615,20 @@ export default function RmQcPage() {
                   testResults:   testResults,
                   extra:         { material_name: "Oil", appearance: oilAppearance || null },
                 });
+
+                // Fire-and-forget email
+                const oilNowISO = new Date().toISOString();
+                const { subject: oilQcSubj, html: oilQcHtml } = buildRmQcEmail({
+                  materialName:    "Oil",
+                  batchNumber:     oilBatchNumber.trim(),
+                  testDate:        oilNowISO.slice(0, 10),
+                  testResults,
+                  remarks:         null,
+                  submittedByName: profile?.full_name ?? "—",
+                  submittedAt:     oilNowISO,
+                });
+                void notifyEvent({ eventType: "lab_qc_rm_qc", subject: oilQcSubj, html: oilQcHtml, factoryId: activeFactory.id, referenceId: oilRow.id });
+
                 showToast("Oil QC saved ✓");
                 setOilBatchNumber(""); setOilAppearance("");
                 setOilMass(""); setOilVolume(""); setOilViscosity("");

@@ -23,6 +23,8 @@ import {
   type PulveriserHourlyReading,
   type PulveriserJobCardReview,
 } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildLabEmail } from "@/lib/notifications/pulveriser-emails";
 
 /** Read-only labelled field row. */
 function F({ label, value }: { label: string; value: React.ReactNode }) {
@@ -34,7 +36,7 @@ function F({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function PulveriserLabPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const supabase = createClient();
 
@@ -98,6 +100,25 @@ export default function PulveriserLabPage() {
         showToast("Review was blocked — check your factory access or the card status.", true);
         return;
       }
+
+      // Fire-and-forget email notification
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildLabEmail({
+        jobNumber:      active.job_number,
+        materialCode:   active.material_code,
+        result,
+        remark:         remark.trim() || null,
+        reviewedByName: profile?.full_name ?? "—",
+        reviewedAt:     nowISO,
+      });
+      void notifyEvent({
+        eventType:   "pulveriser_lab",
+        subject,
+        html,
+        factoryId:   active.factory_id,
+        referenceId: active.id,
+      });
+
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."
         : "Marked NOT OK — sent back to Stores for a full rework cycle.");

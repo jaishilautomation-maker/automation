@@ -18,6 +18,8 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import type { Product } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildPostProductionEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface BatchOption {
   id: string;
@@ -36,7 +38,7 @@ interface PqcOption {
 const TRACKING_TYPES = ["Stability", "Retest", "Other"] as const;
 
 export default function PostProductionPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -127,6 +129,22 @@ export default function PostProductionPage() {
         });
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Fire-and-forget email (reuses testResults and selections already above)
+      const ppNowISO = new Date().toISOString();
+      const selectedProduct = products.find(p => p.id === productId);
+      const selectedBatch   = batches.find(b => b.id === batchId);
+      const { subject: ppSubj, html: ppHtml } = buildPostProductionEmail({
+        productName:     selectedProduct?.name,
+        batchNumber:     selectedBatch?.batch_number,
+        testDate,
+        chemistName:     chemistName.trim() || null,
+        testResults,
+        remarks:         remarks.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     ppNowISO,
+      });
+      void notifyEvent({ eventType: "lab_qc_post_production", subject: ppSubj, html: ppHtml, factoryId: activeFactory.id });
 
       showToast("Post-production test saved ✓");
       setBatchId(""); setProductId(""); setLinkedPqcId("");

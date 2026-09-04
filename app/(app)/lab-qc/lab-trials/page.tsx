@@ -16,6 +16,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import type { Product, LabTrialStatus } from "@/lib/types";
 import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildLabTrialEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface BatchOption {
   id: string;
@@ -26,7 +28,7 @@ interface BatchOption {
 const TRIAL_STATUSES: LabTrialStatus[] = ["ongoing", "completed", "abandoned"];
 
 export default function LabTrialsPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -128,6 +130,24 @@ export default function LabTrialsPage() {
           .map(r => r.current!.flush(trialId));
         await Promise.all(flushes);
       }
+
+      // Fire-and-forget email (reuses testResults already built above)
+      const ltNowISO = new Date().toISOString();
+      const selectedProduct = products.find(p => p.id === productId);
+      const { subject: ltSubj, html: ltHtml } = buildLabTrialEmail({
+        trialCode,
+        productName:     selectedProduct?.name,
+        trialDate,
+        objective:       objective.trim() || null,
+        appearance:      appearance || null,
+        conclusion:      conclusion.trim() || null,
+        status,
+        testResults,
+        remarks:         remarks.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     ltNowISO,
+      });
+      void notifyEvent({ eventType: "lab_qc_lab_trial", subject: ltSubj, html: ltHtml, factoryId: activeFactory.id, referenceId: trialId });
 
       showToast("Lab trial saved ✓");
       setTrialCode(""); setObjective(""); setAppearance(""); setDensity("");

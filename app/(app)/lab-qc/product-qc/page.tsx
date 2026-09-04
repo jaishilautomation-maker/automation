@@ -25,6 +25,8 @@ import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildProductQcEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface BatchOption {
   id: string;
@@ -37,7 +39,7 @@ interface BatchOption {
 const PHASE_AWARE_CODES = ["SULPHUR_SC", "ZINC_SC"];
 
 export default function ProductQcPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -370,6 +372,24 @@ export default function ProductQcPage() {
             extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
           });
         }
+
+        // Fire-and-forget email (UPDATE path)
+        const pqcUpdISO = new Date().toISOString();
+        const { subject: pqcUpdSubj, html: pqcUpdHtml } = buildProductQcEmail({
+          productName:     selectedProduct?.name ?? "Product",
+          batchNumber:     batches.find(b => b.id === existingRecord.batch_id)?.batch_number,
+          phase,
+          testDate,
+          appearance:      values["colour_physical_state"] ?? null,
+          appearanceOk,
+          testResults:     testResults as Record<string, unknown>,
+          remarks:         remarks.trim() || null,
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     pqcUpdISO,
+          isUpdate:        true,
+        });
+        void notifyEvent({ eventType: "lab_qc_product_qc", subject: pqcUpdSubj, html: pqcUpdHtml, factoryId: activeFactory.id, referenceId: existingRecord.id });
+
         showToast("Product QC updated ✓");
       } else {
         const { data: newRow, error } = await supabase
@@ -406,6 +426,25 @@ export default function ProductQcPage() {
             extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
           });
         }
+
+        // Fire-and-forget email (INSERT path)
+        const pqcInsISO = new Date().toISOString();
+        const batchNum = isA20 ? directBatchNumber.trim() : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
+        const { subject: pqcInsSubj, html: pqcInsHtml } = buildProductQcEmail({
+          productName:     selectedProduct?.name ?? "Product",
+          batchNumber:     batchNum,
+          phase,
+          testDate,
+          appearance:      values["colour_physical_state"] ?? null,
+          appearanceOk,
+          testResults:     testResults as Record<string, unknown>,
+          remarks:         remarks.trim() || null,
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     pqcInsISO,
+          isUpdate:        false,
+        });
+        void notifyEvent({ eventType: "lab_qc_product_qc", subject: pqcInsSubj, html: pqcInsHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+
         showToast("Product QC saved ✓");
         setBatchId("");
         setDirectBatchNumber("");

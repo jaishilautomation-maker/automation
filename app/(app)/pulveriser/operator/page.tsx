@@ -27,6 +27,8 @@ import {
   type PulveriserJobCard,
   type VfdParameter,
 } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildOperatorEmail } from "@/lib/notifications/pulveriser-emails";
 
 interface HourlyRow {
   id: string;            // local row id (uuid from DB after save, or temp key)
@@ -83,7 +85,7 @@ function blankRow(): HourlyRow {
 }
 
 export default function PulveriserOperatorPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const supabase = createClient();
 
@@ -288,6 +290,47 @@ export default function PulveriserOperatorPage() {
         showToast("सहेजना रोका गया — अपनी फ़ैक्टरी पहुँच या कार्ड की स्थिति जाँचें।", true);
         return;
       }
+
+      // Fire-and-forget email only on full submit (not on "save progress")
+      if (submit) {
+        const nowISO = new Date().toISOString();
+        // Re-read the updated card fields for oil consumption values
+        const { data: updatedCard } = await supabase
+          .from("pulveriser_job_cards")
+          .select("actual_production_mt,expected_oil_kg,actual_oil_consumption_kg,oil_variance_kg,oil_extra_leftover_balance_kg")
+          .eq("id", active.id)
+          .single();
+        const { subject, html } = buildOperatorEmail({
+          jobNumber:                 active.job_number,
+          materialCode:              active.material_code,
+          actualProductionMt:        updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
+          expectedOilKg:             updatedCard?.expected_oil_kg ?? null,
+          actualOilConsumptionKg:    updatedCard?.actual_oil_consumption_kg ?? null,
+          oilVarianceKg:             updatedCard?.oil_variance_kg ?? null,
+          oilExtraLeftoverBalanceKg: updatedCard?.oil_extra_leftover_balance_kg ?? null,
+          checkpointMachineCleaning: chkClean,
+          checkpointRollerCheck:     chkRoller,
+          checkpointMeshClothCheck:  chkMesh,
+          hourlyReadings: rows.map(r => ({
+            machine:     r.machine     || null,
+            start_time:  r.start_time  || null,
+            stop_time:   r.stop_time   || null,
+            total_hours: (() => { const d = (Number(r.stop_time) - Number(r.start_time)); return d > 0 ? d / 100 : null; })(),
+            batch_no:    r.batch_no    || null,
+            bags:        r.bags.trim() === "" ? null : Number(r.bags),
+          })),
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     nowISO,
+        });
+        void notifyEvent({
+          eventType:   "pulveriser_operator",
+          subject,
+          html,
+          factoryId:   active.factory_id,
+          referenceId: active.id,
+        });
+      }
+
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");
       goBack();
       loadPending();

@@ -21,6 +21,8 @@ import { evalFormula } from "@/lib/formula";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildHourlyReadingEmail } from "@/lib/notifications/lab-qc-emails";
 
 // ---------------------------------------------------------------------------
 // Recent reading row (for the "today's readings" summary below the form)
@@ -32,7 +34,7 @@ interface RecentReading {
 }
 
 export default function HourlyReadingPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -213,6 +215,18 @@ export default function HourlyReadingPage() {
 
       // Flush pending photo uploads
       await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+
+      // Fire-and-forget email
+      const nowISO = new Date().toISOString();
+      const { subject: hrSubj, html: hrHtml } = buildHourlyReadingEmail({
+        batchNumber:     batchNumber.trim(),
+        readingTime:     new Date(readingTime).toISOString(),
+        testResults:     testResults as Record<string, unknown>,
+        remarks:         remarks.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO,
+      });
+      void notifyEvent({ eventType: "lab_qc_hourly_reading", subject: hrSubj, html: hrHtml, factoryId: activeFactory.id, referenceId: newRow.id });
 
       showToast("Reading saved ✓");
       // Reset values only; keep batch number for next reading

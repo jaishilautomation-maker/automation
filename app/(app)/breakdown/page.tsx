@@ -23,6 +23,8 @@ import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import { BREAKDOWN_MACHINES } from "@/lib/types";
 import type { BreakdownMachine, BreakdownEntry } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildBreakdownEmail } from "@/lib/notifications/pulveriser-emails";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +59,7 @@ function durationLabel(startIso: string, finishIso: string | null): string {
 // Component
 // ---------------------------------------------------------------------------
 export default function BreakdownPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -138,6 +140,27 @@ export default function BreakdownPage() {
         });
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Fire-and-forget email notification
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildBreakdownEmail({
+        machineName:        selectedMachine,
+        startAt:            new Date(startAt).toISOString(),
+        finishAt:           finishAt ? new Date(finishAt).toISOString() : null,
+        natureOfBreakdown:  natureOfBreakdown.trim(),
+        repairCarriedOut:   repairCarriedOut.trim()  || null,
+        partsReplaced:      partsReplaced.trim()     || null,
+        correctiveAction:   correctiveAction.trim()  || null,
+        remarks:            remarks.trim()            || null,
+        submittedByName:    profile?.full_name ?? "—",
+        submittedAt:        nowISO,
+      });
+      void notifyEvent({
+        eventType:  "breakdown_register",
+        subject,
+        html,
+        factoryId:  activeFactory?.id,
+      });
 
       showToast("Breakdown entry saved ✓");
       setShowForm(false);

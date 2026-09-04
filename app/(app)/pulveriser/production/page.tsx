@@ -25,6 +25,8 @@ import {
   type PulveriserMachine,
   type VfdParameter,
 } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
 const MAX_ENTRIES = 3;
 
@@ -56,7 +58,7 @@ function blankEntry(): Entry {
 }
 
 export default function PulveriserProductionPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { activeFactory } = useModule();
   const { showToast } = useToast();
   const supabase = createClient();
@@ -174,6 +176,37 @@ export default function PulveriserProductionPage() {
         showToast("Save was blocked — your account may not have access to this factory.", true);
         return;
       }
+
+      // Fire-and-forget email for each created job card entry (reuses nowISO from above)
+      for (let i = 0; i < entries.length; i++) {
+        const e  = entries[i];
+        const { subject, html } = buildProductionEmail({
+          jobNumber:           jobNumber.trim() || null,
+          machineNumber:       machine,
+          materialCode:        e.batchNumber.trim(),
+          partyCode:           e.partyCode,
+          plannedProductionMt: e.plannedMt.trim() === "" ? null : Number(e.plannedMt),
+          oilRequiredKg:       oilRequiredFor(e),
+          sulphurSupplier:     e.sulSupplier.trim()  || null,
+          sulphurLotNumber:    e.sulLot.trim()       || null,
+          sulphurEmptyDate:    e.sulEmptyDate        || null,
+          oilSupplier:         e.oilSupplier.trim()  || null,
+          oilBatchNumber:      e.oilBatch.trim()     || null,
+          oilQuantity:         e.oilQty.trim() === "" ? null : Number(e.oilQty),
+          submittedByName:     profile?.full_name ?? "—",
+          submittedAt:         nowISO,
+          jobDate:             jobDate || null,
+          shift:               shift   || null,
+        });
+        void notifyEvent({
+          eventType:   "pulveriser_production",
+          subject,
+          html,
+          factoryId:   activeFactory.id,
+          referenceId: data[i]?.id,
+        });
+      }
+
       showToast(
         `${data.length} ${data.length === 1 ? "entry" : "entries"} created ✓ — ` +
         "Stores will issue oil, then the operator fills their part.",

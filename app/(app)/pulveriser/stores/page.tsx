@@ -19,9 +19,11 @@ import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildStoresEmail } from "@/lib/notifications/pulveriser-emails";
 
 export default function PulveriserStoresPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const supabase = createClient();
 
@@ -76,6 +78,25 @@ export default function PulveriserStoresPage() {
         showToast("Save blocked — factory access ya card status jaanchein.", true);
         return;
       }
+
+      // Fire-and-forget email notification
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildStoresEmail({
+        jobNumber:       active.job_number,
+        materialCode:    active.material_code,
+        oilRequiredKg:   active.oil_required_kg,
+        oilIssuedKg:     Number(oilIssued),
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO,
+      });
+      void notifyEvent({
+        eventType:   "pulveriser_stores",
+        subject,
+        html,
+        factoryId:   active.factory_id,
+        referenceId: active.id,
+      });
+
       showToast("Oil issued ✓ — operator ab batch chala sakta hai.");
       goBack();
       loadPending();

@@ -22,6 +22,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import type { PmScheduleItem, PmCompletion, PmItemWithStatus } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildPmEmail } from "@/lib/notifications/pulveriser-emails";
 
 // ---------------------------------------------------------------------------
 // Due-status computation
@@ -80,7 +82,7 @@ function freqLabel(weeks: number): string {
 // ---------------------------------------------------------------------------
 
 export default function MaintenancePage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -150,16 +152,39 @@ export default function MaintenancePage() {
     if (!user) { showToast("Session error — refresh.", true); return; }
     setMarkingId(itemId);
     try {
+      const completedAt = new Date().toISOString();
       const { error } = await supabase
         .from("pm_completions")
         .insert({
           schedule_item_id: itemId,
-          completed_at:     new Date().toISOString(),
+          completed_at:     completedAt,
           completed_by:     user.id,
           notes:            null,
         });
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Fire-and-forget email notification — look up the item from current state
+      const itemWithStatus = itemsWithStatus.find(i => i.item.id === itemId);
+      if (itemWithStatus) {
+        const { subject, html } = buildPmEmail({
+          machine:         itemWithStatus.item.machine,
+          component:       itemWithStatus.item.component,
+          task:            itemWithStatus.item.task,
+          frequencyWeeks:  itemWithStatus.item.frequency_weeks,
+          completedAt,
+          completedByName: profile?.full_name ?? "—",
+          notes:           null,
+        });
+        void notifyEvent({
+          eventType:  "pm_completion",
+          subject,
+          html,
+          factoryId:  activeFactory?.id,
+          referenceId: itemId,
+        });
+      }
+
       showToast("Marked done ✓");
       load(); // refresh
     } catch {

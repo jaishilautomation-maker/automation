@@ -17,6 +17,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material } from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildRmReceiptEmail } from "@/lib/notifications/lab-qc-emails";
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -41,7 +43,7 @@ const A20_RM_CODES = [
 ];
 
 export default function RmReceiptPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showToast } = useToast();
   const { activeFactory } = useModule();
   const supabase = createClient();
@@ -146,6 +148,23 @@ export default function RmReceiptPage() {
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
 
+      // Fire-and-forget email
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildRmReceiptEmail({
+        materialType:    "Crude Sulphur",
+        batchNumber:     invoiceNumber.trim(),
+        supplierName:    "Crude Sulphur",
+        quantity:        parseFloat(quantityMt),
+        unit:            "MT",
+        receivedDate:    receivedDate,
+        truckNumber:     csTruckNumber.trim() || null,
+        appearance:      appearance.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO,
+        factoryName:     activeFactory.name,
+      });
+      void notifyEvent({ eventType: "lab_qc_rm_receipt", subject, html, factoryId: activeFactory.id, referenceId: batch.id });
+
       showToast("Crude Sulphur receipt saved ✓");
       reset();
     } catch { showToast("Network error.", true); }
@@ -199,6 +218,23 @@ export default function RmReceiptPage() {
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
 
+      // Fire-and-forget email
+      const nowISO2 = new Date().toISOString();
+      const { subject: oilSubj, html: oilHtml } = buildRmReceiptEmail({
+        materialType:    "Oil",
+        batchNumber:     oilBatchNumber.trim(),
+        supplierName:    supplierName.trim(),
+        quantity:        parseFloat(oilQuantity),
+        unit:            "MT",
+        receivedDate:    oilDatetime.slice(0, 10),
+        truckNumber:     truckNumber.trim() || null,
+        appearance:      null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO2,
+        factoryName:     activeFactory.name,
+      });
+      void notifyEvent({ eventType: "lab_qc_rm_receipt", subject: oilSubj, html: oilHtml, factoryId: activeFactory.id, referenceId: batch.id });
+
       showToast("Oil receipt saved ✓");
       reset();
     } catch { showToast("Network error.", true); }
@@ -251,6 +287,22 @@ export default function RmReceiptPage() {
       });
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
+
+      // Fire-and-forget email
+      const nowISO3 = new Date().toISOString();
+      const { subject: a20Subj, html: a20Html } = buildRmReceiptEmail({
+        materialType:    selectedMaterial?.name ?? "Raw Material",
+        batchNumber:     invoiceNumber.trim(),
+        supplierName:    selectedMaterial?.name ?? "—",
+        quantity:        parseFloat(quantityMt),
+        unit:            "MT",
+        receivedDate:    receivedDate,
+        appearance:      appearance.trim() || null,
+        submittedByName: profile?.full_name ?? "—",
+        submittedAt:     nowISO3,
+        factoryName:     activeFactory.name,
+      });
+      void notifyEvent({ eventType: "lab_qc_rm_receipt", subject: a20Subj, html: a20Html, factoryId: activeFactory.id, referenceId: batch.id });
 
       showToast("Receipt saved ✓");
       reset();
