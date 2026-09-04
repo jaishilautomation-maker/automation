@@ -41,10 +41,12 @@ import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
 // Fixed recipient for all A-20/1 workflow notifications.
-export const AUTOMATION_EMAIL = "automation@jaishil.com";
+export const AUTOMATION_EMAIL = "automation@jaishilshulphur.com";
 
 // The Workspace mailbox the service account impersonates as the sender.
-const SENDER_EMAIL = "automation@jaishil.com";
+// This must be a Workspace account on the domain that has domain-wide
+// delegation authorised for the service account.
+const SENDER_EMAIL = "automation@jaishilshulphur.com";
 
 // ---------------------------------------------------------------------------
 // Build an authenticated Gmail API client, lazily on first use.
