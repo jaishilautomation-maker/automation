@@ -43,10 +43,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "eventType, subject, html required" }, { status: 400 });
   }
 
-  // Fire-and-forget — don't await; the response goes back immediately and
-  // the email + log happen asynchronously (Next.js keeps the lambda alive
-  // via the awaited sendEmail inside the void call).
-  void sendEmail({ eventType, subject, html, factoryId, referenceId, recipients });
+  // Await sendEmail before returning — on Vercel serverless the lambda is
+  // torn down as soon as the response is sent, so fire-and-forget (void) means
+  // the Gmail API call and notification_log insert are abandoned mid-flight.
+  // sendEmail never throws, so awaiting it is safe and adds <500ms latency.
+  await sendEmail({ eventType, subject, html, factoryId, referenceId, recipients });
 
   return NextResponse.json({ queued: true });
 }
