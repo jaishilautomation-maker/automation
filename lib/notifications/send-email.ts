@@ -19,8 +19,9 @@
 // Transport:
 //   - Gmail API (users.messages.send), authenticated via a Google service
 //     account with domain-wide delegation.
-//   - The service account impersonates automation@jaishil.com so every email
-//     is sent FROM that address — no App Password, no SMTP port.
+//   - The service account impersonates chinmaythakker@jaishilsulphur.com
+//     (domain-wide delegation) so emails appear from that Workspace address.
+//   - Recipient is automation@jaishilsulphur.com
 //
 // Required env var (server-side only, never exposed to the browser):
 //   GMAIL_SERVICE_ACCOUNT_KEY_BASE64
@@ -41,12 +42,11 @@ import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
 // Fixed recipient for all A-20/1 workflow notifications.
-export const AUTOMATION_EMAIL = "automation@jaishilshulphur.com";
+export const AUTOMATION_EMAIL = "automation@jaishilsulphur.com";
 
 // The Workspace mailbox the service account impersonates as the sender.
-// This must be a Workspace account on the domain that has domain-wide
-// delegation authorised for the service account.
-const SENDER_EMAIL = "automation@jaishilshulphur.com";
+// Must match the account authorised in Workspace Admin → Domain-wide Delegation.
+const SENDER_EMAIL = "chinmaythakker@jaishilsulphur.com";
 
 // ---------------------------------------------------------------------------
 // Build an authenticated Gmail API client, lazily on first use.
