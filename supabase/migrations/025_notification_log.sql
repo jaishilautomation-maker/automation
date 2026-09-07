@@ -24,3 +24,13 @@ CREATE INDEX IF NOT EXISTS idx_notification_log_factory_event
 
 -- No RLS — this table is written exclusively via the SUPABASE_SERVICE_ROLE_KEY
 -- from server-side API routes. The anon key cannot read or write it.
+
+-- PostgREST requires explicit grants even for service_role when there is no RLS.
+-- Without these, /rest/v1/notification_log returns 403 "permission denied".
+GRANT SELECT, INSERT ON public.notification_log TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.notification_log_id_seq TO service_role;
+
+-- PostgREST requires explicit grants even for service_role when there is no RLS.
+-- Without these, /rest/v1/notification_log returns 403 "permission denied".
+GRANT SELECT, INSERT ON public.notification_log TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.notification_log_id_seq TO service_role;
