@@ -117,15 +117,16 @@ export default function SelectModulePage() {
   const modules = modulesForUser(accessList, role);
 
   // ── factory_admin: handle demo role selection ─────────────────────────────
+  const [demoRoleActive, setDemoRoleActive] = useState<AppRole | null>(null);
+
   const handleDemoRolePick = useCallback((demoRole: AppRole) => {
     setDemoRole(demoRole);
-    setActiveModule("job_card");
     if (demoRole === "chemist" || demoRole === "lab_manager") {
-      // chemist sees module picker — stay on page, re-render will show it
-      // with the demo role context; for simplicity go straight to /lab
-      router.replace("/lab");
+      // Show module picker (Job Card vs Lab QC) for lab roles
+      setDemoRoleActive(demoRole);
       return;
     }
+    setActiveModule("job_card");
     router.replace(landingPath("job_card", demoRole));
   }, [router, setActiveModule]);
 
@@ -209,6 +210,52 @@ export default function SelectModulePage() {
 
   // ── Factory-scoped: factory_admin role picker ─────────────────────────────
   if (IS_FACTORY_SCOPED && isAdmin) {
+    // If a lab demo role was picked, show the module picker
+    if (demoRoleActive === "chemist" || demoRoleActive === "lab_manager") {
+      return (
+        <div className="module-wrap">
+          <div className="module-header">
+            <div className="title">JSCI · {FACTORY_NAME}</div>
+            <div className="sub">
+              {profile?.full_name} · <span className="role-pill">Admin · Lab/QC</span>
+            </div>
+          </div>
+
+          <p className="module-prompt">Select a module to continue</p>
+
+          <div className="module-grid">
+            {(["job_card", "lab_qc"] as ActivityModule[]).map(mod => {
+              const meta = MODULE_META[mod];
+              return (
+                <button
+                  key={mod}
+                  className="module-tile"
+                  type="button"
+                  onClick={() => {
+                    setActiveModule(mod);
+                    router.replace(landingPath(mod, demoRoleActive));
+                  }}
+                >
+                  <div className="module-icon">{meta.icon}</div>
+                  <div className="module-title">{meta.title}</div>
+                  <div className="module-desc">{meta.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ marginTop: 16, fontSize: 13 }}
+            onClick={() => { setDemoRole(null); setDemoRoleActive(null); }}
+          >
+            ← Back to role picker
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="module-wrap">
         <div className="module-header">
