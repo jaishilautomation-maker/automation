@@ -8,7 +8,8 @@
 //     operator            → /operator
 //     production_incharge → /pulveriser/production
 //     chemist/lab_manager → choose Job Card or Lab QC (two tiles)
-//     admin/viewer        → /dashboard
+//     factory_admin       → ROLE PICKER (demo mode: pick any role to navigate as)
+//     viewer              → /dashboard
 //
 // A-20 deployment (FACTORY_CODE=A20):
 //   Same fast-path — operator → /production-job-card, no picker.
@@ -18,7 +19,7 @@
 //   Full two-step module → factory picker (original behaviour, kept intact).
 // =============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -36,6 +37,33 @@ const IS_FACTORY_SCOPED = !!(
 );
 
 // ---------------------------------------------------------------------------
+// Demo role helpers (factory_admin only) — exported for AppHeader
+// ---------------------------------------------------------------------------
+
+const DEMO_ROLE_KEY = "jsci_demo_role";
+
+export function getDemoRole(): AppRole | null {
+  try {
+    return (sessionStorage.getItem(DEMO_ROLE_KEY) as AppRole) ?? null;
+  } catch { return null; }
+}
+
+export function setDemoRole(role: AppRole | null): void {
+  try {
+    if (role) sessionStorage.setItem(DEMO_ROLE_KEY, role);
+    else sessionStorage.removeItem(DEMO_ROLE_KEY);
+  } catch { /* ignore */ }
+}
+
+// The roles a factory_admin can demo as
+const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string; desc: string }[] = [
+  { role: "production_incharge", label: "Production",  labelHi: "प्रोडक्शन", icon: "🏭", desc: "Pulveriser job card — fill production details" },
+  { role: "chemist",             label: "Lab / QC",    labelHi: "लैब / QC",  icon: "🧪", desc: "Job card lab fields + Lab QC module" },
+  { role: "stores",              label: "Stores",       labelHi: "स्टोर्स",   icon: "🛢️", desc: "Issue oil for pulveriser batches" },
+  { role: "operator",            label: "Operator",     labelHi: "ऑपरेटर",   icon: "⚙️", desc: "Run the pulveriser, fill shift details" },
+];
+
+// ---------------------------------------------------------------------------
 // Landing route per role per module
 // ---------------------------------------------------------------------------
 function landingPath(module: ActivityModule, role: AppRole | null): string {
@@ -51,7 +79,7 @@ function landingPath(module: ActivityModule, role: AppRole | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Module metadata (used when lab user sees two tiles)
+// Module metadata
 // ---------------------------------------------------------------------------
 const MODULE_META: Record<ActivityModule, { title: string; desc: string; icon: string }> = {
   job_card: {
@@ -85,7 +113,21 @@ export default function SelectModulePage() {
 
   const loading = authLoading || moduleLoading;
   const role    = profile?.role ?? null;
+  const isAdmin = role === "factory_admin" || role === "company_admin";
   const modules = modulesForUser(accessList, role);
+
+  // ── factory_admin: handle demo role selection ─────────────────────────────
+  const handleDemoRolePick = useCallback((demoRole: AppRole) => {
+    setDemoRole(demoRole);
+    setActiveModule("job_card");
+    if (demoRole === "chemist" || demoRole === "lab_manager") {
+      // chemist sees module picker — stay on page, re-render will show it
+      // with the demo role context; for simplicity go straight to /lab
+      router.replace("/lab");
+      return;
+    }
+    router.replace(landingPath("job_card", demoRole));
+  }, [router, setActiveModule]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // FAST PATH: deployment-scoped factory
@@ -93,36 +135,30 @@ export default function SelectModulePage() {
   useEffect(() => {
     if (loading) return;
     if (!IS_FACTORY_SCOPED) return;
-    if (!activeFactory) return;  // module-context hasn't resolved the factory yet
+    if (!activeFactory) return;
 
-    // Roles that go directly without showing any picker
-    const directRoles: AppRole[] = [
-      "operator", "stores", "production_incharge",
-      "factory_admin", "company_admin", "viewer",
-    ];
+    // factory_admin / company_admin → show role picker (rendered below)
+    if (isAdmin) return;
 
+    const directRoles: AppRole[] = ["operator", "stores", "production_incharge", "viewer"];
     if (role && directRoles.includes(role)) {
       setActiveModule("job_card");
       router.replace(landingPath("job_card", role));
       return;
     }
 
-    // chemist / lab_manager: if they only have one module, go directly
     if (modules.length === 1) {
       setActiveModule(modules[0]);
       router.replace(landingPath(modules[0], role));
       return;
     }
-
-    // chemist / lab_manager with both modules: stay on this page and show
-    // the two-tile module picker (factory is already resolved, skip that step)
-  }, [loading, activeFactory, role, modules, router, setActiveModule]);
+  }, [loading, activeFactory, role, isAdmin, modules, router, setActiveModule]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // STANDARD PATH: multi-factory deployment auto-advance
   // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (IS_FACTORY_SCOPED) return; // handled above
+    if (IS_FACTORY_SCOPED) return;
     if (loading) return;
     if (modules.length === 1) {
       setPickedModule(modules[0]);
@@ -154,7 +190,7 @@ export default function SelectModulePage() {
     );
   }
 
-  if (modules.length === 0) {
+  if (modules.length === 0 && !isAdmin) {
     return (
       <div className="module-wrap">
         <div className="module-card" style={{ textAlign: "center" }}>
@@ -171,9 +207,43 @@ export default function SelectModulePage() {
     );
   }
 
-  // ── Factory-scoped: show module picker for lab roles only ─────────────────
+  // ── Factory-scoped: factory_admin role picker ─────────────────────────────
+  if (IS_FACTORY_SCOPED && isAdmin) {
+    return (
+      <div className="module-wrap">
+        <div className="module-header">
+          <div className="title">JSCI · {FACTORY_NAME}</div>
+          <div className="sub">
+            {profile?.full_name} · <span className="role-pill">Admin</span>
+          </div>
+        </div>
+
+        <p className="module-prompt">Navigate as role / भूमिका चुनें</p>
+
+        <div className="module-grid">
+          {DEMO_ROLES.map(({ role: demoRole, label, labelHi, icon, desc }) => (
+            <button
+              key={demoRole}
+              className="module-tile"
+              type="button"
+              onClick={() => handleDemoRolePick(demoRole)}
+            >
+              <div className="module-icon">{icon}</div>
+              <div className="module-title">{label} / {labelHi}</div>
+              <div className="module-desc">{desc}</div>
+            </button>
+          ))}
+        </div>
+
+        <div className="small-note" style={{ marginTop: 20, textAlign: "center" }}>
+          You are logged in as admin. Select a role to view that experience.
+        </div>
+      </div>
+    );
+  }
+
+  // ── Factory-scoped: module picker (chemist / lab_manager) ─────────────────
   if (IS_FACTORY_SCOPED) {
-    // If we get here the role is chemist/lab_manager with multiple modules
     return (
       <div className="module-wrap">
         <div className="module-header">
@@ -196,7 +266,6 @@ export default function SelectModulePage() {
                 type="button"
                 onClick={() => {
                   setActiveModule(mod);
-                  // activeFactory already resolved by module-context fast-path
                   router.push(landingPath(mod, role));
                 }}
               >
@@ -250,7 +319,7 @@ export default function SelectModulePage() {
     );
   }
 
-  // ── Standard path: factory picker ────────────────────────────────────────
+  // ── Standard path: factory picker ─────────────────────────────────────────
   const factories: Factory[] = pickedModule
     ? factoriesForModule(accessList, pickedModule)
     : [];
