@@ -46,7 +46,7 @@ export const AUTOMATION_EMAIL = "automation@jaishilsulphur.com";
 
 // The Workspace mailbox the service account impersonates as the sender.
 // Must match the account authorised in Workspace Admin → Domain-wide Delegation.
-const SENDER_EMAIL = "chinmaythakker@jaishilsulphur.com";
+const SENDER_EMAIL = "automation@jaishilsulphur.com";
 
 // ---------------------------------------------------------------------------
 // Build an authenticated Gmail API client, lazily on first use.
