@@ -69,7 +69,7 @@ const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string;
 function landingPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
     if (FACTORY_CODE === "A20") return "/production-job-card";
-    if (role === "operator")                          return "/operator";
+    if (role === "operator")                          return "/pulveriser/operator";
     if (role === "stores")                            return "/pulveriser/stores";
     if (role === "production_incharge")               return "/pulveriser/production";
     if (role === "chemist" || role === "lab_manager") return "/lab";
