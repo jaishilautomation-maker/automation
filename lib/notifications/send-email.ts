@@ -46,6 +46,7 @@ export const AUTOMATION_EMAIL = "automation@jaishilsulphur.com";
 
 // The Workspace mailbox the service account impersonates as the sender.
 // Must match the account authorised in Workspace Admin → Domain-wide Delegation.
+// Client ID 111764033913967609618 is delegated for this address.
 const SENDER_EMAIL = "automation@jaishilsulphur.com";
 
 // ---------------------------------------------------------------------------
