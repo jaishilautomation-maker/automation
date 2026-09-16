@@ -59,7 +59,7 @@ export function setDemoRole(role: AppRole | null): void {
 const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string; desc: string }[] = [
   { role: "production_incharge", label: "Production",  labelHi: "प्रोडक्शन", icon: "🏭", desc: "Pulveriser job card — fill production details" },
   { role: "chemist",             label: "Lab / QC",    labelHi: "लैब / QC",  icon: "🧪", desc: "Job card lab fields + Lab QC module" },
-  { role: "stores",              label: "Stores",       labelHi: "स्टोर्स",   icon: "🛢️", desc: "Issue oil for pulveriser batches" },
+  { role: "stores",              label: "Stores",       labelHi: "स्टोर्स",   icon: "🛢️", desc: "Stock ledger, oil issue, material issue slip, PRN, dispatch" },
   { role: "operator",            label: "Operator",     labelHi: "ऑपरेटर",   icon: "⚙️", desc: "Run the pulveriser, fill shift details" },
 ];
 
@@ -70,7 +70,7 @@ function landingPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
     if (FACTORY_CODE === "A20") return "/production-job-card";
     if (role === "operator")                          return "/pulveriser/operator";
-    if (role === "stores")                            return "/pulveriser/stores";
+    if (role === "stores")                            return "/stores";
     if (role === "production_incharge")               return "/pulveriser/production";
     if (role === "chemist" || role === "lab_manager") return "/lab";
     return "/dashboard";
