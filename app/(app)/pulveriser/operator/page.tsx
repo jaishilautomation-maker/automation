@@ -37,7 +37,7 @@ interface HourlyRow {
   start_time: string;
   stop_time: string;
   planned_production: string;
-  low_production_reason: string;
+  low_production_reasons: string[];   // multi-select
   batch_no: string;
   bags: string;
   reading_date: string;
@@ -79,9 +79,17 @@ function blankRow(): HourlyRow {
     id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     persistedId: null,
     machine: "", start_time: "", stop_time: "",
-    planned_production: "", low_production_reason: "",
+    planned_production: "", low_production_reasons: [],
     batch_no: "", bags: "", reading_date: new Date().toISOString().slice(0, 10),
   };
+}
+
+/** Format a YYYY-MM-DD string as DD/MM/YYYY for display. */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
 }
 
 export default function PulveriserOperatorPage() {
@@ -168,7 +176,9 @@ export default function PulveriserOperatorPage() {
       start_time: r.start_time ?? "",
       stop_time: r.stop_time ?? "",
       planned_production: r.planned_production?.toString() ?? "",
-      low_production_reason: r.low_production_reason ?? "",
+      low_production_reasons: r.low_production_reason
+        ? r.low_production_reason.split(", ").filter(Boolean)
+        : [],
       batch_no: r.batch_no ?? "",
       bags: r.bags?.toString() ?? "",
       reading_date: r.reading_date ?? new Date().toISOString().slice(0, 10),
@@ -190,7 +200,7 @@ export default function PulveriserOperatorPage() {
     Number.isFinite(classifierReadingNum) &&
     (classifierReadingNum < classifierRange[0] || classifierReadingNum > classifierRange[1]);
 
-  const updateRow = (id: string, field: keyof HourlyRow, val: string) => {
+  const updateRow = (id: string, field: keyof HourlyRow, val: string | string[]) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: val } : r));
   };
   const addRow = () => setRows(prev => [...prev, blankRow()]);
@@ -254,7 +264,7 @@ export default function PulveriserOperatorPage() {
         stop_time:             r.stop_time.trim() || null,
         total_hours:           hours,
         planned_production:    r.planned_production.trim() === "" ? null : Number(r.planned_production),
-        low_production_reason: r.low_production_reason || null,
+        low_production_reason: r.low_production_reasons.length > 0 ? r.low_production_reasons.join(", ") : null,
         batch_no:              r.batch_no.trim() || null,
         bags:                  r.bags.trim() === "" ? null : Number(r.bags),
         reading_date:          r.reading_date || null,
@@ -363,7 +373,7 @@ export default function PulveriserOperatorPage() {
               {group.entries.map((jc, i) => (
                 <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
                   <div className="pi-top">
-                    <span>Entry {i + 1} · {jc.machine_number} · {jc.job_date ?? "—"}</span>
+                    <span>Entry {i + 1} · {jc.machine_number} · {fmtDate(jc.job_date)}</span>
                     <span>{jc.shift ?? "—"}</span>
                   </div>
                   <div className="pi-sub">
@@ -385,7 +395,7 @@ export default function PulveriserOperatorPage() {
 
       {/* Read-only production + stores reference */}
       <div className="readonly-block">
-        <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} शिफ्ट<br />
+        <b>{active.machine_number}</b> · {fmtDate(active.job_date)} · {active.shift ?? "—"} शिफ्ट<br />
         <b>बैच नंबर:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · जॉब: {active.job_number ?? "—"}<br />
         <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
         <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}<br />
@@ -535,14 +545,24 @@ export default function PulveriserOperatorPage() {
                     onChange={e => updateRow(r.id, "bags", e.target.value)} />
                 </div>
               </div>
-              <label>कम उत्पादन का कारण (यदि कोई हो)</label>
-              <select value={r.low_production_reason}
-                onChange={e => updateRow(r.id, "low_production_reason", e.target.value)}>
-                <option value="">— कोई नहीं / लक्ष्य पूरा —</option>
+              <label>कम उत्पादन का कारण (यदि कोई हो — एक से अधिक चुन सकते हैं)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
                 {PULVERISER_LOW_PROD_REASONS.map(reason => (
-                  <option key={reason} value={reason}>{reason}</option>
+                  <label key={reason} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 400, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={r.low_production_reasons.includes(reason)}
+                      onChange={e => {
+                        const next = e.target.checked
+                          ? [...r.low_production_reasons, reason]
+                          : r.low_production_reasons.filter(x => x !== reason);
+                        updateRow(r.id, "low_production_reasons", next);
+                      }}
+                    />
+                    {reason}
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
           );
         })}
