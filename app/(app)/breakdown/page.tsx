@@ -160,6 +160,25 @@ export default function BreakdownPage() {
         subject,
         html,
         factoryId:  activeFactory?.id,
+        sheetData: {
+          type:   "append",
+          tab:    "Breakdown Register",
+          values: [
+            null,                               // ID — not available client-side pre-insert
+            null,                               // SR No — set by DB trigger
+            selectedMachine,
+            new Date(startAt).toISOString(),
+            finishAt ? new Date(finishAt).toISOString() : null,
+            natureOfBreakdown.trim(),
+            repairCarriedOut.trim()  || null,
+            partsReplaced.trim()     || null,
+            correctiveAction.trim()  || null,
+            remarks.trim()           || null,
+            profile?.full_name       ?? null,
+            nowISO,
+            activeFactory?.id        ?? null,
+          ],
+        },
       });
 
       showToast("Breakdown entry saved ✓");

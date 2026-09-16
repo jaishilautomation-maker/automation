@@ -182,6 +182,21 @@ export default function MaintenancePage() {
           html,
           factoryId:  activeFactory?.id,
           referenceId: itemId,
+          sheetData: {
+            type:   "append",
+            tab:    "Preventive Maintenance",
+            values: [
+              itemId,
+              itemWithStatus.item.machine,
+              itemWithStatus.item.component,
+              itemWithStatus.item.task,
+              itemWithStatus.item.frequency_weeks,
+              completedAt,
+              profile?.full_name ?? null,
+              null,               // notes — currently hardcoded null in the insert above
+              activeFactory?.id ?? null,
+            ],
+          },
         });
       }
 

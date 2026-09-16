@@ -163,7 +163,31 @@ export default function RmReceiptPage() {
         submittedAt:     nowISO,
         factoryName:     activeFactory.name,
       });
-      void notifyEvent({ eventType: "lab_qc_rm_receipt", subject, html, factoryId: activeFactory.id, referenceId: batch.id });
+      void notifyEvent({
+        eventType: "lab_qc_rm_receipt",
+        subject,
+        html,
+        factoryId: activeFactory.id,
+        referenceId: batch.id,
+        sheetData: {
+          type: "append",
+          tab: "RM Receipt",
+          values: [
+            batch.id,
+            "Crude Sulphur",
+            invoiceNumber.trim(),
+            "Crude Sulphur",
+            parseFloat(quantityMt),
+            "MT",
+            receivedDate,
+            csTruckNumber.trim() || null,
+            appearance.trim() || null,
+            profile?.full_name ?? null,
+            nowISO,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("Crude Sulphur receipt saved ✓");
       reset();
@@ -233,7 +257,31 @@ export default function RmReceiptPage() {
         submittedAt:     nowISO2,
         factoryName:     activeFactory.name,
       });
-      void notifyEvent({ eventType: "lab_qc_rm_receipt", subject: oilSubj, html: oilHtml, factoryId: activeFactory.id, referenceId: batch.id });
+      void notifyEvent({
+        eventType: "lab_qc_rm_receipt",
+        subject: oilSubj,
+        html: oilHtml,
+        factoryId: activeFactory.id,
+        referenceId: batch.id,
+        sheetData: {
+          type: "append",
+          tab: "RM Receipt",
+          values: [
+            batch.id,
+            "Oil",
+            oilBatchNumber.trim(),
+            supplierName.trim(),
+            parseFloat(oilQuantity),
+            "MT",
+            oilDatetime.slice(0, 10),
+            truckNumber.trim() || null,
+            null,  // appearance — not collected for oil
+            profile?.full_name ?? null,
+            nowISO2,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("Oil receipt saved ✓");
       reset();

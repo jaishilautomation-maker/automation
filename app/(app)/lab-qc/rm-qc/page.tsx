@@ -381,7 +381,29 @@ export default function RmQcPage() {
         submittedByName: profile?.full_name ?? "—",
         submittedAt:     nowISO,
       });
-      void notifyEvent({ eventType: "lab_qc_rm_qc", subject: rmqcSubj, html: rmqcHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+      void notifyEvent({
+        eventType: "lab_qc_rm_qc",
+        subject: rmqcSubj,
+        html: rmqcHtml,
+        factoryId: activeFactory.id,
+        referenceId: newRow.id,
+        sheetData: {
+          type: "append",
+          tab: "RM QC",
+          values: [
+            newRow.id,
+            selectedMaterial?.name ?? "Raw Material",
+            selectedBatch?.batch_number ?? null,
+            testDate,
+            chemistName.trim() || null,
+            JSON.stringify(testResults),
+            remarks.trim() || null,
+            profile?.full_name ?? null,
+            nowISO,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("QC results saved ✓");
       setBatchId("");
@@ -627,7 +649,29 @@ export default function RmQcPage() {
                   submittedByName: profile?.full_name ?? "—",
                   submittedAt:     oilNowISO,
                 });
-                void notifyEvent({ eventType: "lab_qc_rm_qc", subject: oilQcSubj, html: oilQcHtml, factoryId: activeFactory.id, referenceId: oilRow.id });
+                void notifyEvent({
+                  eventType: "lab_qc_rm_qc",
+                  subject: oilQcSubj,
+                  html: oilQcHtml,
+                  factoryId: activeFactory.id,
+                  referenceId: oilRow.id,
+                  sheetData: {
+                    type: "append",
+                    tab: "RM QC",
+                    values: [
+                      oilRow.id,
+                      "Oil",
+                      oilBatchNumber.trim(),
+                      oilNowISO.slice(0, 10),
+                      null,  // chemist — not collected for oil QC
+                      JSON.stringify(testResults),
+                      null,  // remarks — not collected for oil QC
+                      profile?.full_name ?? null,
+                      oilNowISO,
+                      activeFactory.id,
+                    ],
+                  },
+                });
 
                 showToast("Oil QC saved ✓");
                 setOilBatchNumber(""); setOilAppearance("");

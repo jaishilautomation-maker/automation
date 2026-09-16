@@ -117,6 +117,17 @@ export default function PulveriserLabPage() {
         html,
         factoryId:   active.factory_id,
         referenceId: active.id,
+        sheetData: {
+          type: "job_card",
+          row: {
+            job_number:  active.job_number ?? active.id,
+            status:      result === "ok" ? "finalized" : "pending_stores",
+            lab_result:  result,
+            lab_remark:  remark.trim() || null,
+            lab_by:      profile?.full_name ?? null,
+            lab_at:      nowISO,
+          },
+        },
       });
 
       showToast(result === "ok"

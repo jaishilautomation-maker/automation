@@ -204,6 +204,25 @@ export default function PulveriserProductionPage() {
           html,
           factoryId:   activeFactory.id,
           referenceId: data[i]?.id,
+          sheetData: {
+            type: "job_card",
+            row: {
+              job_number:            jobNumber.trim() || `row-${data[i]?.id}`,
+              machine_number:        machine,
+              material_code:         e.batchNumber.trim(),
+              status:                "pending_stores",
+              planned_production_mt: e.plannedMt.trim() === "" ? null : Number(e.plannedMt),
+              oil_required_kg:       oilRequiredFor(e),
+              sulphur_supplier:      e.sulSupplier.trim()  || null,
+              sulphur_lot_number:    e.sulLot.trim()       || null,
+              sulphur_empty_date:    e.sulEmptyDate        || null,
+              oil_supplier:          e.oilSupplier.trim()  || null,
+              oil_batch_number:      e.oilBatch.trim()     || null,
+              oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
+              production_by:         profile?.full_name ?? null,
+              production_at:         nowISO,
+            },
+          },
         });
       }
 

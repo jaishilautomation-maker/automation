@@ -265,7 +265,29 @@ export default function BatchAnalysisPage() {
           submittedAt:     baUpdateISO,
           isUpdate:        true,
         });
-        void notifyEvent({ eventType: "lab_qc_batch_analysis", subject: baUpdSubj, html: baUpdHtml, factoryId: activeFactory.id, referenceId: existingAnalysis.id });
+        void notifyEvent({
+          eventType: "lab_qc_batch_analysis",
+          subject: baUpdSubj,
+          html: baUpdHtml,
+          factoryId: activeFactory.id,
+          referenceId: existingAnalysis.id,
+          sheetData: {
+            type: "append",
+            tab: "Batch Analysis",
+            values: [
+              existingAnalysis.id,
+              batchNumber.trim(),
+              analysisDate,
+              appearanceVal || null,
+              JSON.stringify(testResults),
+              remarks.trim() || null,
+              profile?.full_name ?? null,
+              baUpdateISO,
+              true,  // isUpdate
+              activeFactory.id,
+            ],
+          },
+        });
 
         showToast("Batch analysis updated ✓");
       } else {
@@ -309,7 +331,29 @@ export default function BatchAnalysisPage() {
           submittedAt:     baInsertISO,
           isUpdate:        false,
         });
-        void notifyEvent({ eventType: "lab_qc_batch_analysis", subject: baInsSubj, html: baInsHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+        void notifyEvent({
+          eventType: "lab_qc_batch_analysis",
+          subject: baInsSubj,
+          html: baInsHtml,
+          factoryId: activeFactory.id,
+          referenceId: newRow.id,
+          sheetData: {
+            type: "append",
+            tab: "Batch Analysis",
+            values: [
+              newRow.id,
+              batchNumber.trim(),
+              analysisDate,
+              appearanceVal || null,
+              JSON.stringify(testResults),
+              remarks.trim() || null,
+              profile?.full_name ?? null,
+              baInsertISO,
+              false,  // isUpdate
+              activeFactory.id,
+            ],
+          },
+        });
 
         showToast("Batch analysis saved ✓");
       }

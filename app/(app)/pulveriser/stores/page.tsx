@@ -95,6 +95,16 @@ export default function PulveriserStoresPage() {
         html,
         factoryId:   active.factory_id,
         referenceId: active.id,
+        sheetData: {
+          type: "job_card",
+          row: {
+            job_number:    active.job_number ?? active.id,
+            status:        "pending",
+            oil_issued_kg: Number(oilIssued),
+            stores_by:     profile?.full_name ?? null,
+            stores_at:     nowISO,
+          },
+        },
       });
 
       showToast("Oil issued ✓ — operator ab batch chala sakta hai.");

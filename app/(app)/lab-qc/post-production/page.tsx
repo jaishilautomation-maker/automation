@@ -144,7 +144,28 @@ export default function PostProductionPage() {
         submittedByName: profile?.full_name ?? "—",
         submittedAt:     ppNowISO,
       });
-      void notifyEvent({ eventType: "lab_qc_post_production", subject: ppSubj, html: ppHtml, factoryId: activeFactory.id });
+      void notifyEvent({
+        eventType: "lab_qc_post_production",
+        subject: ppSubj,
+        html: ppHtml,
+        factoryId: activeFactory.id,
+        sheetData: {
+          type: "append",
+          tab: "Post Production",
+          values: [
+            null,  // ID — not available client-side before insert
+            selectedProduct?.name ?? null,
+            selectedBatch?.batch_number ?? null,
+            testDate,
+            chemistName.trim() || null,
+            JSON.stringify(testResults),
+            remarks.trim() || null,
+            profile?.full_name ?? null,
+            ppNowISO,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("Post-production test saved ✓");
       setBatchId(""); setProductId(""); setLinkedPqcId("");

@@ -338,6 +338,20 @@ export default function PulveriserOperatorPage() {
           html,
           factoryId:   active.factory_id,
           referenceId: active.id,
+          sheetData: {
+            type: "job_card",
+            row: {
+              job_number:                   active.job_number ?? active.id,
+              status:                       "submitted_for_qc",
+              actual_production_mt:         updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
+              expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
+              actual_oil_consumption_kg:    updatedCard?.actual_oil_consumption_kg ?? null,
+              oil_variance_kg:              updatedCard?.oil_variance_kg ?? null,
+              oil_extra_leftover_balance_kg: updatedCard?.oil_extra_leftover_balance_kg ?? null,
+              operator_by:                  profile?.full_name ?? null,
+              operator_submitted_at:        nowISO,
+            },
+          },
         });
       }
 
