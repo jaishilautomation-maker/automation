@@ -1,0 +1,382 @@
+"use client";
+
+// =============================================================================
+// Pulveriser Job Card — Lab review (Form JSCI/PROD/02)
+//
+// Lab reviews a 'submitted_for_qc' card (read-only view of ALL fields):
+//   OK     → inserts review(result='ok');  DB trigger sets card 'finalized'.
+//   NOT OK → inserts review(result='not_ok'); DB trigger sets card 'pending'
+//            (rework). Optionally flag rejected_stage='production' to reopen
+//            Production's fields instead of the default (operator).
+//
+// Every review is appended to pulveriser_job_card_reviews — full history is
+// kept and shown if the card has been through rework before.
+// =============================================================================
+
+import { useCallback, useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/lib/toast-context";
+import {
+  groupByJobNumber,
+  type PulveriserJobCard,
+  type PulveriserHourlyReading,
+  type PulveriserJobCardReview,
+  type PulveriserShutdownLog,
+} from "@/lib/types";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildLabEmail } from "@/lib/notifications/pulveriser-emails";
+
+/** Read-only labelled field row. */
+function F({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+      <b>{label}:</b> {value ?? "—"}
+    </div>
+  );
+}
+
+export default function PulveriserLabPage() {
+  const { user, profile } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [active, setActive]           = useState<PulveriserJobCard | null>(null);
+  const [readings, setReadings]       = useState<PulveriserHourlyReading[]>([]);
+  const [shutdownLogs, setShutdownLogs] = useState<PulveriserShutdownLog[]>([]);
+  const [history, setHistory]         = useState<PulveriserJobCardReview[]>([]);
+  const [remark, setRemark]           = useState("");
+  const [reopenProduction, setReopenProduction] = useState(false);
+  const [submitting, setSubmitting]   = useState(false);
+
+  const loadPending = useCallback(async () => {
+    setLoadingList(true);
+    const { data, error } = await supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .eq("status", "submitted_for_qc")
+      .order("operator_submitted_at", { ascending: false });
+    if (error) showToast("Could not load: " + error.message, true);
+    else setPending((data ?? []) as PulveriserJobCard[]);
+    setLoadingList(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadPending(); }, [loadPending]);
+
+  const openCard = async (jc: PulveriserJobCard) => {
+    setActive(jc);
+    setRemark("");
+    setReopenProduction(false);
+    const [{ data: rd }, { data: hist }, { data: sd }] = await Promise.all([
+      supabase.from("pulveriser_hourly_readings").select("*")
+        .eq("job_card_id", jc.id).order("created_at"),
+      supabase.from("pulveriser_job_card_reviews").select("*")
+        .eq("job_card_id", jc.id).order("reviewed_at", { ascending: false }),
+      supabase.from("pulveriser_shutdown_logs").select("*")
+        .eq("job_card_id", jc.id).order("created_at"),
+    ]);
+    setReadings((rd ?? []) as PulveriserHourlyReading[]);
+    setHistory((hist ?? []) as PulveriserJobCardReview[]);
+    setShutdownLogs((sd ?? []) as PulveriserShutdownLog[]);
+  };
+
+  const goBack = () => { setActive(null); setReadings([]); setHistory([]); setShutdownLogs([]); };
+
+  const submitReview = async (result: "ok" | "not_ok") => {
+    if (!active || !user) return;
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase
+        .from("pulveriser_job_card_reviews")
+        .insert({
+          job_card_id:    active.id,
+          factory_id:     active.factory_id,
+          reviewed_by:    user.id,
+          result,
+          remark:         remark.trim() || null,
+          rejected_stage: result === "not_ok" ? (reopenProduction ? "production" : "operator") : null,
+        })
+        .select("id")
+        .single();
+      if (error) { showToast("Could not submit review: " + error.message, true); return; }
+      if (!data) {
+        showToast("Review was blocked — check your factory access or the card status.", true);
+        return;
+      }
+
+      // Fire-and-forget email notification
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildLabEmail({
+        jobNumber:      active.job_number,
+        materialCode:   active.material_code,
+        result,
+        remark:         remark.trim() || null,
+        reviewedByName: profile?.full_name ?? "—",
+        reviewedAt:     nowISO,
+      });
+      void notifyEvent({
+        eventType:   "pulveriser_lab",
+        subject,
+        html,
+        factoryId:   active.factory_id,
+        referenceId: active.id,
+      });
+
+      showToast(result === "ok"
+        ? "Marked OK ✓ — job card finalized."
+        : "Marked NOT OK — sent back to Stores for a full rework cycle.");
+      goBack();
+      loadPending();
+    } catch (e: unknown) {
+      showToast("Could not submit: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ── List view ───────────────────────────────────────────────────────────
+  if (!active) {
+    return (
+      <div className="card">
+        <h3>Job cards awaiting QC review</h3>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          Operator has submitted these. Review and mark OK or NOT OK.
+        </div>
+        {loadingList ? (
+          <div className="empty">Loading…</div>
+        ) : pending.length === 0 ? (
+          <div className="empty">No job cards awaiting review.</div>
+        ) : (
+          groupByJobNumber(pending).map(group => (
+            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+                Job: {group.jobNumber ?? "—"}
+                {group.entries.length > 1 && ` · ${group.entries.length} entries`}
+              </div>
+              {group.entries.map((jc, i) => (
+                <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
+                  <div className="pi-top">
+                    <span>Entry {i + 1} · {jc.machine_number} · {jc.job_date ?? "—"}</span>
+                    <span>{jc.shift ?? "—"}</span>
+                  </div>
+                  <div className="pi-sub">
+                    Batch: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  // ── Review view (read-only) ───────────────────────────────────────────────
+  return (
+    <>
+      <button className="back-link" type="button" onClick={goBack}>← Back to list</button>
+
+      {history.length > 0 && (
+        <div className="card" style={{ borderColor: "var(--warn)" }}>
+          <h3>Review history ({history.length})</h3>
+          <div className="field-hint" style={{ marginBottom: 8 }}>
+            This card has been through review before.
+          </div>
+          {history.map(h => (
+            <div key={h.id} className="batch-block">
+              <span className={`badge ${h.result === "ok" ? "ok" : "warn"}`}>
+                {h.result === "ok" ? "OK" : "NOT OK"}
+              </span>{" "}
+              <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                {new Date(h.reviewed_at).toLocaleString()}
+                {h.rejected_stage && ` · reopened: ${h.rejected_stage}`}
+              </span>
+              {h.remark && <div style={{ fontSize: 13, marginTop: 4 }}>{h.remark}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="card">
+        <h3>Production details</h3>
+        <F label="Machine" value={active.machine_number} />
+        <F label="Job Number" value={active.job_number} />
+        <F label="Shift" value={active.shift} />
+        <F label="Job Date" value={active.job_date} />
+        <F label="Batch Number" value={active.material_code} />
+        <F label="Party / CODE" value={active.party_code} />
+        <F label="Sulphur Supplier" value={active.sulphur_supplier} />
+        <F label="Sulphur Lot" value={active.sulphur_lot_number} />
+        <F label="Sulphur Empty Date" value={active.sulphur_empty_date} />
+        <F label="Oil Supplier" value={active.oil_supplier} />
+        <F label="Oil Batch" value={active.oil_batch_number} />
+        <F label="Oil Quantity" value={active.oil_quantity} />
+        <F label="Planned Production (MT)" value={active.planned_production_mt} />
+        <F label="Oil Required (kg)" value={active.oil_required_kg} />
+      </div>
+
+      <div className="card">
+        <h3>Stores &amp; oil consumption</h3>
+        <F label="Oil Issued (kg)" value={active.oil_issued_kg} />
+        <F label="Actual Production (MT)" value={active.actual_production_mt} />
+        <F label="Expected Oil (kg)" value={active.expected_oil_kg} />
+        <F label="Actual Oil Consumption (kg)" value={active.actual_oil_consumption_kg} />
+        <F label="Oil Variance (kg)" value={active.oil_variance_kg} />
+        <F label="Extra / Leftover Balance (kg)" value={active.oil_extra_leftover_balance_kg} />
+        <F label="Oil Consumption %" value={
+          active.oil_consumption_percent != null
+            ? `${active.oil_consumption_percent.toFixed(2)}%`
+            : null
+        } />
+      </div>
+
+      <div className="card">
+        <h3>Operator details</h3>
+        <F label="Classifier VFD" value={active.classifier_vfd} />
+        <F label="Blower Inlet Valve" value={active.blower_inlet_valve} />
+        <F label="Blower Outlet Valve" value={active.blower_outlet_valve} />
+        <F label="Finished Goods Bag" value={active.finished_goods_bag} />
+        <F label="Packing Size" value={active.packing_size} />
+        <F label="QC Incharge Note" value={active.qc_incharge_note} />
+        <F label="Stores Incharge Note" value={active.stores_incharge_note} />
+        <F label="Work Details" value={active.work_details} />
+        <F label="Machine Cleaning" value={active.checkpoint_machine_cleaning ? "✓" : "✗"} />
+        <F label="Roller Check" value={active.checkpoint_roller_check ? "✓" : "✗"} />
+        <F label="Mesh Cloth Check" value={active.checkpoint_mesh_cloth_check ? "✓" : "✗"} />
+      </div>
+
+      <div className="card">
+        <h3>Hourly readings ({readings.length})</h3>
+        {readings.length === 0 ? (
+          <div className="empty">No readings recorded.</div>
+        ) : (
+          readings.map((r, i) => (
+            <div className="batch-block" key={r.id}>
+              <span className="batch-label">Reading {i + 1} · {r.reading_date ?? "—"}</span>
+              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                {r.machine ?? "—"} · reading {r.start_time ?? "—"}→{r.stop_time ?? "—"} ·{" "}
+                {r.total_hours ?? "—"} hrs · Planned {r.planned_production ?? "—"} ·{" "}
+                Batch {r.batch_no ?? "—"} · {r.bags ?? "—"} bags
+                {r.low_production_reason && (
+                  <div style={{ color: "var(--warn)" }}>Low prod: {r.low_production_reason}</div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Shutdown log + reconciliation (Sept 16 meeting item 4) */}
+      <div className="card">
+        <h3>Shutdown log ({shutdownLogs.length})</h3>
+        {shutdownLogs.length === 0 ? (
+          <div className="empty">No shutdowns logged by operator.</div>
+        ) : (
+          shutdownLogs.map((s, i) => {
+            const sn   = Number(s.start_time);
+            const en   = Number(s.end_time);
+            const diff = Number.isFinite(sn) && Number.isFinite(en) && en > sn ? en - sn : null;
+            const hrs  = diff !== null ? diff / 100 : null;
+            return (
+              <div className="batch-block" key={s.id}>
+                <span className="batch-label">Shutdown {i + 1}</span>
+                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                  Reading {s.start_time} → {s.end_time}
+                  {hrs !== null && ` · ${hrs.toFixed(2)} hrs`}
+                  {s.reason && <div style={{ color: "var(--ink-soft)" }}>Reason: {s.reason}</div>}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Shift-time reconciliation summary for Lab reviewer */}
+      {(() => {
+        if (readings.length === 0) return null;
+
+        const runningHours = readings.reduce((sum, r) => sum + (r.total_hours ?? 0), 0);
+
+        const starts = readings
+          .map(r => r.start_time?.trim())
+          .filter((s): s is string => !!s && Number.isFinite(Number(s)))
+          .map(Number);
+        const stops = readings
+          .map(r => r.stop_time?.trim())
+          .filter((s): s is string => !!s && Number.isFinite(Number(s)))
+          .map(Number);
+
+        if (starts.length === 0 || stops.length === 0) return null;
+
+        const shiftDuration = (Math.max(...stops) - Math.min(...starts)) / 100;
+        if (shiftDuration <= 0) return null;
+
+        const shutdownTotal = shutdownLogs.reduce((sum, s) => {
+          const sn = Number(s.start_time);
+          const en = Number(s.end_time);
+          const diff = Number.isFinite(sn) && Number.isFinite(en) && en > sn ? en - sn : 0;
+          return sum + diff / 100;
+        }, 0);
+
+        const accountedHours = shiftDuration - shutdownTotal;
+        const diff = Math.abs(runningHours - accountedHours);
+        const ok   = diff <= 0.05;
+
+        if (ok) {
+          return (
+            <div style={{
+              padding: "10px 14px", borderRadius: 8, fontSize: 13,
+              background: "color-mix(in srgb, var(--ok) 12%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)",
+              color: "var(--ink-soft)",
+            }}>
+              ✓ Shift time reconciled — running {runningHours.toFixed(2)} hrs ≈
+              shift {shiftDuration.toFixed(2)} − shutdowns {shutdownTotal.toFixed(2)}
+            </div>
+          );
+        }
+        return (
+          <div style={{
+            padding: "10px 14px", borderRadius: 8, fontSize: 13,
+            background: "color-mix(in srgb, var(--warn) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)",
+          }}>
+            <div style={{ fontWeight: 700, color: "var(--warn)", marginBottom: 4 }}>
+              ⚠ Shift time mismatch — operator review recommended
+            </div>
+            <div><b>Running hours (readings):</b> {runningHours.toFixed(2)} hrs</div>
+            <div><b>Accounted:</b> shift {shiftDuration.toFixed(2)} − shutdowns {shutdownTotal.toFixed(2)} = {accountedHours.toFixed(2)} hrs</div>
+            <div style={{ color: "var(--warn)", marginTop: 4 }}>
+              Discrepancy: {diff.toFixed(2)} hrs — factor this into your QC decision.
+            </div>
+          </div>
+        );
+      })()}
+
+      <div className="card">
+        <h3>QC decision</h3>
+        <label>Remark (optional)</label>
+        <textarea rows={2} value={remark} onChange={e => setRemark(e.target.value)} />
+        <div className="checkline" style={{ marginTop: 8 }}>
+          <input type="checkbox" checked={reopenProduction}
+            onChange={e => setReopenProduction(e.target.checked)} />
+          <span>NOT OK is about Production&apos;s fields (reopen Production instead of Operator)</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="btn btn-primary" type="button"
+          disabled={submitting} onClick={() => submitReview("ok")}>
+          {submitting ? "…" : "OK — Finalize"}
+        </button>
+        <button className="btn btn-ghost" type="button"
+          style={{ color: "var(--warn)" }}
+          disabled={submitting} onClick={() => submitReview("not_ok")}>
+          {submitting ? "…" : "NOT OK — Send back"}
+        </button>
+      </div>
+    </>
+  );
+}
