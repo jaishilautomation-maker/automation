@@ -141,7 +141,6 @@ export default function PulveriserOperatorPage() {
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
   const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
-  const [savingClose, setSavingClose]     = useState(false);
 
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
@@ -313,20 +312,6 @@ export default function PulveriserOperatorPage() {
           );
         }
       }
-    }
-  };
-
-  /** Dedicated save for मशीन बंद समय — persists close entries without touching other fields. */
-  const handleSaveCloseEntries = async () => {
-    if (!active || !user) return;
-    setSavingClose(true);
-    try {
-      await syncCloseEntries(active);
-      showToast("मशीन बंद समय सहेजा गया ✓");
-    } catch (e: unknown) {
-      showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
-    } finally {
-      setSavingClose(false);
     }
   };
 
@@ -613,7 +598,7 @@ export default function PulveriserOperatorPage() {
         </div>
         <div className="field-hint" style={{ marginBottom: 10 }}>
           शिफ्ट के दौरान जितनी बार मशीन बंद हो, हर बार एक नई प्रविष्टि जोड़ें।
-          भरने के बाद "बंद समय सहेजें" दबाएँ — बाद में वापस आकर और प्रविष्टियाँ जोड़ सकते हैं।
+          नीचे <b>मशीन बंद समय सहेजें</b> दबाएँ — बाद में वापस आकर और प्रविष्टियाँ जोड़ सकते हैं।
         </div>
 
         {closeEntries.map((e, i) => (
@@ -657,7 +642,6 @@ export default function PulveriserOperatorPage() {
                 <input
                   type="time"
                   value={e.restart_time}
-                  placeholder="—"
                   onChange={ev => updateCloseEntry(e.id, "restart_time", ev.target.value)}
                 />
               </div>
@@ -679,12 +663,22 @@ export default function PulveriserOperatorPage() {
           </button>
           <button
             type="button"
-            className="btn btn-ghost"
-            style={{ color: "var(--ok)" }}
-            disabled={savingClose}
-            onClick={handleSaveCloseEntries}
+            className="btn btn-primary"
+            disabled={submitting}
+            onClick={async () => {
+              if (!active || !user) return;
+              setSubmitting(true);
+              try {
+                await syncCloseEntries(active);
+                showToast("मशीन बंद समय सहेजा गया ✓");
+              } catch (e: unknown) {
+                showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
+              } finally {
+                setSubmitting(false);
+              }
+            }}
           >
-            {savingClose ? "सहेजा जा रहा है…" : "बंद समय सहेजें"}
+            {submitting ? "सहेजा जा रहा है…" : "मशीन बंद समय सहेजें"}
           </button>
         </div>
       </div>
