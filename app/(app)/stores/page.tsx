@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -93,12 +93,13 @@ export default function StoresPage() {
   const [tab, setTab] = useState<Tab>("oil");
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: "oil",      label: "Oil Issue" },
-    { id: "rm",       label: "Raw Material" },
-    { id: "ledger",   label: "Stock Ledger" },
-    { id: "issue",    label: "Issue Slip" },
-    { id: "prn",      label: "PRN" },
-    { id: "dispatch", label: "Dispatch" },
+    { id: "oil",        label: "Oil Issue" },
+    { id: "rm",         label: "Raw Material" },
+    { id: "daily_prod", label: "Daily Production" },
+    { id: "ledger",     label: "Stock Ledger" },
+    { id: "issue",      label: "Issue Slip" },
+    { id: "prn",        label: "PRN" },
+    { id: "dispatch",   label: "Dispatch" },
   ];
 
   return (
@@ -124,12 +125,13 @@ export default function StoresPage() {
         ))}
       </div>
 
-      {tab === "oil"      && <OilIssueSection />}
-      {tab === "rm"       && <RawMaterialSection />}
-      {tab === "ledger"   && <StockLedgerSection />}
-      {tab === "issue"    && <IssueSlipSection />}
-      {tab === "prn"      && <PrnSection />}
-      {tab === "dispatch" && <DispatchSection />}
+      {tab === "oil"        && <OilIssueSection />}
+      {tab === "rm"         && <RawMaterialSection />}
+      {tab === "daily_prod" && <DailyProductionSection />}
+      {tab === "ledger"     && <StockLedgerSection />}
+      {tab === "issue"      && <IssueSlipSection />}
+      {tab === "prn"        && <PrnSection />}
+      {tab === "dispatch"   && <DispatchSection />}
     </div>
   );
 }
@@ -625,7 +627,355 @@ function RawMaterialSection() {
 }
 
 // =============================================================================
-// TAB 3 -- STOCK LEDGER
+// TAB 3 -- DAILY PRODUCTION
+//
+// Mirrors the DAILY PRODN tab in the DPR Excel exactly.
+// Columns (matching the Excel left-to-right):
+//   Date | CEAT 108/EXPORT | M2615 | PLAIN-2615 | APOLLO 160108 | LANXESS |
+//   CEAT R5299 | PLAIN/WE-10/S.A.EXPORT/Plain Lanxess | JKI-108 |
+//   OLD BAGS (SHAKTI) | RUBBER MAKER 50 KG | Sulphur Powder (Gain Formulation) |
+//   JUMBO BAG | Export Plan Bag W/O 25 Kg | TOTAL MT
+//
+// TOTAL MT formula (from the Excel cell P179):
+//   = (B+C+D+E+F+G+H+N)*25/1000  [25 kg bags]
+//   + (I+J+K+L)*50/1000           [50 kg bags]
+//   + M*250/1000                  [250 kg jumbo bags]
+//
+// Each entry is one row per date. Saved to stores_stock_ledger with
+// reference_type = 'daily_prod' and all fields packed as JSON in remark.
+// =============================================================================
+
+// Column definitions — drives both the form and the table header
+interface DailyProdCol {
+  key: string;
+  label: string;        // full label for form
+  shortLabel: string;   // abbreviated for table header
+  bagKg: number;        // kg per bag (25, 50, or 250)
+  colGroup: "25kg" | "50kg" | "250kg";
+}
+
+const DAILY_PROD_COLS: DailyProdCol[] = [
+  { key: "ceat_108_export",     label: "CEAT 108 / EXPORT",                       shortLabel: "CEAT 108",    bagKg: 25,  colGroup: "25kg"  },
+  { key: "m2615",               label: "M2615",                                    shortLabel: "M2615",       bagKg: 25,  colGroup: "25kg"  },
+  { key: "plain_2615",          label: "PLAIN-2615",                               shortLabel: "PLAIN-2615",  bagKg: 25,  colGroup: "25kg"  },
+  { key: "apollo_160108",       label: "APOLLO 160108",                            shortLabel: "APOLLO",      bagKg: 25,  colGroup: "25kg"  },
+  { key: "lanxess",             label: "LANXESS",                                  shortLabel: "LANXESS",     bagKg: 25,  colGroup: "25kg"  },
+  { key: "ceat_r5299",          label: "CEAT R5299",                               shortLabel: "CEAT R5299",  bagKg: 25,  colGroup: "25kg"  },
+  { key: "plain_we10_sa",       label: "PLAIN / WE-10 / S.A. EXPORT / Plain Lanxess", shortLabel: "PLAIN/WE-10", bagKg: 25, colGroup: "25kg" },
+  { key: "jki_108",             label: "JKI-108",                                  shortLabel: "JKI-108",     bagKg: 50,  colGroup: "50kg"  },
+  { key: "old_bags_shakti",     label: "OLD BAGS (SHAKTI)",                        shortLabel: "OLD BAGS",    bagKg: 50,  colGroup: "50kg"  },
+  { key: "rubber_maker_50kg",   label: "RUBBER MAKER 50 KG",                       shortLabel: "RUBBER 50",   bagKg: 50,  colGroup: "50kg"  },
+  { key: "sulphur_gain",        label: "Sulphur Powder (Gain Formulation)",         shortLabel: "SUL GAIN",    bagKg: 50,  colGroup: "50kg"  },
+  { key: "jumbo_bag",           label: "JUMBO BAG (500 KG)",                       shortLabel: "JUMBO",       bagKg: 250, colGroup: "250kg" },
+  { key: "export_plan_25kg",    label: "Export Plan Bag W/O 25 Kg",                shortLabel: "EXP PLAN",    bagKg: 25,  colGroup: "25kg"  },
+];
+
+// Keys that use 25 kg bags (B,C,D,E,F,G,H,N in the Excel)
+const BAGS_25KG = ["ceat_108_export","m2615","plain_2615","apollo_160108","lanxess","ceat_r5299","plain_we10_sa","export_plan_25kg"];
+// Keys that use 50 kg bags (I,J,K,L)
+const BAGS_50KG = ["jki_108","old_bags_shakti","rubber_maker_50kg","sulphur_gain"];
+// Keys that use 250 kg bags (M)
+const BAGS_250KG = ["jumbo_bag"];
+
+type DailyProdRow = Record<string, string> & { date: string };
+
+interface SavedDailyProdRow {
+  id: string;
+  date: string;
+  values: Record<string, number>;
+  total_mt: number;
+}
+
+/** Excel formula: (B+C+D+E+F+G+H+N)*25/1000 + (I+J+K+L)*50/1000 + M*250/1000 */
+function calcTotalMt(vals: Record<string, string>): number {
+  const n = (k: string) => Number(vals[k]) || 0;
+
+  const sum25 = BAGS_25KG.reduce((s, k) => s + n(k), 0);
+  const sum50 = BAGS_50KG.reduce((s, k) => s + n(k), 0);
+  const sum250 = BAGS_250KG.reduce((s, k) => s + n(k), 0);
+
+  return (sum25 * 25) / 1000 + (sum50 * 50) / 1000 + (sum250 * 250) / 1000;
+}
+
+function blankDailyProdRow(): DailyProdRow {
+  const row: DailyProdRow = { date: today() };
+  DAILY_PROD_COLS.forEach(c => { row[c.key] = ""; });
+  return row;
+}
+
+function DailyProductionSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<DailyProdRow>(blankDailyProdRow());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedDailyProdRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+
+  // Compute total MT live from current entry
+  const totalMt = calcTotalMt(entry);
+
+  const setField = (key: string, val: string) => {
+    setEntry(prev => ({ ...prev, [key]: val }));
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "daily_prod")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(90);  // ~3 months of daily entries
+
+    if (error) {
+      showToast("Could not load history: " + error.message, true);
+      setHistLoading(false);
+      return;
+    }
+
+    const rows: SavedDailyProdRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as { values?: Record<string, number>; total_mt?: number };
+        rows.push({
+          id: row.id,
+          date: row.transaction_date,
+          values: p.values ?? {},
+          total_mt: p.total_mt ?? 0,
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows);
+    setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleSave = async () => {
+    if (!entry.date) { showToast("Enter a date.", true); return; }
+    if (!user) return;
+
+    // Check at least one column has a value
+    const hasAny = DAILY_PROD_COLS.some(c => Number(entry[c.key]) > 0);
+    if (!hasAny) { showToast("Enter at least one production quantity.", true); return; }
+
+    setSubmitting(true);
+    try {
+      // We need an item_id FK — use any active item as a placeholder anchor.
+      // Daily production entries are keyed by reference_type='daily_prod' not by item.
+      // Use a dummy lookup: find the first active FG item for this factory.
+      // If none found, we cannot insert (ledger requires item_id). Show helpful error.
+      const { data: itemData } = await supabase
+        .from("stores_stock_items")
+        .select("id, factory_id")
+        .eq("is_active", true)
+        .eq("category", "finished_good")
+        .limit(1)
+        .maybeSingle();
+
+      if (!itemData) {
+        showToast("No stock items found. Run migrations 027 and 031 in Supabase first.", true);
+        setSubmitting(false);
+        return;
+      }
+
+      const numericVals: Record<string, number> = {};
+      DAILY_PROD_COLS.forEach(c => {
+        numericVals[c.key] = Number(entry[c.key]) || 0;
+      });
+
+      const payload = {
+        date:     entry.date,
+        values:   numericVals,
+        total_mt: totalMt,
+      };
+
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            itemData.id,
+        factory_id:         itemData.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received:       0,
+        qty_issued:         0,
+        dispatch_qty:       0,
+        closing_balance:    0,      // daily prod entry — not a stock movement
+        reference_type:     "daily_prod",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Daily production saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+      setEntry(blankDailyProdRow());
+      loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  // Column totals for the TOTAL row in history
+  const colTotals: Record<string, number> = {};
+  DAILY_PROD_COLS.forEach(c => {
+    colTotals[c.key] = history.reduce((s, r) => s + (r.values[c.key] ?? 0), 0);
+  });
+  const grandTotalMt = history.reduce((s, r) => s + r.total_mt, 0);
+
+  return (
+    <>
+      {/* ── Entry form ── */}
+      <div className="card">
+        <h3>Daily Production Entry</h3>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Date *</label>
+          <input type="date" value={entry.date}
+            onChange={e => setField("date", e.target.value)}
+            style={{ maxWidth: 200 }} />
+        </div>
+
+        {/* 25 kg bag columns */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 8 }}>
+          25 kg Bags
+        </div>
+        <div className="row2">
+          {DAILY_PROD_COLS.filter(c => c.colGroup === "25kg").map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* 50 kg bag columns */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
+          50 kg Bags
+        </div>
+        <div className="row2">
+          {DAILY_PROD_COLS.filter(c => c.colGroup === "50kg").map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* 250 kg bag column */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
+          250 kg Bags (Jumbo)
+        </div>
+        <div style={{ maxWidth: 220 }}>
+          {DAILY_PROD_COLS.filter(c => c.colGroup === "250kg").map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* Total MT (computed live) */}
+        <div style={{
+          marginTop: 14, padding: "12px 16px",
+          background: "var(--clay-soft)", borderRadius: 8,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>TOTAL MT</span>
+          <span style={{ fontWeight: 700, fontSize: 20, color: "var(--clay)" }}>
+            {totalMt.toFixed(3)} MT
+          </span>
+        </div>
+        <div className="field-hint" style={{ marginTop: 6 }}>
+          Formula: (25 kg cols x 25 + 50 kg cols x 50 + JUMBO x 250) / 1000
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Daily Production"}
+      </button>
+
+      {/* ── History table ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Daily Production History</h3>
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : history.length === 0
+            ? <div className="empty">No entries yet.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 1100 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      {DAILY_PROD_COLS.map(c => (
+                        <th key={c.key} style={{ textAlign: "right", fontSize: 10 }}>
+                          {c.shortLabel}
+                          <div style={{ fontWeight: 400, color: "var(--ink-soft)" }}>
+                            {c.bagKg}kg
+                          </div>
+                        </th>
+                      ))}
+                      <th style={{ textAlign: "right", color: "var(--clay)" }}>
+                        TOTAL MT
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>
+                          {fmtDate(row.date)}
+                        </td>
+                        {DAILY_PROD_COLS.map(c => (
+                          <td key={c.key} style={{ textAlign: "right" }}>
+                            {row.values[c.key] > 0
+                              ? row.values[c.key].toFixed(0)
+                              : <span style={{ color: "var(--line)" }}>-</span>}
+                          </td>
+                        ))}
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: "var(--clay)" }}>
+                          {row.total_mt.toFixed(3)}
+                        </td>
+                      </tr>
+                    ))}
+                    {/* TOTAL row */}
+                    <tr style={{ borderTop: "2px solid var(--line)",
+                      background: "var(--clay-soft)" }}>
+                      <td style={{ fontWeight: 700 }}>TOTAL</td>
+                      {DAILY_PROD_COLS.map(c => (
+                        <td key={c.key} style={{ textAlign: "right", fontWeight: 700 }}>
+                          {colTotals[c.key] > 0 ? colTotals[c.key].toFixed(0) : "-"}
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "right", fontWeight: 700,
+                        color: "var(--clay)", fontSize: 14 }}>
+                        {grandTotalMt.toFixed(3)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// TAB 4 -- STOCK LEDGER
 // =============================================================================
 function StockLedgerSection() {
   const { showToast } = useToast();
