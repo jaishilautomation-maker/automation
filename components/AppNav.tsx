@@ -93,7 +93,7 @@ export default function AppNav() {
       ];
     } else if (role === "stores") {
       links = [
-        { href: "/pulveriser/stores",  label: "तेल जारी करें (Stores)" },
+        { href: "/stores",             label: "Stores" },
         { href: "/pulveriser/records", label: "जॉब कार्ड रिकॉर्ड्स" },
       ];
     } else if (role === "production_incharge") {
