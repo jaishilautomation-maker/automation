@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -95,6 +95,7 @@ export default function StoresPage() {
   const TABS: { id: Tab; label: string }[] = [
     { id: "oil",        label: "Oil Issue" },
     { id: "rm",         label: "Raw Material" },
+    { id: "received",   label: "Received" },
     { id: "daily_prod", label: "Daily Production" },
     { id: "ledger",     label: "Stock Ledger" },
     { id: "issue",      label: "Issue Slip" },
@@ -127,6 +128,7 @@ export default function StoresPage() {
 
       {tab === "oil"        && <OilIssueSection />}
       {tab === "rm"         && <RawMaterialSection />}
+      {tab === "received"   && <ReceivedSection />}
       {tab === "daily_prod" && <DailyProductionSection />}
       {tab === "ledger"     && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
@@ -627,7 +629,547 @@ function RawMaterialSection() {
 }
 
 // =============================================================================
-// TAB 3 -- DAILY PRODUCTION
+// TAB 3 -- RECEIVED ENTRY BOOK
+//
+// Mirrors the RECEIVED tab in the DPR Excel exactly.
+// Columns: Date | Particular | Transport | Materials | Vehicle No | O/WT |
+//          F/Wt | Bags/Loose | INV/CHL No | Remarks | PO No
+//
+// Remarks field has a searchable multi-select filter dropdown with all
+// predefined values from the Excel filter list.
+// =============================================================================
+
+const RECEIVED_REMARKS = [
+  "008/2026-27","Apollo bag","Ceat108 bag","Chem Grind Oil","Code R5299",
+  "Crude Sulphur Shifting","DC no. 323","Document not Received","DS-10",
+  "ELASTO 541 OIL","Export Pallet Loading","For Lab","For Repair",
+  "Gear oil 320","Jumbo Bags Shifting","JKI bag","Jumbo Bags Loading",
+  "Jumbo Bags Unloading","Lanxess bag","LR no. 27482","LR no. 61084",
+  "LR no. 61086","LR No 357","LR No.","LR No. 1067","LR No. 120",
+  "LR No. 121","LR No. 122","LR No. 123","LR No. 124","LR No. 125",
+  "LR No. 126","LR No. 127","LR No. 128","LR No. 129","LR No. 137",
+  "LR No. 139","LR No. 151","LR no. 153","LR no. 154","LR No. 227809",
+  "LR No. 2739","LR No. 2741","LR No. 2742","LR No. 2743","LR No. 2744",
+  "LR No. 27458","LR No. 27459","LR No. 27460","LR No. 27462","LR No. 27464",
+  "LR No. 27467","LR No. 27470","LR No. 27478","LR No. 27479","LR No. 27484",
+  "LR No. 27489","LR No. 27490","LR No. 27492","LR No. 27493","LR No. 27494",
+  "LR No. 27495","LR No. 27498","LR No. 27499","LR No. 27500","LR No. 27801",
+  "LR No. 27802","LR No. 27803","LR No. 27807","LR No. 27808","LR No. 2823",
+  "LR No. 2824","LR No. 2825","LR No. 2826","LR No. 2832","LR No. 2835",
+  "LR No. 2836","LR No. 2837","LR No. 2838","LR No. 2839","LR No. 2840",
+  "LR No. 2841","LR No. 2842","LR No. 2843","LR No. 2848","LR No. 2849",
+  "LR No. 2850","LR No. 2851","LR No. 2852","LR No. 2853","LR No. 2854",
+  "LR No. 2855","LR No. 2856","LR No. 2863","LR No. 2864","LR No. 2865",
+  "LR No. 2866","LR No. 2867","LR No. 2868","LR No. 2869","LR No. 2870",
+  "LR No. 2871","LR No. 2872","LR No. 2873","LR No. 2874","LR No. 2875",
+  "LR No. 2876","LR No. 2877","LR No. 2878","LR No. 2879","LR No. 2880",
+  "LR No. 2884","LR No. 2885","LR No. 2886","LR No. 2887","LR No. 2888",
+  "LR No. 2889","LR No. 2890","LR No. 2891","LR No. 2892","LR No. 2893",
+  "LR No. 2894","LR No. 2895","LR No. 2896","LR No. 2897","LR No. 2898",
+  "LR No. 2901","LR No. 2902","LR No. 2903","LR No. 2904","LR No. 2905",
+  "LR No. 2912","LR No. 2913","LR No. 2914","LR No. 2915","LR No. 3473",
+  "LR No. 3475","Lr No. 353","LR No. 354","LR No. 355","LR No. 359",
+  "LR No. 361","Lr No. 363","Lr No. 366","LR No. 377","LR No. 378",
+  "LR No. 381","Lr No. 385","LR No. 395","LR No. 398","LR No. 400",
+  "LR No. 401","LR No. 4152176641","LR No. 60685","LR No. 60686",
+  "LR No. 60690","LR No. 60703","LR No. 60754","LR No. 60783","LR No. 60784",
+  "LR No. 60786","LR No. 60801","LR No. 60802","LR No. 60822","LR No. 60823",
+  "LR No. 60846","LR No. 60847","LR No. 60868","LR No. 60869","LR No. 60893",
+  "LR No. 60898","LR No. 60912","LR No. 60919","LR No. 60958","LR No. 60965",
+  "LR No. 60982","LR No. 60984","LR No. 60996","LR No. 61009","LR No. 61057",
+  "LR No. 61058","LR No. 61083","LR No. 61117","LR No. 61133","LR No. 61134",
+  "LR No. 61185","LR No. 61277","LR No. 61286","LR No. 61288","LR No. 61289",
+  "LR No. 61387","LR No. 61388","LR No. 61403","LR No. 61658","LR No. 61659",
+  "LR No. 61667","LR No. 61668","LR No. 61669","LR No. 61671","LR No. 61680",
+  "LR No. 61685","Lr No. 61734","LR no. 61735","LR no. 61740","LR No. 61743",
+  "LR No. 61751","LR No. 61755","LR No. 61756","LR No. 61764","LR No. 61765",
+  "LR No. 61766","LR No. 66060","LR No. 66076","LR no. 66084","LR No. 66089",
+  "LR No. 66098","LR No. 66144","LR No. 66160","LR No. 66213","LR No. 66216",
+  "LR No. 66222","LR No. 66227","LR No. 66229","LR No. 66258","LR No. 66269",
+  "LR No. 66274","LR No. 66289","LR No. 66404","LR No. 66424","LR No. 66427",
+  "LR No. 66434","LR No. 66453","LR No. 66489","LR No. 66492","LR No. NA",
+  "LR No. ZULFO/26-27/0104","LR No. ZULFO/26-27/0105","LR No. ZULFO/26-27/0106",
+  "LR No. ZULFO/26-27/0107","LR No. ZULFO/26-27/0109","LR No. ZULFO/26-27/0110",
+  "LR No. ZULFO/26-27/0111","LR No. ZULFO/26-27/0112","LR No.1081",
+  "LR No.26605","LR No.2881","LR No.2882","M2615 bag","Old bag",
+  "Pallet Loading","Pallet Unloadin","Power Oil M4150","R5299 bag","Return",
+  "Returned","Returned after repairing","Rubber bag","Sulhphur Shifting",
+  "Sulphur loading","Sulphur Shifting","sulphur Unloading","Sulphur Unloading at B-11",
+  "Sulphur Unloding","W10 bag","Westage Loading",
+] as const;
+
+interface ReceivedEntry {
+  date: string;
+  particular: string;
+  transport: string;
+  materials: string;
+  vehicle_no: string;
+  o_wt: string;
+  f_wt: string;
+  bags_loose: string;
+  inv_chl_no: string;
+  remark: string;
+  po_no: string;
+}
+
+interface SavedReceivedRow extends ReceivedEntry {
+  id: string;
+}
+
+function blankReceivedEntry(): ReceivedEntry {
+  return {
+    date: today(), particular: "", transport: "", materials: "",
+    vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
+    inv_chl_no: "", remark: "", po_no: "",
+  };
+}
+
+function ReceivedSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<ReceivedEntry>(blankReceivedEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedReceivedRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+
+  // Remark dropdown state
+  const [remarkSearch, setRemarkSearch]       = useState("");
+  const [remarkDropOpen, setRemarkDropOpen]   = useState(false);
+
+  // History filter state (multi-select)
+  const [filterRemarks, setFilterRemarks]     = useState<string[]>([]);  // empty = All
+  const [filterSearch, setFilterSearch]       = useState("");
+  const [filterDropOpen, setFilterDropOpen]   = useState(false);
+
+  const setField = (k: keyof ReceivedEntry, v: string) =>
+    setEntry(prev => ({ ...prev, [k]: v }));
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "received_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) { showToast("Could not load history: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedReceivedRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry>;
+        rows.push({
+          id: row.id,
+          date: row.transaction_date,
+          particular:  p.particular  ?? "",
+          transport:   p.transport   ?? "",
+          materials:   p.materials   ?? "",
+          vehicle_no:  p.vehicle_no  ?? "",
+          o_wt:        p.o_wt        ?? "",
+          f_wt:        p.f_wt        ?? "",
+          bags_loose:  p.bags_loose  ?? "",
+          inv_chl_no:  p.inv_chl_no  ?? "",
+          remark:      p.remark      ?? "",
+          po_no:       p.po_no       ?? "",
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows);
+    setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Remarks filtered by search in dropdown
+  const remarkFiltered = remarkSearch.trim()
+    ? RECEIVED_REMARKS.filter(r => r.toLowerCase().includes(remarkSearch.toLowerCase()))
+    : RECEIVED_REMARKS;
+
+  // History filtered by selected remark tags
+  const histFiltered = filterRemarks.length === 0
+    ? history
+    : history.filter(r => filterRemarks.includes(r.remark));
+
+  // Filter dropdown search
+  const filterRemarksFiltered = filterSearch.trim()
+    ? RECEIVED_REMARKS.filter(r => r.toLowerCase().includes(filterSearch.toLowerCase()))
+    : RECEIVED_REMARKS;
+
+  const toggleFilterRemark = (val: string) => {
+    setFilterRemarks(prev =>
+      prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val]
+    );
+  };
+
+  const handleSave = async () => {
+    if (!entry.date) { showToast("Enter a date.", true); return; }
+    if (!entry.particular.trim() && !entry.materials.trim()) {
+      showToast("Enter at least Particular or Materials.", true); return;
+    }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      // Need an item_id FK anchor -- use first active item
+      const { data: itemData } = await supabase
+        .from("stores_stock_items")
+        .select("id, factory_id")
+        .eq("is_active", true)
+        .limit(1).maybeSingle();
+
+      if (!itemData) {
+        showToast("No stock items found. Run migration 027 in Supabase first.", true);
+        setSubmitting(false); return;
+      }
+
+      const payload: ReceivedEntry = {
+        date:        entry.date,
+        particular:  entry.particular.trim(),
+        transport:   entry.transport.trim(),
+        materials:   entry.materials.trim(),
+        vehicle_no:  entry.vehicle_no.trim(),
+        o_wt:        entry.o_wt.trim(),
+        f_wt:        entry.f_wt.trim(),
+        bags_loose:  entry.bags_loose.trim(),
+        inv_chl_no:  entry.inv_chl_no.trim(),
+        remark:      entry.remark,
+        po_no:       entry.po_no.trim(),
+      };
+
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            itemData.id,
+        factory_id:         itemData.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received:       0,
+        qty_issued:         0,
+        dispatch_qty:       0,
+        closing_balance:    0,
+        reference_type:     "received_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
+      setEntry(blankReceivedEntry());
+      setRemarkSearch(""); setRemarkDropOpen(false);
+      loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <>
+      {/* ── Entry form ── */}
+      <div className="card">
+        <h3>Received Entry Book</h3>
+
+        {/* Row 1: Date | Particular | Transport */}
+        <div className="row3">
+          <div>
+            <label>Date *</label>
+            <input type="date" value={entry.date}
+              onChange={e => setField("date", e.target.value)} />
+          </div>
+          <div>
+            <label>Particular</label>
+            <input type="text" placeholder="e.g. Aquaproof Plastics"
+              value={entry.particular}
+              onChange={e => setField("particular", e.target.value)} />
+          </div>
+          <div>
+            <label>Transport</label>
+            <input type="text" placeholder="e.g. Party Transport"
+              value={entry.transport}
+              onChange={e => setField("transport", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 2: Materials | Vehicle No | O/WT */}
+        <div className="row3">
+          <div>
+            <label>Materials</label>
+            <input type="text" placeholder="e.g. HDPE/PP bags for Apollo 160108 25 Kg"
+              value={entry.materials}
+              onChange={e => setField("materials", e.target.value)} />
+          </div>
+          <div>
+            <label>Vehicle No.</label>
+            <input type="text" placeholder="e.g. MH05EL3625"
+              value={entry.vehicle_no}
+              onChange={e => setField("vehicle_no", e.target.value)} />
+          </div>
+          <div>
+            <label>O/WT</label>
+            <input type="text" placeholder="e.g. 2034.000"
+              value={entry.o_wt}
+              onChange={e => setField("o_wt", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 3: F/Wt | Bags/Loose | INV/CHL No */}
+        <div className="row3">
+          <div>
+            <label>F/Wt</label>
+            <input type="text" placeholder="e.g. 2034 Nos"
+              value={entry.f_wt}
+              onChange={e => setField("f_wt", e.target.value)} />
+          </div>
+          <div>
+            <label>Bags / Loose</label>
+            <input type="text" placeholder="e.g. Size 20x32 Printed"
+              value={entry.bags_loose}
+              onChange={e => setField("bags_loose", e.target.value)} />
+          </div>
+          <div>
+            <label>INV / CHL No.</label>
+            <input type="text" placeholder="e.g. AP/0049/2026-27"
+              value={entry.inv_chl_no}
+              onChange={e => setField("inv_chl_no", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 4: Remarks (searchable dropdown) | PO No */}
+        <div className="row2">
+          <div style={{ position: "relative" }}>
+            <label>Remarks</label>
+            {/* Display box */}
+            <div
+              onClick={() => setRemarkDropOpen(prev => !prev)}
+              style={{
+                width: "100%", padding: "10px 12px",
+                border: "1px solid var(--line)", borderRadius: 8,
+                fontSize: 15, background: "#fff", cursor: "pointer",
+                color: entry.remark ? "var(--ink)" : "var(--ink-soft)",
+                userSelect: "none",
+              }}>
+              {entry.remark || "-- Select remark --"}
+            </div>
+
+            {/* Dropdown panel */}
+            {remarkDropOpen && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0,
+                background: "#fff", border: "1px solid var(--line)",
+                borderRadius: 8, zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,.12)",
+                maxHeight: 300, display: "flex", flexDirection: "column",
+              }}>
+                {/* Search box inside dropdown */}
+                <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
+                  <input
+                    type="text"
+                    placeholder="Search remarks..."
+                    value={remarkSearch}
+                    onChange={e => setRemarkSearch(e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    style={{ width: "100%", padding: "6px 10px",
+                      border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }}
+                    autoFocus
+                  />
+                </div>
+                {/* Options list */}
+                <div style={{ overflowY: "auto", flex: 1 }}>
+                  {/* Clear / blank option */}
+                  <div
+                    onClick={() => { setField("remark", ""); setRemarkDropOpen(false); setRemarkSearch(""); }}
+                    style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                      color: "var(--ink-soft)", borderBottom: "1px solid var(--line)",
+                      background: !entry.remark ? "var(--clay-soft)" : undefined }}>
+                    (Blanks) -- Clear selection
+                  </div>
+                  {remarkFiltered.map(r => (
+                    <div key={r}
+                      onClick={() => { setField("remark", r); setRemarkDropOpen(false); setRemarkSearch(""); }}
+                      style={{
+                        padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                        background: entry.remark === r ? "var(--clay-soft)" : undefined,
+                        color: entry.remark === r ? "var(--clay)" : "var(--ink)",
+                      }}
+                      onMouseEnter={e => { if (entry.remark !== r) (e.target as HTMLDivElement).style.background = "#f9f8f5"; }}
+                      onMouseLeave={e => { if (entry.remark !== r) (e.target as HTMLDivElement).style.background = ""; }}
+                    >
+                      {r}
+                    </div>
+                  ))}
+                  {remarkFiltered.length === 0 && (
+                    <div style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-soft)" }}>
+                      No results for "{remarkSearch}"
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label>PO No.</label>
+            <input type="text" placeholder="e.g. 34/26-27"
+              value={entry.po_no}
+              onChange={e => setField("po_no", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Received Entry"}
+      </button>
+
+      {/* ── History table with filter ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>
+            Received History
+            {filterRemarks.length > 0
+              ? " (filtered: " + filterRemarks.length + ")"
+              : " (all)"}
+          </h3>
+
+          {/* Filter by Remarks multi-select */}
+          <div style={{ position: "relative" }}>
+            <button type="button"
+              onClick={() => setFilterDropOpen(prev => !prev)}
+              style={{
+                padding: "6px 14px", border: "1px solid var(--line)",
+                borderRadius: 6, background: filterRemarks.length > 0
+                  ? "var(--clay)" : "#fff",
+                color: filterRemarks.length > 0 ? "#fff" : "var(--ink-soft)",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+              Filter Remarks {filterRemarks.length > 0 ? "(" + filterRemarks.length + ")" : ""}
+            </button>
+
+            {filterDropOpen && (
+              <div style={{
+                position: "absolute", top: "100%", right: 0,
+                background: "#fff", border: "1px solid var(--line)",
+                borderRadius: 8, zIndex: 100,
+                boxShadow: "0 4px 16px rgba(0,0,0,.12)",
+                width: 280, maxHeight: 320,
+                display: "flex", flexDirection: "column",
+              }}>
+                <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
+                  <input type="text" placeholder="Search..."
+                    value={filterSearch}
+                    onChange={e => setFilterSearch(e.target.value)}
+                    style={{ width: "100%", padding: "6px 10px",
+                      border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }}
+                    autoFocus
+                  />
+                </div>
+                <div style={{ overflowY: "auto", flex: 1 }}>
+                  {/* Select All */}
+                  <label style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                    fontWeight: 700, borderBottom: "1px solid var(--line)",
+                  }}>
+                    <input type="checkbox"
+                      checked={filterRemarks.length === 0}
+                      onChange={() => setFilterRemarks([])}
+                    />
+                    (Select All)
+                  </label>
+                  {/* (Blanks) */}
+                  <label style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                    borderBottom: "1px solid var(--line)",
+                  }}>
+                    <input type="checkbox"
+                      checked={filterRemarks.includes("")}
+                      onChange={() => toggleFilterRemark("")}
+                    />
+                    (Blanks)
+                  </label>
+                  {filterRemarksFiltered.map(r => (
+                    <label key={r} style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "8px 14px", cursor: "pointer", fontSize: 13,
+                    }}>
+                      <input type="checkbox"
+                        checked={filterRemarks.includes(r)}
+                        onChange={() => toggleFilterRemark(r)}
+                      />
+                      {r}
+                    </label>
+                  ))}
+                </div>
+                <div style={{ padding: "8px 10px", borderTop: "1px solid var(--line)",
+                  display: "flex", gap: 8 }}>
+                  <button type="button" className="btn btn-primary"
+                    style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+                    onClick={() => setFilterDropOpen(false)}>
+                    Apply
+                  </button>
+                  <button type="button" className="btn btn-ghost"
+                    style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+                    onClick={() => { setFilterRemarks([]); setFilterSearch(""); setFilterDropOpen(false); }}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : histFiltered.length === 0
+            ? <div className="empty">No entries found.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 1000 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Particular</th>
+                      <th>Transport</th>
+                      <th>Materials</th>
+                      <th>Vehicle No.</th>
+                      <th style={{ textAlign: "right" }}>O/WT</th>
+                      <th style={{ textAlign: "right" }}>F/Wt</th>
+                      <th>Bags/Loose</th>
+                      <th>INV/CHL No.</th>
+                      <th>Remarks</th>
+                      <th>PO No.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {histFiltered.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
+                        <td style={{ fontSize: 12, maxWidth: 180, whiteSpace: "normal" }}>
+                          {nilText(row.materials)}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.f_wt)}</td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
+                        <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>
+                          {nilText(row.remark)}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// TAB 4 -- DAILY PRODUCTION
 //
 // Mirrors the DAILY PRODN tab in the DPR Excel exactly.
 // Columns (matching the Excel left-to-right):
