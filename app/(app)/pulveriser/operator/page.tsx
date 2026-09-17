@@ -43,6 +43,30 @@ interface HourlyRow {
   reading_date: string;
 }
 
+// ---------------------------------------------------------------------------
+// Machine Close (Band) Time — multiple entries per job card, any time during
+// the shift. Operator can save and continue later.
+// ---------------------------------------------------------------------------
+interface MachineCloseEntry {
+  id: string;              // local key (temp-xxx or DB uuid)
+  persistedId: string | null;
+  close_date: string;      // YYYY-MM-DD
+  close_time: string;      // HH:MM
+  restart_time: string;    // HH:MM — optional, empty string = not yet restarted
+  reason: string;
+}
+
+function blankCloseEntry(): MachineCloseEntry {
+  return {
+    id: `tmp-close-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    persistedId: null,
+    close_date: new Date().toISOString().slice(0, 10),
+    close_time: "",
+    restart_time: "",
+    reason: "",
+  };
+}
+
 // The pulveriser hour meter is a CODED reading, not a wall clock.
 // Operator enters plain numbers, e.g. start 780, stop 930.
 //   raw diff      = stop - start                     (930 - 780 = 250)
@@ -116,6 +140,7 @@ export default function PulveriserOperatorPage() {
   const [chkRoller, setChkRoller]         = useState(false);
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
+  const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
 
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
@@ -184,9 +209,25 @@ export default function PulveriserOperatorPage() {
       reading_date: r.reading_date ?? new Date().toISOString().slice(0, 10),
     })) as HourlyRow[];
     setRows(existing.length ? existing : [blankRow()]);
+
+    // Load any existing machine close time entries
+    const { data: closeData } = await supabase
+      .from("pulveriser_machine_close_times")
+      .select("*")
+      .eq("job_card_id", jc.id)
+      .order("created_at");
+    const existingClose = (closeData ?? []).map(r => ({
+      id:           r.id,
+      persistedId:  r.id as string,
+      close_date:   r.close_date  ?? new Date().toISOString().slice(0, 10),
+      close_time:   r.close_time  ?? "",
+      restart_time: r.restart_time ?? "",
+      reason:       r.reason      ?? "",
+    })) as MachineCloseEntry[];
+    setCloseEntries(existingClose.length ? existingClose : [blankCloseEntry()]);
   };
 
-  const goBack = () => { setActive(null); setRows([blankRow()]); setVfdParam(null); setActualMt(""); };
+  const goBack = () => { setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]); setVfdParam(null); setActualMt(""); };
 
   // Classifier VFD mismatch flag — reference only, never blocks submission.
   const classifierRange = useMemo(
@@ -214,6 +255,64 @@ export default function PulveriserOperatorPage() {
       if (error) { showToast("पंक्ति नहीं हटा सके: " + error.message, true); return; }
     }
     setRows(prev => prev.filter(r => r.id !== row.id));
+  };
+
+  // ── Machine Close Time helpers ────────────────────────────────────────────
+  const updateCloseEntry = (id: string, field: keyof MachineCloseEntry, val: string) => {
+    setCloseEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: val } : e));
+  };
+  const addCloseEntry = () => setCloseEntries(prev => [...prev, blankCloseEntry()]);
+  const removeCloseEntry = async (entry: MachineCloseEntry) => {
+    if (entry.persistedId) {
+      const { error } = await supabase
+        .from("pulveriser_machine_close_times")
+        .delete()
+        .eq("id", entry.persistedId);
+      if (error) { showToast("प्रविष्टि नहीं हटा सके: " + error.message, true); return; }
+    }
+    setCloseEntries(prev => prev.filter(e => e.id !== entry.id));
+  };
+
+  /** Upsert all close-time entries — called on both "save progress" and "submit". */
+  const syncCloseEntries = async (jc: PulveriserJobCard) => {
+    for (const e of closeEntries) {
+      // Skip blank rows (no close_time entered yet)
+      if (!e.close_time.trim()) continue;
+
+      const body = {
+        job_card_id:  jc.id,
+        factory_id:   jc.factory_id,
+        close_date:   e.close_date  || new Date().toISOString().slice(0, 10),
+        close_time:   e.close_time,
+        restart_time: e.restart_time.trim() || null,
+        reason:       e.reason.trim()       || null,
+        recorded_by:  user?.id              ?? null,
+      };
+
+      if (e.persistedId) {
+        const { error } = await supabase
+          .from("pulveriser_machine_close_times")
+          .update(body)
+          .eq("id", e.persistedId);
+        if (error) throw error;
+      } else {
+        const { data: inserted, error } = await supabase
+          .from("pulveriser_machine_close_times")
+          .insert(body)
+          .select("id")
+          .single();
+        if (error) throw error;
+        // Promote temp id → real DB id so subsequent saves are UPDATEs
+        if (inserted) {
+          setCloseEntries(prev =>
+            prev.map(x => x.id === e.id
+              ? { ...x, persistedId: inserted.id, id: inserted.id }
+              : x
+            )
+          );
+        }
+      }
+    }
   };
 
   // Submit is allowed once the core operator fields are present.
@@ -294,6 +393,8 @@ export default function PulveriserOperatorPage() {
     try {
       // Save hourly rows first (they require the card to still be 'pending').
       await syncHourlyRows(active);
+      // Save machine close time entries (independent of submission status)
+      await syncCloseEntries(active);
       const { data, error } = await persistOperatorFields(active.id, submit);
       if (error) { showToast("सहेजा नहीं जा सका: " + error.message, true); return; }
       if (!data || data.length === 0) {
@@ -582,6 +683,82 @@ export default function PulveriserOperatorPage() {
         })}
         <button type="button" className="btn btn-ghost" onClick={addRow}>
           + प्रति घंटा रीडिंग जोड़ें
+        </button>
+      </div>
+
+      {/* Machine Close (Band) Times */}
+      <div className="card">
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>मशीन बंद समय</h3>
+          <span className="count">{closeEntries.length}</span>
+        </div>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          शिफ्ट के दौरान जितनी बार मशीन बंद हो, हर बार एक नई प्रविष्टि जोड़ें।
+          "प्रगति सहेजें" दबाने पर डेटा सुरक्षित हो जाता है — बाद में वापस आकर भर सकते हैं।
+        </div>
+
+        {closeEntries.map((e, i) => (
+          <div key={e.id} style={{
+            border: "1px solid var(--line)", borderRadius: 8,
+            padding: 14, marginBottom: 10, background: "var(--surface)",
+          }}>
+            {/* Entry header */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>बंद #{i + 1}</span>
+              {closeEntries.length > 1 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
+                  onClick={() => removeCloseEntry(e)}
+                >
+                  हटाएँ
+                </button>
+              )}
+            </div>
+
+            {/* Date + Close time + Restart time */}
+            <div className="row3">
+              <div>
+                <label>तारीख</label>
+                <input
+                  type="date"
+                  value={e.close_date}
+                  onChange={ev => updateCloseEntry(e.id, "close_date", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>बंद समय *</label>
+                <input
+                  type="time"
+                  value={e.close_time}
+                  onChange={ev => updateCloseEntry(e.id, "close_time", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>पुनः शुरू समय</label>
+                <input
+                  type="time"
+                  value={e.restart_time}
+                  placeholder="—"
+                  onChange={ev => updateCloseEntry(e.id, "restart_time", ev.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Reason */}
+            <label>कारण / टिप्पणी</label>
+            <input
+              type="text"
+              placeholder="जैसे: मेंटेनेन्स, ब्रेक, माल खत्म…"
+              value={e.reason}
+              onChange={ev => updateCloseEntry(e.id, "reason", ev.target.value)}
+            />
+          </div>
+        ))}
+
+        <button type="button" className="btn btn-ghost" onClick={addCloseEntry}>
+          + बंद समय जोड़ें
         </button>
       </div>
 
