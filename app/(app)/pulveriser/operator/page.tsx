@@ -294,14 +294,14 @@ export default function PulveriserOperatorPage() {
           .from("pulveriser_machine_close_times")
           .update(body)
           .eq("id", e.persistedId);
-        if (error) throw error;
+        if (error) throw new Error(error.message ?? JSON.stringify(error));
       } else {
         const { data: inserted, error } = await supabase
           .from("pulveriser_machine_close_times")
           .insert(body)
           .select("id")
           .single();
-        if (error) throw error;
+        if (error) throw new Error(error.message ?? JSON.stringify(error));
         // Promote temp id → real DB id so subsequent saves are UPDATEs
         if (inserted) {
           setCloseEntries(prev =>
