@@ -5,7 +5,7 @@
 //
 // Factory A-20/1 (FACTORY_CODE=A20_1):
 //   operator          → A-20/1 shift entry (/operator)
-//   stores            → pulveriser oil-issue queue (/pulveriser/stores)
+//   stores            → full Stores module (/stores) with all tabs
 //   production_incharge → production sign-off + Breakdown + PM
 //   chemist/lab_manager → lab sign-off (job_card) + Lab QC (lab_qc)
 //
@@ -94,7 +94,7 @@ export default function AppNav() {
     } else if (role === "stores") {
       links = [
         { href: "/stores",             label: "Stores" },
-        { href: "/pulveriser/records", label: "जॉब कार्ड रिकॉर्ड्स" },
+        { href: "/pulveriser/records", label: "Job Card Records" },
       ];
     } else if (role === "production_incharge") {
       links = [

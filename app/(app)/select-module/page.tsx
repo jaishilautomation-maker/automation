@@ -70,7 +70,7 @@ function landingPath(module: ActivityModule, role: AppRole | null): string {
   if (module === "job_card") {
     if (FACTORY_CODE === "A20") return "/production-job-card";
     if (role === "operator")                          return "/pulveriser/operator";
-    if (role === "stores")                            return "/pulveriser/stores";
+    if (role === "stores")                            return "/stores";
     if (role === "production_incharge")               return "/pulveriser/production";
     if (role === "chemist" || role === "lab_manager") return "/lab";
     return "/dashboard";
