@@ -1123,3 +1123,74 @@ export function parseVfdRange(ref: string | null | undefined): [number, number] 
   const single = Number(cleaned);
   return Number.isFinite(single) ? [single, single] : null;
 }
+
+// ---------------------------------------------------------------------------
+// Stores Module — stock items, ledger, purchase requisitions
+// (used by app/(app)/stores/page.tsx)
+// ---------------------------------------------------------------------------
+
+export type StockItemCategory = "raw_material" | "finished_good" | "packaging_material";
+
+export type PrnStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "ordered"
+  | "partial"
+  | "fulfilled"
+  | "cancelled"
+  | "auto_flagged";
+
+/** stores_stock_items — master list of tracked stock items. */
+export interface StoresStockItem {
+  id: string;
+  factory_id: string;
+  item_name: string;
+  item_code: string;
+  category: StockItemCategory;
+  unit: string;
+  min_threshold: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** stores_stock_ledger — one row per stock movement / transaction. */
+export interface StoresStockLedger {
+  id: string;
+  factory_id: string;
+  item_id: string;
+  transaction_date: string;        // ISO date
+  transaction_type: string;        // 'in' | 'out' | 'adjustment' | etc.
+  transaction_source: string;      // 'manual' | 'oil_issue' | 'dispatch' | etc.
+  quantity: number;
+  qty_received: number;            // inbound qty for this row
+  qty_issued: number;              // outbound (issue) qty for this row
+  dispatch_qty: number;            // dispatch qty for this row
+  closing_balance: number;
+  reference_no: string | null;
+  remark: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** purchase_requisitions — PRN records raised by Stores. */
+export interface PurchaseRequisition {
+  id: string;
+  factory_id: string;
+  item_id: string;
+  prn_number: string | null;
+  status: PrnStatus;
+  qty_required: number | null;
+  po_qty: number | null;
+  received_qty: number | null;
+  unit_price: number | null;
+  preferred_supplier: string | null;
+  required_by_date: string | null; // ISO date
+  reason: string | null;
+  auto_flagged_balance: number | null;
+  raised_at: string;               // ISO date
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
