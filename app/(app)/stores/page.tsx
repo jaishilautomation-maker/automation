@@ -809,7 +809,29 @@ function StockLedgerSection() {
 
 // =============================================================================
 // TAB 4 — ISSUE SLIP
+//
+// Fields per the physical Material Issue Slip form (JSCI/STORE/02):
+//   Date | Material Description | Unit | Quantity Required | Quantity Issued |
+//   Used For | Remaining | Remark
+//
+// Remaining = current stock balance − Quantity Issued (computed live).
+// The slip is saved as a ledger row; all extra fields are stored in remark JSON
+// so they appear correctly in the history table.
 // =============================================================================
+
+/** Shape stored in the remark JSON column for slip reference_type rows. */
+interface SlipPayload {
+  date: string;
+  material_description: string;
+  unit: string;
+  qty_required: number;
+  qty_issued: number;
+  used_for: string;
+  remaining: number;
+  remark: string;
+  item_id: string;
+}
+
 function IssueSlipSection() {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -818,12 +840,19 @@ function IssueSlipSection() {
   const [items, setItems]                   = useState<StoresStockItem[]>([]);
   const [loading, setLoading]               = useState(true);
   const [selectedItemId, setSelectedItemId] = useState("");
-  const [qty, setQty]                       = useState("");
-  const [usedFor, setUsedFor]               = useState("");
-  const [slipDate, setSlipDate]             = useState(today());
-  const [remark, setRemark]                 = useState("");
-  const [submitting, setSubmitting]         = useState(false);
-  const [recentSlips, setRecentSlips]       = useState<(StoresStockLedger & { item_name?: string })[]>([]);
+  const [currentBalance, setCurrentBalance] = useState<number | null>(null);
+
+  // Form fields
+  const [slipDate, setSlipDate]         = useState(today());
+  const [qtyRequired, setQtyRequired]   = useState("");
+  const [qtyIssued, setQtyIssued]       = useState("");
+  const [usedFor, setUsedFor]           = useState("");
+  const [remark, setRemark]             = useState("");
+  const [submitting, setSubmitting]     = useState(false);
+
+  // History
+  const [recentSlips, setRecentSlips]   = useState<SlipPayload[]>([]);
+  const [histLoading, setHistLoading]   = useState(true);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -835,101 +864,233 @@ function IssueSlipSection() {
   }, [supabase]);
 
   const loadSlips = useCallback(async () => {
+    setHistLoading(true);
     const { data } = await supabase
       .from("stores_stock_ledger")
-      .select("*, stores_stock_items(item_name)")
-      .eq("transaction_source", "manual").gt("qty_issued", 0)
-      .order("created_at", { ascending: false }).limit(20);
-    if (data) setRecentSlips(data.map((r: Record<string, unknown>) => ({
-      ...r, item_name: (r.stores_stock_items as { item_name: string } | null)?.item_name,
-    })) as (StoresStockLedger & { item_name?: string })[]);
+      .select("remark")
+      .eq("reference_type", "slip")
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (data) {
+      const parsed: SlipPayload[] = [];
+      for (const row of data as { remark: string | null }[]) {
+        try {
+          const p = JSON.parse(row.remark ?? "{}") as Partial<SlipPayload>;
+          if (p.material_description) parsed.push(p as SlipPayload);
+        } catch { /* skip */ }
+      }
+      setRecentSlips(parsed);
+    }
+    setHistLoading(false);
   }, [supabase]);
 
   useEffect(() => { loadItems(); loadSlips(); }, [loadItems, loadSlips]);
 
-  const selectedItem = items.find(i => i.id === selectedItemId);
+  // When item is selected, fetch its current stock balance
+  const handleItemChange = async (itemId: string) => {
+    setSelectedItemId(itemId);
+    setCurrentBalance(null);
+    if (!itemId) return;
+    const { data } = await supabase
+      .from("stores_stock_ledger")
+      .select("closing_balance")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setCurrentBalance((data as { closing_balance: number } | null)?.closing_balance ?? 0);
+  };
+
+  const selectedItem  = items.find(i => i.id === selectedItemId);
+  const qtyIssuedNum  = Number(qtyIssued);
+  const qtyRequiredNum = Number(qtyRequired);
+  // Remaining = current balance − qty issued (computed live)
+  const remaining     = currentBalance != null && Number.isFinite(qtyIssuedNum) && qtyIssuedNum >= 0
+    ? currentBalance - qtyIssuedNum
+    : null;
+
+  const reset = () => {
+    setSelectedItemId(""); setCurrentBalance(null);
+    setQtyRequired(""); setQtyIssued(""); setUsedFor(""); setRemark("");
+    setSlipDate(today());
+  };
 
   const handleIssue = async () => {
-    if (!selectedItemId || !qty.trim() || !user) { showToast("Select item and enter quantity.", true); return; }
-    const qtyNum = Number(qty);
-    if (!Number.isFinite(qtyNum) || qtyNum <= 0) { showToast("Enter a valid quantity.", true); return; }
+    if (!selectedItemId || !qtyIssued.trim() || !user) {
+      showToast("Select a material and enter Quantity Issued.", true); return;
+    }
+    if (!Number.isFinite(qtyIssuedNum) || qtyIssuedNum <= 0) {
+      showToast("Enter a valid Quantity Issued (> 0).", true); return;
+    }
     setSubmitting(true);
     try {
-      const { data: last } = await supabase.from("stores_stock_ledger")
-        .select("closing_balance").eq("item_id", selectedItemId)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
-      const prevBal = (last as { closing_balance: number } | null)?.closing_balance ?? 0;
-      const newBal  = prevBal - qtyNum;
+      const prevBal = currentBalance ?? 0;
+      const newBal  = prevBal - qtyIssuedNum;
+
+      const payload: SlipPayload = {
+        date:                 slipDate,
+        material_description: selectedItem?.item_name ?? selectedItemId,
+        unit:                 selectedItem?.unit ?? "kg",
+        qty_required:         Number.isFinite(qtyRequiredNum) ? qtyRequiredNum : 0,
+        qty_issued:           qtyIssuedNum,
+        used_for:             usedFor.trim(),
+        remaining:            newBal,
+        remark:               remark.trim(),
+        item_id:              selectedItemId,
+      };
+
       const { error } = await supabase.from("stores_stock_ledger").insert({
-        item_id: selectedItemId, transaction_date: slipDate,
-        transaction_source: "manual", qty_received: 0, qty_issued: qtyNum,
-        dispatch_qty: 0, closing_balance: newBal, reference_type: "slip",
-        remark: [usedFor.trim() && `Used for: ${usedFor.trim()}`, remark.trim()].filter(Boolean).join(" | ") || null,
-        entered_by: user.id,
+        item_id:            selectedItemId,
+        transaction_date:   slipDate,
+        transaction_source: "manual",
+        qty_received:       0,
+        qty_issued:         qtyIssuedNum,
+        dispatch_qty:       0,
+        closing_balance:    newBal,
+        reference_type:     "slip",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
       });
+
       if (error) { showToast("Save failed: " + error.message, true); return; }
-      showToast(`Issued ✓ — ${selectedItem?.item_name ?? ""} ${qtyNum} ${selectedItem?.unit ?? ""}. Balance: ${newBal.toFixed(3)}`);
-      setSelectedItemId(""); setQty(""); setUsedFor(""); setRemark("");
+      showToast(`Issued ✓ — ${payload.material_description} ${qtyIssuedNum} ${payload.unit}. Remaining: ${newBal.toFixed(3)}`);
+      reset();
       loadSlips();
-    } catch (e: unknown) { showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
     } finally { setSubmitting(false); }
   };
 
   return (
     <>
+      {/* ── Entry form ── */}
       <div className="card">
         <h3>Material Issue Slip</h3>
-        <label>Item *</label>
-        {loading ? <div className="field-hint">Loading…</div> : (
-          <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)}>
-            <option value="">— Select item —</option>
-            {["raw_material", "packaging_material"].map(cat => (
-              <optgroup key={cat} label={CATEGORY_LABEL[cat as StockItemCategory]}>
-                {items.filter(i => i.category === cat).map(item => (
-                  <option key={item.id} value={item.id}>{item.item_name} ({item.item_code})</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        )}
+
+        {/* Row 1: Date + Material Description */}
         <div className="row2">
           <div>
-            <label>Quantity ({selectedItem?.unit ?? "unit"}) *</label>
-            <input type="number" min="0.001" step="0.001" placeholder="0"
-              value={qty} onChange={e => setQty(e.target.value)} />
+            <label>Date</label>
+            <input type="date" value={slipDate}
+              onChange={e => setSlipDate(e.target.value)} />
           </div>
           <div>
-            <label>Date</label>
-            <input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} />
+            <label>Material Description *</label>
+            {loading ? <div className="field-hint">Loading…</div> : (
+              <select value={selectedItemId} onChange={e => handleItemChange(e.target.value)}>
+                <option value="">— Select material —</option>
+                {["raw_material", "packaging_material"].map(cat => (
+                  <optgroup key={cat} label={CATEGORY_LABEL[cat as StockItemCategory]}>
+                    {items.filter(i => i.category === cat).map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.item_name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            )}
           </div>
         </div>
-        <label>Used for (Batch / Job No.)</label>
-        <input type="text" placeholder="e.g. Batch 348, Job 301…"
-          value={usedFor} onChange={e => setUsedFor(e.target.value)} />
-        <label>Remark (optional)</label>
-        <input type="text" placeholder="Additional note…"
-          value={remark} onChange={e => setRemark(e.target.value)} />
+
+        {/* Row 2: Unit (read-only from item) + Qty Required + Qty Issued */}
+        <div className="row3">
+          <div>
+            <label>Unit</label>
+            <input type="text" disabled
+              value={selectedItem?.unit ?? "—"}
+              placeholder="kg / nos / L…" />
+          </div>
+          <div>
+            <label>Quantity Required</label>
+            <input type="number" min="0" step="0.001" placeholder="0"
+              value={qtyRequired}
+              onChange={e => setQtyRequired(e.target.value)} />
+          </div>
+          <div>
+            <label>Quantity Issued *</label>
+            <input type="number" min="0.001" step="0.001" placeholder="0"
+              value={qtyIssued}
+              onChange={e => setQtyIssued(e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 3: Used For + Remaining (computed) + Remark */}
+        <div className="row3">
+          <div>
+            <label>Used For (Batch / Job No.)</label>
+            <input type="text" placeholder="e.g. Batch 348, Job 301…"
+              value={usedFor}
+              onChange={e => setUsedFor(e.target.value)} />
+          </div>
+          <div>
+            <label>Remaining</label>
+            <input type="text" disabled
+              value={remaining != null ? remaining.toFixed(3) : "—"}
+              style={{
+                fontWeight: 700,
+                color: remaining != null && remaining < 0 ? "var(--warn)" : "var(--ok)",
+              }} />
+            {currentBalance != null && (
+              <div className="field-hint">Current stock: {currentBalance.toFixed(3)}</div>
+            )}
+          </div>
+          <div>
+            <label>Remark</label>
+            <input type="text" placeholder="Additional note…"
+              value={remark}
+              onChange={e => setRemark(e.target.value)} />
+          </div>
+        </div>
       </div>
+
       <button className="btn btn-primary" type="button"
-        disabled={submitting || !selectedItemId || !qty.trim()} onClick={handleIssue}>
+        disabled={submitting || !selectedItemId || !qtyIssued.trim()}
+        onClick={handleIssue}>
         {submitting ? "Saving…" : "Issue Material ✓"}
       </button>
-      {recentSlips.length > 0 && (
-        <div className="card" style={{ marginTop: 14 }}>
-          <h3>Recent Slips (Last 20)</h3>
-          <div style={{ overflowX: "auto" }}>
-            <table className="dash" style={{ minWidth: 420 }}>
-              <thead><tr><th>Date</th><th>Item</th><th style={{ textAlign: "right" }}>Issued</th><th style={{ textAlign: "right" }}>Balance</th></tr></thead>
-              <tbody>
-                {recentSlips.map(row => (
-                  <tr key={row.id}>
-                    <td>{fmtDate(row.transaction_date)}</td>
-                    <td style={{ fontSize: 12 }}>{row.item_name ?? row.item_id.slice(0, 8)}</td>
-                    <td style={{ textAlign: "right", color: "var(--warn)" }}>−{fmt(row.qty_issued)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(row.closing_balance)}</td>
+
+      {/* ── History table ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Issue Slip History (Last 30)</h3>
+        {histLoading ? <div className="empty">Loading…</div>
+          : recentSlips.length === 0 ? <div className="empty">No slips recorded yet.</div>
+          : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash" style={{ minWidth: 780 }}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Material Description</th>
+                    <th>Unit</th>
+                    <th style={{ textAlign: "right" }}>Qty Required</th>
+                    <th style={{ textAlign: "right" }}>Qty Issued</th>
+                    <th>Used For</th>
+                    <th style={{ textAlign: "right" }}>Remaining</th>
+                    <th>Remark</th>
                   </tr>
-                ))}
-              </tbody>
+                </thead>
+                <tbody>
+                  {recentSlips.map((row, i) => (
+                    <tr key={i}>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                      <td style={{ fontWeight: 600, fontSize: 12 }}>{row.material_description}</td>
+                      <td style={{ fontSize: 12 }}>{row.unit}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {row.qty_required > 0 ? fmt(row.qty_required) : "—"}
+                      </td>
+                      <td style={{ textAlign: "right", color: "var(--warn)", fontWeight: 700 }}>
+                        −{fmt(row.qty_issued)}
+                      </td>
+                      <td style={{ fontSize: 12 }}>{row.used_for || "—"}</td>
+                      <td style={{ textAlign: "right", fontWeight: 700,
+                        color: row.remaining < 0 ? "var(--warn)" : undefined }}>
+                        {fmt(row.remaining)}
+                      </td>
+                      <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>{row.remark || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
             </table>
           </div>
         </div>
