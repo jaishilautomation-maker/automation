@@ -141,6 +141,7 @@ export default function PulveriserOperatorPage() {
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
   const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
+  const [savingClose, setSavingClose]     = useState(false);
 
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
@@ -312,6 +313,20 @@ export default function PulveriserOperatorPage() {
           );
         }
       }
+    }
+  };
+
+  /** Dedicated save for मशीन बंद समय — persists close entries without touching other fields. */
+  const handleSaveCloseEntries = async () => {
+    if (!active || !user) return;
+    setSavingClose(true);
+    try {
+      await syncCloseEntries(active);
+      showToast("मशीन बंद समय सहेजा गया ✓");
+    } catch (e: unknown) {
+      showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally {
+      setSavingClose(false);
     }
   };
 
@@ -590,6 +605,90 @@ export default function PulveriserOperatorPage() {
         <textarea rows={2} value={workDetails} onChange={e => setWorkDetails(e.target.value)} />
       </div>
 
+      {/* Machine Close (Band) Times — ABOVE hourly readings */}
+      <div className="card">
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>मशीन बंद समय</h3>
+          <span className="count">{closeEntries.length}</span>
+        </div>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          शिफ्ट के दौरान जितनी बार मशीन बंद हो, हर बार एक नई प्रविष्टि जोड़ें।
+          भरने के बाद "बंद समय सहेजें" दबाएँ — बाद में वापस आकर और प्रविष्टियाँ जोड़ सकते हैं।
+        </div>
+
+        {closeEntries.map((e, i) => (
+          <div key={e.id} style={{
+            border: "1px solid var(--line)", borderRadius: 8,
+            padding: 14, marginBottom: 10, background: "var(--surface)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>बंद #{i + 1}</span>
+              {closeEntries.length > 1 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
+                  onClick={() => removeCloseEntry(e)}
+                >
+                  हटाएँ
+                </button>
+              )}
+            </div>
+
+            <div className="row3">
+              <div>
+                <label>तारीख</label>
+                <input
+                  type="date"
+                  value={e.close_date}
+                  onChange={ev => updateCloseEntry(e.id, "close_date", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>बंद समय *</label>
+                <input
+                  type="time"
+                  value={e.close_time}
+                  onChange={ev => updateCloseEntry(e.id, "close_time", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>पुनः शुरू समय</label>
+                <input
+                  type="time"
+                  value={e.restart_time}
+                  placeholder="—"
+                  onChange={ev => updateCloseEntry(e.id, "restart_time", ev.target.value)}
+                />
+              </div>
+            </div>
+
+            <label>कारण / टिप्पणी</label>
+            <input
+              type="text"
+              placeholder="जैसे: मेंटेनेन्स, ब्रेक, माल खत्म…"
+              value={e.reason}
+              onChange={ev => updateCloseEntry(e.id, "reason", ev.target.value)}
+            />
+          </div>
+        ))}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+          <button type="button" className="btn btn-ghost" onClick={addCloseEntry}>
+            + बंद समय जोड़ें
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ color: "var(--ok)" }}
+            disabled={savingClose}
+            onClick={handleSaveCloseEntries}
+          >
+            {savingClose ? "सहेजा जा रहा है…" : "बंद समय सहेजें"}
+          </button>
+        </div>
+      </div>
+
       {/* Hourly readings (repeatable) */}
       <div className="card">
         <div className="helper-row">
@@ -683,82 +782,6 @@ export default function PulveriserOperatorPage() {
         })}
         <button type="button" className="btn btn-ghost" onClick={addRow}>
           + प्रति घंटा रीडिंग जोड़ें
-        </button>
-      </div>
-
-      {/* Machine Close (Band) Times */}
-      <div className="card">
-        <div className="helper-row">
-          <h3 style={{ margin: 0 }}>मशीन बंद समय</h3>
-          <span className="count">{closeEntries.length}</span>
-        </div>
-        <div className="field-hint" style={{ marginBottom: 10 }}>
-          शिफ्ट के दौरान जितनी बार मशीन बंद हो, हर बार एक नई प्रविष्टि जोड़ें।
-          "प्रगति सहेजें" दबाने पर डेटा सुरक्षित हो जाता है — बाद में वापस आकर भर सकते हैं।
-        </div>
-
-        {closeEntries.map((e, i) => (
-          <div key={e.id} style={{
-            border: "1px solid var(--line)", borderRadius: 8,
-            padding: 14, marginBottom: 10, background: "var(--surface)",
-          }}>
-            {/* Entry header */}
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ fontWeight: 700, fontSize: 13 }}>बंद #{i + 1}</span>
-              {closeEntries.length > 1 && (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
-                  onClick={() => removeCloseEntry(e)}
-                >
-                  हटाएँ
-                </button>
-              )}
-            </div>
-
-            {/* Date + Close time + Restart time */}
-            <div className="row3">
-              <div>
-                <label>तारीख</label>
-                <input
-                  type="date"
-                  value={e.close_date}
-                  onChange={ev => updateCloseEntry(e.id, "close_date", ev.target.value)}
-                />
-              </div>
-              <div>
-                <label>बंद समय *</label>
-                <input
-                  type="time"
-                  value={e.close_time}
-                  onChange={ev => updateCloseEntry(e.id, "close_time", ev.target.value)}
-                />
-              </div>
-              <div>
-                <label>पुनः शुरू समय</label>
-                <input
-                  type="time"
-                  value={e.restart_time}
-                  placeholder="—"
-                  onChange={ev => updateCloseEntry(e.id, "restart_time", ev.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* Reason */}
-            <label>कारण / टिप्पणी</label>
-            <input
-              type="text"
-              placeholder="जैसे: मेंटेनेन्स, ब्रेक, माल खत्म…"
-              value={e.reason}
-              onChange={ev => updateCloseEntry(e.id, "reason", ev.target.value)}
-            />
-          </div>
-        ))}
-
-        <button type="button" className="btn btn-ghost" onClick={addCloseEntry}>
-          + बंद समय जोड़ें
         </button>
       </div>
 
