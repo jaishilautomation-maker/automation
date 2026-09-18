@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -101,6 +101,7 @@ export default function StoresPage() {
     { id: "daily_dispatch",   label: "Daily Dispatch" },
     { id: "packing_material", label: "Packing Material" },
     { id: "finished_goods",   label: "Finished Goods" },
+    { id: "ball_mill",        label: "Ball Mill" },
     { id: "ledger",           label: "Stock Ledger" },
     { id: "issue",          label: "Issue Slip" },
     { id: "prn",            label: "PRN" },
@@ -138,6 +139,7 @@ export default function StoresPage() {
       {tab === "daily_dispatch"   && <DailyDispatchSection />}
       {tab === "packing_material" && <PackingMaterialSection />}
       {tab === "finished_goods"   && <FinishedGoodsSection />}
+      {tab === "ball_mill"        && <BallMillSection />}
       {tab === "ledger"           && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
       {tab === "prn"        && <PrnSection />}
@@ -2942,6 +2944,497 @@ function FinishedGoodsSection() {
                 </table>
               </div>
             )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// BALL MILL PRODUCTION SECTION
+//
+// Mirrors the BALL MILL PRODUCTION 2026-27 tab in the DPR Excel.
+//
+// LEFT SIDE — Ball Mill Manufacturing Details:
+//   A  Date of Ball Milling
+//   B  SHIFT  (1ST / 2ND)
+//   C  Party  (Lanxess / W10)
+//   D  BATCH NO
+//   E  Qty. MFG. Ball Mill  (bags)
+//   F  KG = E * 25
+//   G  Total weight MT = F / 1000
+//
+// RIGHT SIDE — Dispatch Details with Closing Stock:
+//   H  Dispatch Date
+//   I  LOCATION
+//   J  BATCH NO (dispatch)
+//   K  Dispatch Bags
+//   L  Balance Bags (Running Balance)
+//      Formula: L = L_prev + E(1ST) + E(2ND) - K
+//
+// Formulas implemented:
+//   F (KG)          = E * 25
+//   G (Total MT)    = F / 1000  = E * 25 / 1000
+//   L (Balance)     = prev_L + sum_of_E_for_date - K
+// =============================================================================
+
+const BALL_MILL_SHIFTS   = ["1ST", "2ND"] as const;
+const BALL_MILL_PARTIES  = ["Lanxess", "W10"] as const;
+
+type BallMillShift  = (typeof BALL_MILL_SHIFTS)[number];
+type BallMillParty  = (typeof BALL_MILL_PARTIES)[number];
+
+/** One production row (left side) */
+interface BmProdRow {
+  date: string;
+  shift: BallMillShift | "";
+  party: BallMillParty | "";
+  batch_no: string;
+  qty_mfg: string;       // E — Qty. MFG. Ball Mill (bags)
+  kg: number | null;     // F = E * 25
+  total_mt: number | null; // G = F / 1000
+}
+
+/** One dispatch row (right side) — can be on the same or different date */
+interface BmDispatchRow {
+  dispatch_date: string;
+  location: string;
+  batch_no: string;
+  dispatch_bags: string;  // K
+}
+
+/** Saved combined entry per submit */
+interface SavedBmEntry {
+  id: string;
+  date: string;
+  prod_rows: BmProdRow[];
+  dispatch_rows: BmDispatchRow[];
+  balance_bags: number;  // L — running balance stored
+}
+
+function blankProdRow(): BmProdRow {
+  return { date: today(), shift: "", party: "", batch_no: "", qty_mfg: "", kg: null, total_mt: null };
+}
+function blankDispatchRow(): BmDispatchRow {
+  return { dispatch_date: today(), location: "", batch_no: "", dispatch_bags: "" };
+}
+
+function computeBmRow(r: BmProdRow): BmProdRow {
+  const e = Number(r.qty_mfg);
+  const kg = Number.isFinite(e) && e >= 0 ? e * 25 : null;
+  return { ...r, kg, total_mt: kg != null ? kg / 1000 : null };
+}
+
+function BallMillSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [prodRows, setProdRows]         = useState<BmProdRow[]>([blankProdRow()]);
+  const [dispatchRows, setDispatchRows] = useState<BmDispatchRow[]>([blankDispatchRow()]);
+  const [prevBalance, setPrevBalance]   = useState<string>("");
+  const [submitting, setSubmitting]     = useState(false);
+  const [history, setHistory]           = useState<SavedBmEntry[]>([]);
+  const [histLoading, setHistLoading]   = useState(true);
+
+  // Computed balance: prev_L + sum(E rows) - sum(K dispatches)
+  const sumProd      = prodRows.reduce((s, r) => s + (Number(r.qty_mfg) || 0), 0);
+  const sumDispatch  = dispatchRows.reduce((s, r) => s + (Number(r.dispatch_bags) || 0), 0);
+  const prevBal      = Number(prevBalance) || 0;
+  const newBalance   = prevBal + sumProd - sumDispatch;
+
+  // Prod row helpers
+  const updateProdRow = (idx: number, patch: Partial<BmProdRow>) => {
+    setProdRows(prev => prev.map((r, i) =>
+      i === idx ? computeBmRow({ ...r, ...patch }) : r
+    ));
+  };
+  const addProdRow    = () => setProdRows(prev => [...prev, blankProdRow()]);
+  const removeProdRow = (idx: number) => {
+    if (prodRows.length === 1) return;
+    setProdRows(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // Dispatch row helpers
+  const updateDispatch = (idx: number, patch: Partial<BmDispatchRow>) =>
+    setDispatchRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const addDispatch    = () => setDispatchRows(prev => [...prev, blankDispatchRow()]);
+  const removeDispatch = (idx: number) => {
+    if (dispatchRows.length === 1) return;
+    setDispatchRows(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "ball_mill_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedBmEntry[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SavedBmEntry>;
+        rows.push({
+          id: row.id, date: row.transaction_date,
+          prod_rows:     p.prod_rows     ?? [],
+          dispatch_rows: p.dispatch_rows ?? [],
+          balance_bags:  p.balance_bags  ?? 0,
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows);
+    // Auto-fill prev balance from most recent entry
+    if (rows.length > 0) setPrevBalance(String(rows[0].balance_bags));
+    setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleSave = async () => {
+    if (!user) return;
+    const hasAnyProd = prodRows.some(r => r.qty_mfg.trim() !== "" && r.date && r.shift && r.party);
+    if (!hasAnyProd) { showToast("Fill at least one production row (date, shift, party, qty).", true); return; }
+    setSubmitting(true);
+    try {
+      const { data: anchor } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 first.", true);
+        setSubmitting(false); return;
+      }
+      const computedRows = prodRows.map(computeBmRow);
+      const payload: Omit<SavedBmEntry, "id"> = {
+        date:          computedRows[0]?.date ?? today(),
+        prod_rows:     computedRows,
+        dispatch_rows: dispatchRows,
+        balance_bags:  newBalance,
+      };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   payload.date,
+        transaction_source: "manual",
+        qty_received:       sumProd * 25,
+        qty_issued:         sumDispatch * 25,
+        dispatch_qty:       0,
+        closing_balance:    newBalance,
+        reference_type:     "ball_mill_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Ball Mill entry saved -- Balance: " + newBalance + " bags");
+      setProdRows([blankProdRow()]);
+      setDispatchRows([blankDispatchRow()]);
+      loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <>
+      {/* ── Manufacturing Details ── */}
+      <div className="card">
+        <div className="helper-row" style={{ marginBottom: 8 }}>
+          <h3 style={{ margin: 0 }}>Ball Mill Manufacturing Details</h3>
+          <button type="button" className="btn btn-ghost"
+            style={{ width: "auto", padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+            onClick={addProdRow}>+ Add Row</button>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "var(--clay-soft)" }}>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Date (A)</th>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Shift (B)</th>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Party (C)</th>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Batch No (D)</th>
+                <th style={{ padding: "8px 6px", textAlign: "right", fontSize: 11 }}>Qty MFG Bags (E)</th>
+                <th style={{ padding: "8px 6px", textAlign: "right", fontSize: 11 }}>KG (F=E*25)</th>
+                <th style={{ padding: "8px 6px", textAlign: "right", fontSize: 11 }}>Total MT (G=F/1000)</th>
+                <th style={{ padding: "8px 6px", width: 36 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {prodRows.map((row, idx) => (
+                <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                  <td style={{ padding: "6px 4px" }}>
+                    <input type="date" value={row.date}
+                      onChange={e => updateProdRow(idx, { date: e.target.value })}
+                      style={{ width: 130, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }} />
+                  </td>
+                  <td style={{ padding: "6px 4px" }}>
+                    <select value={row.shift}
+                      onChange={e => updateProdRow(idx, { shift: e.target.value as BallMillShift | "" })}
+                      style={{ padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }}>
+                      <option value="">--</option>
+                      {BALL_MILL_SHIFTS.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ padding: "6px 4px" }}>
+                    <select value={row.party}
+                      onChange={e => updateProdRow(idx, { party: e.target.value as BallMillParty | "" })}
+                      style={{ padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }}>
+                      <option value="">--</option>
+                      {BALL_MILL_PARTIES.map(p => (
+                        <option key={p} value={p}
+                          style={{ color: p === "Lanxess" ? "var(--clay)" : "var(--ok)" }}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ padding: "6px 4px" }}>
+                    <input type="text" value={row.batch_no}
+                      onChange={e => updateProdRow(idx, { batch_no: e.target.value })}
+                      placeholder="e.g. 215"
+                      style={{ width: 80, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }} />
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "right" }}>
+                    <input type="number" min="0" step="1" value={row.qty_mfg}
+                      onChange={e => updateProdRow(idx, { qty_mfg: e.target.value })}
+                      placeholder="0"
+                      style={{ width: 70, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6,
+                        textAlign: "right" }} />
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", fontWeight: 600 }}>
+                    {row.kg != null ? row.kg.toFixed(0) : "0"}
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", fontWeight: 600,
+                    color: "var(--clay)" }}>
+                    {row.total_mt != null ? row.total_mt.toFixed(3) : "0.000"}
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "center" }}>
+                    {prodRows.length > 1 && (
+                      <button type="button" onClick={() => removeProdRow(idx)}
+                        style={{ background: "none", border: "none",
+                          color: "var(--warn)", cursor: "pointer", fontSize: 14 }}>
+                        x
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {/* Summary row */}
+              <tr style={{ background: "var(--clay-soft)", fontWeight: 700 }}>
+                <td colSpan={4} style={{ padding: "8px 6px", fontSize: 12 }}>Total</td>
+                <td style={{ padding: "8px 6px", textAlign: "right" }}>{sumProd}</td>
+                <td style={{ padding: "8px 6px", textAlign: "right" }}>{(sumProd * 25).toFixed(0)}</td>
+                <td style={{ padding: "8px 6px", textAlign: "right", color: "var(--clay)" }}>
+                  {(sumProd * 25 / 1000).toFixed(3)}
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Dispatch Details ── */}
+      <div className="card">
+        <div className="helper-row" style={{ marginBottom: 8 }}>
+          <h3 style={{ margin: 0 }}>Dispatch Details with Closing Stock</h3>
+          <button type="button" className="btn btn-ghost"
+            style={{ width: "auto", padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+            onClick={addDispatch}>+ Add Dispatch</button>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#e8f4e8" }}>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Dispatch Date (H)</th>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Location (I)</th>
+                <th style={{ padding: "8px 6px", textAlign: "left", fontSize: 11 }}>Batch No (J)</th>
+                <th style={{ padding: "8px 6px", textAlign: "right", fontSize: 11 }}>Dispatch Bags (K)</th>
+                <th style={{ padding: "8px 6px", width: 36 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {dispatchRows.map((row, idx) => (
+                <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                  <td style={{ padding: "6px 4px" }}>
+                    <input type="date" value={row.dispatch_date}
+                      onChange={e => updateDispatch(idx, { dispatch_date: e.target.value })}
+                      style={{ width: 130, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }} />
+                  </td>
+                  <td style={{ padding: "6px 4px" }}>
+                    <input type="text" value={row.location}
+                      onChange={e => updateDispatch(idx, { location: e.target.value })}
+                      placeholder="e.g. Pune, Lanxess"
+                      style={{ width: 100, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }} />
+                  </td>
+                  <td style={{ padding: "6px 4px" }}>
+                    <input type="text" value={row.batch_no}
+                      onChange={e => updateDispatch(idx, { batch_no: e.target.value })}
+                      placeholder="e.g. 1,05,11,31"
+                      style={{ width: 120, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6 }} />
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "right" }}>
+                    <input type="number" min="0" step="1" value={row.dispatch_bags}
+                      onChange={e => updateDispatch(idx, { dispatch_bags: e.target.value })}
+                      placeholder="0"
+                      style={{ width: 70, padding: "4px 6px", fontSize: 12,
+                        border: "1px solid var(--line)", borderRadius: 6,
+                        textAlign: "right" }} />
+                  </td>
+                  <td style={{ padding: "6px 4px", textAlign: "center" }}>
+                    {dispatchRows.length > 1 && (
+                      <button type="button" onClick={() => removeDispatch(idx)}
+                        style={{ background: "none", border: "none",
+                          color: "var(--warn)", cursor: "pointer", fontSize: 14 }}>
+                        x
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Running Balance (L) ── */}
+      <div className="card">
+        <h3>Running Balance (L = prev_L + sum_E - sum_K)</h3>
+        <div className="row3">
+          <div>
+            <label>Previous Balance (L_prev)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={prevBalance}
+              onChange={e => setPrevBalance(e.target.value)} />
+            <div className="field-hint">Auto-filled from last saved entry</div>
+          </div>
+          <div>
+            <label>Total Produced (sum E)</label>
+            <input type="text" disabled value={sumProd}
+              style={{ fontWeight: 600, color: "var(--ok)" }} />
+          </div>
+          <div>
+            <label>Total Dispatched (sum K)</label>
+            <input type="text" disabled value={sumDispatch}
+              style={{ fontWeight: 600, color: "var(--warn)" }} />
+          </div>
+        </div>
+        <div style={{
+          marginTop: 12, padding: "12px 16px",
+          background: "var(--clay-soft)", borderRadius: 8,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>
+            Balance Bags (L = {prevBal} + {sumProd} - {sumDispatch})
+          </span>
+          <span style={{ fontWeight: 700, fontSize: 20,
+            color: newBalance < 0 ? "var(--warn)" : "var(--clay)" }}>
+            {newBalance} bags
+          </span>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Ball Mill Entry"}
+      </button>
+
+      {/* ── History ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Ball Mill History</h3>
+        {histLoading ? <div className="empty">Loading...</div>
+          : history.length === 0 ? <div className="empty">No entries yet.</div>
+          : history.map(entry => (
+            <div key={entry.id} style={{
+              border: "1px solid var(--line)", borderRadius: 8,
+              padding: 12, marginBottom: 12,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between",
+                marginBottom: 8, fontWeight: 700, fontSize: 13 }}>
+                <span>{fmtDate(entry.date)}</span>
+                <span style={{ color: "var(--clay)" }}>
+                  Balance: {entry.balance_bags} bags
+                </span>
+              </div>
+
+              {/* Production rows */}
+              {entry.prod_rows.length > 0 && (
+                <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                  <table className="dash" style={{ minWidth: 500, fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th><th>Shift</th><th>Party</th>
+                        <th>Batch</th>
+                        <th style={{ textAlign: "right" }}>Bags</th>
+                        <th style={{ textAlign: "right" }}>KG</th>
+                        <th style={{ textAlign: "right" }}>MT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entry.prod_rows.map((r, i) => (
+                        <tr key={i}>
+                          <td>{fmtDate(r.date)}</td>
+                          <td style={{ fontWeight: 700,
+                            color: r.shift === "1ST" ? "var(--clay)" : "var(--ok)" }}>
+                            {r.shift}
+                          </td>
+                          <td style={{ color: r.party === "Lanxess" ? "var(--clay)" : "var(--ok)",
+                            fontWeight: 600 }}>{r.party}</td>
+                          <td>{nilText(r.batch_no)}</td>
+                          <td style={{ textAlign: "right" }}>{r.qty_mfg || "0"}</td>
+                          <td style={{ textAlign: "right" }}>{r.kg != null ? r.kg.toFixed(0) : "0"}</td>
+                          <td style={{ textAlign: "right" }}>
+                            {r.total_mt != null ? r.total_mt.toFixed(3) : "0.000"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Dispatch rows */}
+              {entry.dispatch_rows.some(r => r.dispatch_bags.trim() !== "") && (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="dash" style={{ minWidth: 420, fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th>Dispatch Date</th>
+                        <th>Location</th>
+                        <th>Batch No</th>
+                        <th style={{ textAlign: "right" }}>Dispatch Bags</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entry.dispatch_rows.filter(r => r.dispatch_bags.trim() !== "").map((r, i) => (
+                        <tr key={i}>
+                          <td>{fmtDate(r.dispatch_date)}</td>
+                          <td>{nilText(r.location)}</td>
+                          <td>{nilText(r.batch_no)}</td>
+                          <td style={{ textAlign: "right", fontWeight: 700,
+                            color: "var(--warn)" }}>
+                            {r.dispatch_bags}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))
         }
       </div>
     </>
