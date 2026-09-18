@@ -3015,7 +3015,7 @@ interface SavedBmEntry {
 function blankProdRow(): BmProdRow {
   return { date: today(), shift: "", party: "", batch_no: "", qty_mfg: "", kg: null, total_mt: null };
 }
-function blankDispatchRow(): BmDispatchRow {
+function blankBmDispatchRow(): BmDispatchRow {
   return { dispatch_date: today(), location: "", batch_no: "", dispatch_bags: "" };
 }
 
@@ -3031,7 +3031,7 @@ function BallMillSection() {
   const supabase = createClient();
 
   const [prodRows, setProdRows]         = useState<BmProdRow[]>([blankProdRow()]);
-  const [dispatchRows, setDispatchRows] = useState<BmDispatchRow[]>([blankDispatchRow()]);
+  const [dispatchRows, setDispatchRows] = useState<BmDispatchRow[]>([blankBmDispatchRow()]);
   const [prevBalance, setPrevBalance]   = useState<string>("");
   const [submitting, setSubmitting]     = useState(false);
   const [history, setHistory]           = useState<SavedBmEntry[]>([]);
@@ -3058,7 +3058,7 @@ function BallMillSection() {
   // Dispatch row helpers
   const updateDispatch = (idx: number, patch: Partial<BmDispatchRow>) =>
     setDispatchRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
-  const addDispatch    = () => setDispatchRows(prev => [...prev, blankDispatchRow()]);
+  const addDispatch    = () => setDispatchRows(prev => [...prev, blankBmDispatchRow()]);
   const removeDispatch = (idx: number) => {
     if (dispatchRows.length === 1) return;
     setDispatchRows(prev => prev.filter((_, i) => i !== idx));
@@ -3130,7 +3130,7 @@ function BallMillSection() {
       if (error) { showToast("Save failed: " + error.message, true); return; }
       showToast("Ball Mill entry saved -- Balance: " + newBalance + " bags");
       setProdRows([blankProdRow()]);
-      setDispatchRows([blankDispatchRow()]);
+      setDispatchRows([blankBmDispatchRow()]);
       loadHistory();
     } catch (e: unknown) {
       showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
