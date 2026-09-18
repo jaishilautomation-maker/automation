@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -100,6 +100,7 @@ export default function StoresPage() {
     { id: "daily_prod",     label: "Daily Production" },
     { id: "daily_dispatch",   label: "Daily Dispatch" },
     { id: "packing_material", label: "Packing Material" },
+    { id: "finished_goods",   label: "Finished Goods" },
     { id: "ledger",           label: "Stock Ledger" },
     { id: "issue",          label: "Issue Slip" },
     { id: "prn",            label: "PRN" },
@@ -136,6 +137,7 @@ export default function StoresPage() {
       {tab === "daily_prod"     && <DailyProductionSection />}
       {tab === "daily_dispatch"   && <DailyDispatchSection />}
       {tab === "packing_material" && <PackingMaterialSection />}
+      {tab === "finished_goods"   && <FinishedGoodsSection />}
       {tab === "ledger"           && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
       {tab === "prn"        && <PrnSection />}
@@ -2484,6 +2486,458 @@ function PackingMaterialSection() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// FINISHED GOODS SECTION
+//
+// Mirrors the FINISHED GOODS (SULPHUR POWDER) 2026-27 tab in the DPR Excel.
+// Columns:
+//   B  Sulphur Powder (product name)
+//   C  O/BAL in BAGS   (Opening Balance in bags)
+//   D  PROD            (Production in bags)
+//   E  Repacking material / BY TR
+//   F  Less packing Stock
+//   G  Transfer material / TO TR
+//   H  Dispatch
+//   I  C/BAL IN BAGS   Formula: I = C + D + E - F - G - H
+//   J  TOTAL MT        = C/BAL IN BAGS x bag_kg / 1000
+//
+// Bag sizes by product:
+//   Standard (25 kg) : most products
+//   50 kg            : RUBBER MAKER.50 KG, OLD BAGS (SHAKTI & OTHERS), J.K. INDUSTRIES
+//   550 kg           : Sulphur Powder(Jumbo Bag-550 KG)
+//   500 kg           : BRIDGESTONE WE-10(500 KG JUMBO)
+// =============================================================================
+
+const FG_PRODUCTS: { name: string; bagKg: number }[] = [
+  { name: "CEAT-108/ EXPORT",                         bagKg: 25  },
+  { name: "MRF LIMITED (M-2615)",                     bagKg: 25  },
+  { name: "EXPORT Plain Bag 25 KG A2052",              bagKg: 25  },
+  { name: "LANXESS INDIA PVT LTD",                    bagKg: 25  },
+  { name: "CEAT HALOL/NAGPUR-R5299(Halol/Nag)",        bagKg: 25  },
+  { name: "APOLLO TYRE/CLASSIC AUTO 160108",           bagKg: 25  },
+  { name: "CODE 2615 w/o Oil (MRF Grade)",             bagKg: 25  },
+  { name: "Lanxess 2% Oil",                            bagKg: 25  },
+  { name: "MRF Ltd 2615 - Rejected",                  bagKg: 25  },
+  { name: "Lanxess R.M. 25 KG - Rejected",            bagKg: 25  },
+  { name: "CEAT R5299 - Rejected",                    bagKg: 25  },
+  { name: "Apollo 160108 - Rejected",                 bagKg: 25  },
+  { name: "Jayam Chemical 0.5% Silica",               bagKg: 25  },
+  { name: "EOC POLYMERS",                             bagKg: 25  },
+  { name: "BRIDGESTONE WE-10 FINISHED",               bagKg: 25  },
+  { name: "BRIDGESTONE/Lanxess(Semifinish) PLA",      bagKg: 25  },
+  { name: "RUBBER MAKER.50 KG",                       bagKg: 50  },
+  { name: "OLD BAGS (SHAKTI & OTHERS)",               bagKg: 50  },
+  { name: "J.K. INDUSTRIES",                         bagKg: 50  },
+  { name: "FOR PESTICIDE FORMULATION (SC)",           bagKg: 25  },
+  { name: "Sulphur Powder(Jumbo Bag-550 KG)",         bagKg: 550 },
+  { name: "BRIDGESTONE WE-10(500 KG JUMBO)",          bagKg: 500 },
+  { name: "RUBBER MAKER.50 KG - Rejected",            bagKg: 50  },
+];
+
+type FgProductName = (typeof FG_PRODUCTS)[number]["name"];
+
+interface FgEntry {
+  date: string;
+  product: FgProductName | "";
+  op_bal: string;
+  production: string;
+  repacking_by_tr: string;
+  less_packing_stock: string;
+  transfer_to_tr: string;
+  dispatch: string;
+  cl_bal: number | null;    // I = C+D+E-F-G-H
+  total_mt: number | null;  // I * bagKg / 1000
+  remark: string;
+}
+
+interface SavedFgRow {
+  id: string;
+  date: string;
+  product: string;
+  bag_kg: number;
+  op_bal: number;
+  production: number;
+  repacking_by_tr: number;
+  less_packing_stock: number;
+  transfer_to_tr: number;
+  dispatch: number;
+  cl_bal: number;
+  total_mt: number;
+  remark: string;
+}
+
+function computeFgClBal(e: FgEntry): number | null {
+  const c = Number(e.op_bal);
+  const d = Number(e.production);
+  const ee = Number(e.repacking_by_tr);
+  const f = Number(e.less_packing_stock);
+  const g = Number(e.transfer_to_tr);
+  const h = Number(e.dispatch);
+  if ([c, d, ee, f, g, h].some(v => !Number.isFinite(v))) return null;
+  return c + d + ee - f - g - h;
+}
+
+function blankFgEntry(): FgEntry {
+  return {
+    date: today(), product: "",
+    op_bal: "", production: "", repacking_by_tr: "",
+    less_packing_stock: "", transfer_to_tr: "", dispatch: "",
+    cl_bal: null, total_mt: null, remark: "",
+  };
+}
+
+function FinishedGoodsSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<FgEntry>(blankFgEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedFgRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [filterProduct, setFilterProduct] = useState<FgProductName | "ALL">("ALL");
+
+  const selectedProd = FG_PRODUCTS.find(p => p.name === entry.product);
+  const bagKg = selectedProd?.bagKg ?? 25;
+  const clBal = computeFgClBal(entry);
+  const totalMt = clBal != null ? (clBal * bagKg) / 1000 : null;
+
+  const setField = <K extends keyof FgEntry>(key: K, val: FgEntry[K]) => {
+    setEntry(prev => {
+      const next = { ...prev, [key]: val };
+      const cl = computeFgClBal(next);
+      const bk = FG_PRODUCTS.find(p => p.name === next.product)?.bagKg ?? 25;
+      return { ...next, cl_bal: cl, total_mt: cl != null ? (cl * bk) / 1000 : null };
+    });
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "fg_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedFgRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SavedFgRow>;
+        rows.push({
+          id: row.id, date: row.transaction_date,
+          product:            p.product            ?? "",
+          bag_kg:             p.bag_kg             ?? 25,
+          op_bal:             p.op_bal             ?? 0,
+          production:         p.production         ?? 0,
+          repacking_by_tr:    p.repacking_by_tr    ?? 0,
+          less_packing_stock: p.less_packing_stock ?? 0,
+          transfer_to_tr:     p.transfer_to_tr     ?? 0,
+          dispatch:           p.dispatch           ?? 0,
+          cl_bal:             p.cl_bal             ?? 0,
+          total_mt:           p.total_mt           ?? 0,
+          remark:             p.remark             ?? "",
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Auto-fill op_bal from last closing balance for this product
+  const handleProductChange = (product: FgProductName | "") => {
+    const last = history.find(r => r.product === product);
+    const bk = FG_PRODUCTS.find(p => p.name === product)?.bagKg ?? 25;
+    const cl = last ? last.cl_bal : null;
+    setEntry({
+      ...blankFgEntry(),
+      date: entry.date, product,
+      op_bal: last ? String(last.cl_bal) : "",
+      cl_bal: cl,
+      total_mt: cl != null ? (cl * bk) / 1000 : null,
+    });
+  };
+
+  const handleSave = async () => {
+    if (!entry.product) { showToast("Select a product.", true); return; }
+    if (clBal == null) { showToast("Fill all numeric fields.", true); return; }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      // Find FG item in stores_stock_items, fallback to any item
+      const { data: fgItem } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).eq("category", "finished_good")
+        .limit(1).maybeSingle();
+      const { data: anyItem } = fgItem
+        ? { data: fgItem }
+        : await supabase.from("stores_stock_items").select("id, factory_id")
+            .eq("is_active", true).limit(1).maybeSingle();
+      const anchor = (anyItem ?? fgItem) as { id: string; factory_id: string } | null;
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 first.", true);
+        setSubmitting(false); return;
+      }
+      const payload: SavedFgRow = {
+        id: "", date: entry.date, product: entry.product,
+        bag_kg:             bagKg,
+        op_bal:             Number(entry.op_bal)             || 0,
+        production:         Number(entry.production)         || 0,
+        repacking_by_tr:    Number(entry.repacking_by_tr)    || 0,
+        less_packing_stock: Number(entry.less_packing_stock) || 0,
+        transfer_to_tr:     Number(entry.transfer_to_tr)     || 0,
+        dispatch:           Number(entry.dispatch)           || 0,
+        cl_bal:             clBal,
+        total_mt:           totalMt ?? 0,
+        remark:             entry.remark,
+      };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received:       payload.production + payload.repacking_by_tr,
+        qty_issued:         payload.less_packing_stock + payload.transfer_to_tr,
+        dispatch_qty:       payload.dispatch,
+        closing_balance:    clBal,
+        reference_type:     "fg_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Saved -- " + entry.product + " C/Bal: " + clBal.toFixed(0) + " bags | " + (totalMt ?? 0).toFixed(3) + " MT");
+      setEntry(blankFgEntry()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  // Totals for history table TOTAL row
+  const filtered = filterProduct === "ALL" ? history : history.filter(r => r.product === filterProduct);
+  const totals = {
+    op_bal: filtered.reduce((s, r) => s + r.op_bal, 0),
+    production: filtered.reduce((s, r) => s + r.production, 0),
+    repacking_by_tr: filtered.reduce((s, r) => s + r.repacking_by_tr, 0),
+    less_packing_stock: filtered.reduce((s, r) => s + r.less_packing_stock, 0),
+    transfer_to_tr: filtered.reduce((s, r) => s + r.transfer_to_tr, 0),
+    dispatch: filtered.reduce((s, r) => s + r.dispatch, 0),
+    cl_bal: filtered.reduce((s, r) => s + r.cl_bal, 0),
+    total_mt: filtered.reduce((s, r) => s + r.total_mt, 0),
+  };
+
+  return (
+    <>
+      <div className="card">
+        <h3>Finished Goods Entry (Sulphur Powder)</h3>
+
+        {/* Row 1: Date | Product */}
+        <div className="row2">
+          <div>
+            <label>Date *</label>
+            <input type="date" value={entry.date}
+              onChange={e => setField("date", e.target.value)} />
+          </div>
+          <div>
+            <label>Sulphur Powder (Product) *</label>
+            <select value={entry.product}
+              onChange={e => handleProductChange(e.target.value as FgProductName | "")}>
+              <option value="">-- Select product --</option>
+              {FG_PRODUCTS.map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name} ({p.bagKg} kg/bag)
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Bag size info */}
+        {entry.product && (
+          <div className="field-hint" style={{ marginBottom: 8 }}>
+            Bag size: {bagKg} kg/bag | TOTAL MT = C/BAL x {bagKg} / 1000
+          </div>
+        )}
+
+        {/* Row 2: O/BAL (C) | PROD (D) | Repacking BY TR (E) */}
+        <div className="row3">
+          <div>
+            <label>O/BAL in BAGS (C)</label>
+            <input type="number" step="1" placeholder="0"
+              value={entry.op_bal}
+              onChange={e => setField("op_bal", e.target.value)} />
+          </div>
+          <div>
+            <label>PROD (D)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.production}
+              onChange={e => setField("production", e.target.value)} />
+          </div>
+          <div>
+            <label>Repacking material / BY TR (E)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.repacking_by_tr}
+              onChange={e => setField("repacking_by_tr", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 3: Less packing Stock (F) | Transfer TO TR (G) | Dispatch (H) */}
+        <div className="row3">
+          <div>
+            <label>Less packing Stock (F)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.less_packing_stock}
+              onChange={e => setField("less_packing_stock", e.target.value)} />
+          </div>
+          <div>
+            <label>Transfer material / TO TR (G)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.transfer_to_tr}
+              onChange={e => setField("transfer_to_tr", e.target.value)} />
+          </div>
+          <div>
+            <label>Dispatch (H)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.dispatch}
+              onChange={e => setField("dispatch", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 4: C/BAL computed | TOTAL MT computed | Remark */}
+        <div className="row3">
+          <div>
+            <label>C/BAL IN BAGS (I = C+D+E-F-G-H)</label>
+            <input type="text" disabled
+              value={clBal != null ? clBal.toFixed(0) : "N/A"}
+              style={{
+                fontWeight: 700,
+                color: clBal != null && clBal < 0 ? "var(--warn)" : "var(--ok)",
+              }} />
+          </div>
+          <div>
+            <label>TOTAL MT (J = I x {bagKg}/1000)</label>
+            <input type="text" disabled
+              value={totalMt != null ? totalMt.toFixed(3) : "N/A"}
+              style={{ fontWeight: 700, color: "var(--clay)" }} />
+          </div>
+          <div>
+            <label>Remark</label>
+            <input type="text" placeholder="Optional note..."
+              value={entry.remark}
+              onChange={e => setField("remark", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting || !entry.product || clBal == null}
+        onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Finished Goods Entry"}
+      </button>
+
+      {/* History table */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>Finished Goods History</h3>
+          <select value={filterProduct}
+            onChange={e => setFilterProduct(e.target.value as FgProductName | "ALL")}
+            style={{ width: "auto", padding: "6px 10px", fontSize: 12 }}>
+            <option value="ALL">All Products</option>
+            {FG_PRODUCTS.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+        </div>
+
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : filtered.length === 0
+            ? <div className="empty">No entries yet.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 950 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Sulphur Powder</th>
+                      <th style={{ textAlign: "right" }}>O/BAL Bags (C)</th>
+                      <th style={{ textAlign: "right" }}>PROD (D)</th>
+                      <th style={{ textAlign: "right" }}>Repkg/BY TR (E)</th>
+                      <th style={{ textAlign: "right" }}>Less Pkg (F)</th>
+                      <th style={{ textAlign: "right" }}>Transfer/TO TR (G)</th>
+                      <th style={{ textAlign: "right" }}>Dispatch (H)</th>
+                      <th style={{ textAlign: "right" }}>C/BAL Bags (I)</th>
+                      <th style={{ textAlign: "right", color: "var(--clay)" }}>TOTAL MT (J)</th>
+                      <th>Remark</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                        <td style={{ fontSize: 12, fontWeight: 600, maxWidth: 160, whiteSpace: "normal" }}>
+                          {row.product}
+                        </td>
+                        <td style={{ textAlign: "right" }}>{row.op_bal.toFixed(0)}</td>
+                        <td style={{ textAlign: "right",
+                          color: row.production > 0 ? "var(--ok)" : undefined }}>
+                          {row.production > 0 ? "+" + row.production.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.repacking_by_tr > 0 ? "var(--ok)" : undefined }}>
+                          {row.repacking_by_tr > 0 ? "+" + row.repacking_by_tr.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.less_packing_stock > 0 ? "var(--warn)" : undefined }}>
+                          {row.less_packing_stock > 0 ? row.less_packing_stock.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.transfer_to_tr > 0 ? "var(--clay)" : undefined }}>
+                          {row.transfer_to_tr > 0 ? row.transfer_to_tr.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.dispatch > 0 ? "var(--warn)" : undefined }}>
+                          {row.dispatch > 0 ? row.dispatch.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: row.cl_bal < 0 ? "var(--warn)" : undefined }}>
+                          {row.cl_bal.toFixed(0)}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: "var(--clay)" }}>
+                          {row.total_mt.toFixed(3)}
+                        </td>
+                        <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+                          {nilText(row.remark)}
+                        </td>
+                      </tr>
+                    ))}
+                    {/* TOTAL row */}
+                    {filtered.length > 1 && (
+                      <tr style={{ borderTop: "2px solid var(--line)",
+                        background: "var(--clay-soft)" }}>
+                        <td colSpan={2} style={{ fontWeight: 700 }}>TOTAL</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.op_bal.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.production.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.repacking_by_tr.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.less_packing_stock.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.transfer_to_tr.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.dispatch.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.cl_bal.toFixed(0)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: "var(--clay)", fontSize: 14 }}>{totals.total_mt.toFixed(3)}</td>
+                        <td></td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
