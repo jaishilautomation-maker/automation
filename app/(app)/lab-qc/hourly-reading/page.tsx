@@ -226,7 +226,27 @@ export default function HourlyReadingPage() {
         submittedByName: profile?.full_name ?? "—",
         submittedAt:     nowISO,
       });
-      void notifyEvent({ eventType: "lab_qc_hourly_reading", subject: hrSubj, html: hrHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+      void notifyEvent({
+        eventType: "lab_qc_hourly_reading",
+        subject: hrSubj,
+        html: hrHtml,
+        factoryId: activeFactory.id,
+        referenceId: newRow.id,
+        sheetData: {
+          type: "append",
+          tab: "Hourly Reading",
+          values: [
+            newRow.id,
+            batchNumber.trim(),
+            new Date(readingTime).toISOString(),
+            JSON.stringify(testResults),
+            remarks.trim() || null,
+            profile?.full_name ?? null,
+            nowISO,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("Reading saved ✓");
       // Reset values only; keep batch number for next reading

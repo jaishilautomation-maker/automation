@@ -11,8 +11,16 @@
 //     html:        buildProductionEmail({ ... }),
 //     factoryId:   activeFactory.id,
 //     referenceId: cardId,
+//     sheetData:   { type: "job_card", row: { job_number: "JB-0451", ... } },
 //   });
 // =============================================================================
+
+import type { JobCardSheetRow } from "@/lib/notifications/sheets-sync";
+
+/** Payload sent to /api/notify for the Google Sheets sync side-channel. */
+export type SheetSyncPayload =
+  | { type: "job_card"; row: JobCardSheetRow }
+  | { type: "append";   tab: string; values: (string | number | boolean | null)[] };
 
 export interface NotifyEventArgs {
   eventType:    string;
@@ -21,6 +29,8 @@ export interface NotifyEventArgs {
   factoryId?:   string;
   referenceId?: string;
   recipients?:  string[];
+  /** Optional — push a row to the master Google Sheet at the same time. */
+  sheetData?:   SheetSyncPayload;
 }
 
 /**

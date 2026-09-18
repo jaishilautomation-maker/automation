@@ -562,28 +562,6 @@ export interface Database {
         Insert: Omit<VfdParameter, "id">;
         Update: Partial<Omit<VfdParameter, "id">>;
       };
-      // Stores Inventory — migration 027
-      stores_stock_items: {
-        Row: StoresStockItem;
-        Insert: Omit<StoresStockItem, "id" | "created_at" | "updated_at">;
-        Update: Partial<Omit<StoresStockItem, "id">>;
-      };
-      stores_stock_ledger: {
-        Row: StoresStockLedger;
-        Insert: Omit<StoresStockLedger, "id" | "created_at">;
-        Update: never;  // append-only
-      };
-      purchase_requisitions: {
-        Row: PurchaseRequisition;
-        Insert: Omit<PurchaseRequisition, "id" | "created_at" | "updated_at">;
-        Update: Partial<Omit<PurchaseRequisition, "id">>;
-      };
-      // Pulveriser shutdown logs — migration 027
-      pulveriser_shutdown_logs: {
-        Row: PulveriserShutdownLog;
-        Insert: Omit<PulveriserShutdownLog, "id" | "created_at">;
-        Update: never;  // corrections = delete + re-insert while card is pending
-      };
       // Lab QC — master data
       materials: {
         Row: Material;
@@ -666,9 +644,6 @@ export interface Database {
       batch_type: BatchType;
       quantity_unit: QuantityUnit;
       pulveriser_status: PulveriserStatus;
-      stock_item_category: StockItemCategory;
-      prn_status: PrnStatus;
-      ledger_transaction_source: LedgerTransactionSource;
     };
   };
 }
@@ -1082,28 +1057,6 @@ export interface PulveriserJobCardReview {
   reviewed_at: string;                  // timestamptz ISO
 }
 
-/**
- * pulveriser_shutdown_logs — operator-logged shutdown periods per job card.
- * Migration 027 (Sept 16 meeting item 4).
- *
- * start_time / end_time use the CODED hour-meter system (same as
- * pulveriser_hourly_readings.start_time/stop_time from migration 020):
- *   shutdown_hours = (Number(end_time) - Number(start_time)) / 100
- *
- * Multiple rows per job card allowed (one per distinct shutdown event).
- * Append-only while the card is 'pending'; deletable by operator before submit.
- */
-export interface PulveriserShutdownLog {
-  id: string;
-  job_card_id: string;
-  factory_id: string;
-  start_time: string;     // coded meter reading, e.g. "1000"
-  end_time: string;       // coded meter reading, e.g. "1200"
-  reason: string | null;  // free text
-  logged_by: string;      // auth.users.id
-  created_at: string;     // timestamptz ISO
-}
-
 // ---------------------------------------------------------------------------
 // VFD / oil-dosing standard (Form JSCI/PRD/10) — migration 017
 // Master lookup keyed by party_code, which is the SAME code stored as
@@ -1151,13 +1104,6 @@ export interface VfdParameter {
   mesh_size_300: string | null;
   rev_no: number;
   effective_date: string;               // ISO date
-  /**
-   * Sulphur purity fraction for this party_code (migration 027).
-   * e.g. 0.99 = 99% pure sulphur. INDEPENDENT of oil_feed_std —
-   * these are different physical quantities. NULL until set by admin.
-   * Auto-deduction of sulphur from RM ledger will not fire until set.
-   */
-  sulphur_ratio: number | null;
 }
 
 /**
@@ -1179,10 +1125,12 @@ export function parseVfdRange(ref: string | null | undefined): [number, number] 
 }
 
 // ---------------------------------------------------------------------------
-// Stores Inventory — migration 027 (Sept 16 meeting)
+// Stores Module — stock items, ledger, purchase requisitions
+// (used by app/(app)/stores/page.tsx)
 // ---------------------------------------------------------------------------
 
 export type StockItemCategory = "raw_material" | "finished_good" | "packaging_material";
+
 export type PrnStatus =
   | "draft"
   | "submitted"
@@ -1192,92 +1140,57 @@ export type PrnStatus =
   | "fulfilled"
   | "cancelled"
   | "auto_flagged";
-export type LedgerTransactionSource =
-  | "manual"
-  | "production_fg"
-  | "production_rm_oil"
-  | "production_rm_sul"
-  | "dispatch";
 
-/**
- * stores_stock_items — master item catalogue for RM / FG / PM.
- * item_code = 'OIL' and item_code = 'SULPHUR' are the canonical codes
- * used by the RM auto-deduction triggers (migrations 029).
- * min_threshold: when closing_balance falls below this, an auto PRN is created.
- */
+/** stores_stock_items — master list of tracked stock items. */
 export interface StoresStockItem {
   id: string;
   factory_id: string;
-  item_code: string;
   item_name: string;
+  item_code: string;
   category: StockItemCategory;
-  unit: string;                         // 'kg' | 'bag' | 'pcs' etc.
-  min_threshold: number | null;         // auto-PRN trigger level; null = disabled
-  hsn_code: string | null;
-  remarks: string | null;
+  unit: string;
+  min_threshold: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
 }
 
-/**
- * stores_stock_ledger — running stock ledger (append-only, one row per transaction).
- *
- * Exactly one movement column should be non-zero per row (CHECK in DB):
- *   qty_received  — goods arriving (supplier delivery or FG from production)
- *   qty_issued    — goods leaving (manual slip or auto production deduction)
- *   dispatch_qty  — FG dispatched (Nivas Patil's dispatch entry)
- *
- * closing_balance = prev_closing + qty_received - qty_issued - dispatch_qty
- * (computed by the inserting code/trigger, stored as a plain numeric column)
- *
- * transaction_source identifies whether the row came from a manual Stores entry
- * or an automated production trigger.
- */
+/** stores_stock_ledger — one row per stock movement / transaction. */
 export interface StoresStockLedger {
   id: string;
   factory_id: string;
   item_id: string;
-  transaction_date: string;             // ISO date
-  transaction_source: LedgerTransactionSource;
-  qty_received: number;                 // DEFAULT 0
-  qty_issued: number;                   // DEFAULT 0
-  dispatch_qty: number;                 // DEFAULT 0
+  transaction_date: string;        // ISO date
+  transaction_type: string;        // 'in' | 'out' | 'adjustment' | etc.
+  transaction_source: string;      // 'manual' | 'oil_issue' | 'dispatch' | etc.
+  quantity: number;
+  qty_received: number;            // inbound qty for this row
+  qty_issued: number;              // outbound (issue) qty for this row
+  dispatch_qty: number;            // dispatch qty for this row
   closing_balance: number;
-  reference_id: string | null;          // e.g. job_card_id, prn_id
-  reference_type: string | null;        // 'job_card' | 'prn' | 'slip' etc.
+  reference_no: string | null;
   remark: string | null;
-  entered_by: string | null;            // auth.users.id
+  created_by: string | null;
   created_at: string;
 }
 
-/**
- * purchase_requisitions — PRN table (migration 027).
- *
- * pending_qty = po_qty - received_qty (computed by app, not stored).
- * auto_flagged rows are created by the DB trigger fn_stores_prn_threshold_check
- * when closing_balance < min_threshold and no open PRN already exists.
- */
+/** purchase_requisitions — PRN records raised by Stores. */
 export interface PurchaseRequisition {
   id: string;
   factory_id: string;
   item_id: string;
   prn_number: string | null;
   status: PrnStatus;
+  qty_required: number | null;
   po_qty: number | null;
-  received_qty: number;                 // DEFAULT 0; incremented as deliveries arrive
-  preferred_supplier: string | null;
-  required_by_date: string | null;      // ISO date
+  received_qty: number | null;
   unit_price: number | null;
+  preferred_supplier: string | null;
+  required_by_date: string | null; // ISO date
   reason: string | null;
-  notes: string | null;
-  raised_by: string | null;             // auth.users.id; null = system-generated
-  raised_at: string;                    // timestamptz ISO
-  approved_by: string | null;
-  approved_at: string | null;
+  auto_flagged_balance: number | null;
+  raised_at: string;               // ISO date
+  created_by: string | null;
   created_at: string;
   updated_at: string;
-  // Auto-flagged context
-  auto_flagged_balance: number | null;  // balance at time of auto-creation
-  auto_flagged_at: string | null;       // timestamptz ISO
 }

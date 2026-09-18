@@ -22,7 +22,6 @@ import {
   type PulveriserJobCard,
   type PulveriserHourlyReading,
   type PulveriserJobCardReview,
-  type PulveriserShutdownLog,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildLabEmail } from "@/lib/notifications/pulveriser-emails";
@@ -45,7 +44,6 @@ export default function PulveriserLabPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [active, setActive]           = useState<PulveriserJobCard | null>(null);
   const [readings, setReadings]       = useState<PulveriserHourlyReading[]>([]);
-  const [shutdownLogs, setShutdownLogs] = useState<PulveriserShutdownLog[]>([]);
   const [history, setHistory]         = useState<PulveriserJobCardReview[]>([]);
   const [remark, setRemark]           = useState("");
   const [reopenProduction, setReopenProduction] = useState(false);
@@ -69,20 +67,17 @@ export default function PulveriserLabPage() {
     setActive(jc);
     setRemark("");
     setReopenProduction(false);
-    const [{ data: rd }, { data: hist }, { data: sd }] = await Promise.all([
+    const [{ data: rd }, { data: hist }] = await Promise.all([
       supabase.from("pulveriser_hourly_readings").select("*")
         .eq("job_card_id", jc.id).order("created_at"),
       supabase.from("pulveriser_job_card_reviews").select("*")
         .eq("job_card_id", jc.id).order("reviewed_at", { ascending: false }),
-      supabase.from("pulveriser_shutdown_logs").select("*")
-        .eq("job_card_id", jc.id).order("created_at"),
     ]);
     setReadings((rd ?? []) as PulveriserHourlyReading[]);
     setHistory((hist ?? []) as PulveriserJobCardReview[]);
-    setShutdownLogs((sd ?? []) as PulveriserShutdownLog[]);
   };
 
-  const goBack = () => { setActive(null); setReadings([]); setHistory([]); setShutdownLogs([]); };
+  const goBack = () => { setActive(null); setReadings([]); setHistory([]); };
 
   const submitReview = async (result: "ok" | "not_ok") => {
     if (!active || !user) return;
@@ -122,6 +117,17 @@ export default function PulveriserLabPage() {
         html,
         factoryId:   active.factory_id,
         referenceId: active.id,
+        sheetData: {
+          type: "job_card",
+          row: {
+            job_number:  active.job_number ?? active.id,
+            status:      result === "ok" ? "finalized" : "pending_stores",
+            lab_result:  result,
+            lab_remark:  remark.trim() || null,
+            lab_by:      profile?.full_name ?? null,
+            lab_at:      nowISO,
+          },
+        },
       });
 
       showToast(result === "ok"
@@ -267,93 +273,6 @@ export default function PulveriserLabPage() {
           ))
         )}
       </div>
-
-      {/* Shutdown log + reconciliation (Sept 16 meeting item 4) */}
-      <div className="card">
-        <h3>Shutdown log ({shutdownLogs.length})</h3>
-        {shutdownLogs.length === 0 ? (
-          <div className="empty">No shutdowns logged by operator.</div>
-        ) : (
-          shutdownLogs.map((s, i) => {
-            const sn   = Number(s.start_time);
-            const en   = Number(s.end_time);
-            const diff = Number.isFinite(sn) && Number.isFinite(en) && en > sn ? en - sn : null;
-            const hrs  = diff !== null ? diff / 100 : null;
-            return (
-              <div className="batch-block" key={s.id}>
-                <span className="batch-label">Shutdown {i + 1}</span>
-                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  Reading {s.start_time} → {s.end_time}
-                  {hrs !== null && ` · ${hrs.toFixed(2)} hrs`}
-                  {s.reason && <div style={{ color: "var(--ink-soft)" }}>Reason: {s.reason}</div>}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Shift-time reconciliation summary for Lab reviewer */}
-      {(() => {
-        if (readings.length === 0) return null;
-
-        const runningHours = readings.reduce((sum, r) => sum + (r.total_hours ?? 0), 0);
-
-        const starts = readings
-          .map(r => r.start_time?.trim())
-          .filter((s): s is string => !!s && Number.isFinite(Number(s)))
-          .map(Number);
-        const stops = readings
-          .map(r => r.stop_time?.trim())
-          .filter((s): s is string => !!s && Number.isFinite(Number(s)))
-          .map(Number);
-
-        if (starts.length === 0 || stops.length === 0) return null;
-
-        const shiftDuration = (Math.max(...stops) - Math.min(...starts)) / 100;
-        if (shiftDuration <= 0) return null;
-
-        const shutdownTotal = shutdownLogs.reduce((sum, s) => {
-          const sn = Number(s.start_time);
-          const en = Number(s.end_time);
-          const diff = Number.isFinite(sn) && Number.isFinite(en) && en > sn ? en - sn : 0;
-          return sum + diff / 100;
-        }, 0);
-
-        const accountedHours = shiftDuration - shutdownTotal;
-        const diff = Math.abs(runningHours - accountedHours);
-        const ok   = diff <= 0.05;
-
-        if (ok) {
-          return (
-            <div style={{
-              padding: "10px 14px", borderRadius: 8, fontSize: 13,
-              background: "color-mix(in srgb, var(--ok) 12%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)",
-              color: "var(--ink-soft)",
-            }}>
-              ✓ Shift time reconciled — running {runningHours.toFixed(2)} hrs ≈
-              shift {shiftDuration.toFixed(2)} − shutdowns {shutdownTotal.toFixed(2)}
-            </div>
-          );
-        }
-        return (
-          <div style={{
-            padding: "10px 14px", borderRadius: 8, fontSize: 13,
-            background: "color-mix(in srgb, var(--warn) 10%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)",
-          }}>
-            <div style={{ fontWeight: 700, color: "var(--warn)", marginBottom: 4 }}>
-              ⚠ Shift time mismatch — operator review recommended
-            </div>
-            <div><b>Running hours (readings):</b> {runningHours.toFixed(2)} hrs</div>
-            <div><b>Accounted:</b> shift {shiftDuration.toFixed(2)} − shutdowns {shutdownTotal.toFixed(2)} = {accountedHours.toFixed(2)} hrs</div>
-            <div style={{ color: "var(--warn)", marginTop: 4 }}>
-              Discrepancy: {diff.toFixed(2)} hrs — factor this into your QC decision.
-            </div>
-          </div>
-        );
-      })()}
 
       <div className="card">
         <h3>QC decision</h3>

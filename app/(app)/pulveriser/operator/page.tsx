@@ -25,7 +25,6 @@ import {
   parseVfdRange,
   groupByJobNumber,
   type PulveriserJobCard,
-  type PulveriserShutdownLog,
   type VfdParameter,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
@@ -45,14 +44,27 @@ interface HourlyRow {
 }
 
 // ---------------------------------------------------------------------------
-// Shutdown log row (local state — mirrors pulveriser_shutdown_logs table)
+// Machine Close (Band) Time — multiple entries per job card, any time during
+// the shift. Operator can save and continue later.
 // ---------------------------------------------------------------------------
-interface ShutdownRow {
-  id: string;           // local key (tmp-... or DB uuid)
+interface MachineCloseEntry {
+  id: string;              // local key (temp-xxx or DB uuid)
   persistedId: string | null;
-  start_time: string;   // coded meter reading, e.g. "1000"
-  end_time: string;     // coded meter reading, e.g. "1200"
+  close_date: string;      // YYYY-MM-DD
+  close_time: string;      // HH:MM
+  restart_time: string;    // HH:MM — optional, empty string = not yet restarted
   reason: string;
+}
+
+function blankCloseEntry(): MachineCloseEntry {
+  return {
+    id: `tmp-close-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    persistedId: null,
+    close_date: new Date().toISOString().slice(0, 10),
+    close_time: "",
+    restart_time: "",
+    reason: "",
+  };
 }
 
 // The pulveriser hour meter is a CODED reading, not a wall clock.
@@ -96,101 +108,6 @@ function blankRow(): HourlyRow {
   };
 }
 
-function blankShutdown(): ShutdownRow {
-  return {
-    id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    persistedId: null,
-    start_time: "",
-    end_time: "",
-    reason: "",
-  };
-}
-
-/**
- * Compute shutdown hours for a single row. Returns null if values are invalid.
- * Reuses the coded meter system: diff / 100 = decimal running hours.
- */
-function shutdownHours(row: ShutdownRow): number | null {
-  const s = row.start_time.trim();
-  const e = row.end_time.trim();
-  if (!s || !e) return null;
-  const sn = Number(s);
-  const en = Number(e);
-  if (!Number.isFinite(sn) || !Number.isFinite(en)) return null;
-  const diff = en - sn;
-  return diff > 0 ? diff / 100 : null;
-}
-
-/**
- * Shift-time reconciliation:
- *   actual_running = sum(hourly_readings.total_hours)
- *   accounted_time = shift_duration_hours - sum(shutdown_hours)
- *
- * Returns { ok: true } when the two sides reconcile within TOLERANCE, or
- * { ok: false, runningHours, accountedHours, diffHours } with the discrepancy.
- *
- * shift_duration_hours: total coded span of the shift (start to end meter reading),
- *   computed from the first start_time and last stop_time across all hourly rows.
- *   If that information isn't available, reconciliation is skipped (returns null).
- *
- * TOLERANCE: ±0.05 decimal hours (3 minutes) to absorb rounding in coded readings.
- */
-const RECONCILE_TOLERANCE = 0.05;
-
-interface ReconcileResult {
-  canCheck: boolean;
-  ok: boolean;
-  runningHours: number;
-  accountedHours: number;
-  diffHours: number;
-  shutdownTotal: number;
-  shiftDuration: number;
-}
-
-function reconcileShiftTime(
-  hourlyRows: HourlyRow[],
-  shutdownRows: ShutdownRow[],
-): ReconcileResult | null {
-  // Sum of total_hours from hourly readings (as already computed by codedToHours).
-  const runningHours = hourlyRows.reduce<number>((sum, r) => {
-    const d = codedDiff(r.start_time, r.stop_time);
-    return sum + (d !== null ? codedToHours(d) : 0);
-  }, 0);
-
-  // Derive shift span from the min start and max stop across all hourly rows.
-  const starts = hourlyRows
-    .map(r => r.start_time.trim())
-    .filter(s => s !== "" && Number.isFinite(Number(s)))
-    .map(Number);
-  const stops = hourlyRows
-    .map(r => r.stop_time.trim())
-    .filter(s => s !== "" && Number.isFinite(Number(s)))
-    .map(Number);
-
-  if (starts.length === 0 || stops.length === 0) {
-    // Not enough data to derive shift duration — skip check.
-    return null;
-  }
-
-  const shiftStart = Math.min(...starts);
-  const shiftStop  = Math.max(...stops);
-  if (shiftStop <= shiftStart) return null;
-
-  const shiftDuration = (shiftStop - shiftStart) / 100;
-
-  // Sum of logged shutdown durations.
-  const shutdownTotal = shutdownRows.reduce<number>(
-    (sum, r) => sum + (shutdownHours(r) ?? 0),
-    0,
-  );
-
-  const accountedHours = shiftDuration - shutdownTotal;
-  const diffHours      = Math.abs(runningHours - accountedHours);
-  const ok             = diffHours <= RECONCILE_TOLERANCE;
-
-  return { canCheck: true, ok, runningHours, accountedHours, diffHours, shutdownTotal, shiftDuration };
-}
-
 /** Format a YYYY-MM-DD string as DD/MM/YYYY for display. */
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -223,9 +140,7 @@ export default function PulveriserOperatorPage() {
   const [chkRoller, setChkRoller]         = useState(false);
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
-
-  // Shutdown log rows (Sept 16 meeting item 4)
-  const [shutdowns, setShutdowns]         = useState<ShutdownRow[]>([]);
+  const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
 
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
@@ -295,23 +210,24 @@ export default function PulveriserOperatorPage() {
     })) as HourlyRow[];
     setRows(existing.length ? existing : [blankRow()]);
 
-    // Load any existing shutdown logs (rework case)
-    const { data: sdData } = await supabase
-      .from("pulveriser_shutdown_logs")
+    // Load any existing machine close time entries
+    const { data: closeData } = await supabase
+      .from("pulveriser_machine_close_times")
       .select("*")
       .eq("job_card_id", jc.id)
       .order("created_at");
-    const existingShutdowns: ShutdownRow[] = (sdData ?? []).map((s: PulveriserShutdownLog) => ({
-      id: s.id,
-      persistedId: s.id,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      reason: s.reason ?? "",
-    }));
-    setShutdowns(existingShutdowns);
+    const existingClose = (closeData ?? []).map(r => ({
+      id:           r.id,
+      persistedId:  r.id as string,
+      close_date:   r.close_date  ?? new Date().toISOString().slice(0, 10),
+      close_time:   r.close_time  ?? "",
+      restart_time: r.restart_time ?? "",
+      reason:       r.reason      ?? "",
+    })) as MachineCloseEntry[];
+    setCloseEntries(existingClose.length ? existingClose : [blankCloseEntry()]);
   };
 
-  const goBack = () => { setActive(null); setRows([blankRow()]); setVfdParam(null); setActualMt(""); setShutdowns([]); };
+  const goBack = () => { setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]); setVfdParam(null); setActualMt(""); };
 
   // Classifier VFD mismatch flag — reference only, never blocks submission.
   const classifierRange = useMemo(
@@ -341,22 +257,62 @@ export default function PulveriserOperatorPage() {
     setRows(prev => prev.filter(r => r.id !== row.id));
   };
 
-  // ── Shutdown log helpers ─────────────────────────────────────────────────
-  const updateShutdown = (id: string, field: keyof ShutdownRow, val: string) => {
-    setShutdowns(prev => prev.map(s => s.id === id ? { ...s, [field]: val } : s));
+  // ── Machine Close Time helpers ────────────────────────────────────────────
+  const updateCloseEntry = (id: string, field: keyof MachineCloseEntry, val: string) => {
+    setCloseEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: val } : e));
+  };
+  const addCloseEntry = () => setCloseEntries(prev => [...prev, blankCloseEntry()]);
+  const removeCloseEntry = async (entry: MachineCloseEntry) => {
+    if (entry.persistedId) {
+      const { error } = await supabase
+        .from("pulveriser_machine_close_times")
+        .delete()
+        .eq("id", entry.persistedId);
+      if (error) { showToast("प्रविष्टि नहीं हटा सके: " + error.message, true); return; }
+    }
+    setCloseEntries(prev => prev.filter(e => e.id !== entry.id));
   };
 
-  const addShutdown = () => setShutdowns(prev => [...prev, blankShutdown()]);
+  /** Upsert all close-time entries — called on both "save progress" and "submit". */
+  const syncCloseEntries = async (jc: PulveriserJobCard) => {
+    for (const e of closeEntries) {
+      // Skip blank rows (no close_time entered yet)
+      if (!e.close_time.trim()) continue;
 
-  const removeShutdown = async (row: ShutdownRow) => {
-    if (row.persistedId) {
-      const { error } = await supabase
-        .from("pulveriser_shutdown_logs")
-        .delete()
-        .eq("id", row.persistedId);
-      if (error) { showToast("शटडाउन पंक्ति नहीं हटा सके: " + error.message, true); return; }
+      const body = {
+        job_card_id:  jc.id,
+        factory_id:   jc.factory_id,
+        close_date:   e.close_date  || new Date().toISOString().slice(0, 10),
+        close_time:   e.close_time,
+        restart_time: e.restart_time.trim() || null,
+        reason:       e.reason.trim()       || null,
+        recorded_by:  user?.id              ?? null,
+      };
+
+      if (e.persistedId) {
+        const { error } = await supabase
+          .from("pulveriser_machine_close_times")
+          .update(body)
+          .eq("id", e.persistedId);
+        if (error) throw new Error(error.message ?? JSON.stringify(error));
+      } else {
+        const { data: inserted, error } = await supabase
+          .from("pulveriser_machine_close_times")
+          .insert(body)
+          .select("id")
+          .single();
+        if (error) throw new Error(error.message ?? JSON.stringify(error));
+        // Promote temp id → real DB id so subsequent saves are UPDATEs
+        if (inserted) {
+          setCloseEntries(prev =>
+            prev.map(x => x.id === e.id
+              ? { ...x, persistedId: inserted.id, id: inserted.id }
+              : x
+            )
+          );
+        }
+      }
     }
-    setShutdowns(prev => prev.filter(s => s.id !== row.id));
   };
 
   // Submit is allowed once the core operator fields are present.
@@ -427,27 +383,6 @@ export default function PulveriserOperatorPage() {
     }
   };
 
-  // Persist new shutdown log rows (updates are not supported — user deletes and re-adds).
-  const syncShutdownRows = async (jc: PulveriserJobCard) => {
-    if (!user) return;
-    for (const s of shutdowns) {
-      if (s.persistedId) continue; // already in DB, no update path
-      if (!s.start_time.trim() || !s.end_time.trim()) continue; // skip blank rows
-      const body = {
-        job_card_id: jc.id,
-        factory_id:  jc.factory_id,
-        start_time:  s.start_time.trim(),
-        end_time:    s.end_time.trim(),
-        reason:      s.reason.trim() || null,
-        logged_by:   user.id,
-      };
-      const { error } = await supabase
-        .from("pulveriser_shutdown_logs")
-        .insert(body);
-      if (error) throw error;
-    }
-  };
-
   const handleSave = async (submit: boolean) => {
     if (!active || !user) return;
     if (submit && !canSubmit) {
@@ -458,8 +393,8 @@ export default function PulveriserOperatorPage() {
     try {
       // Save hourly rows first (they require the card to still be 'pending').
       await syncHourlyRows(active);
-      // Save new shutdown log rows (also while card is still 'pending').
-      await syncShutdownRows(active);
+      // Save machine close time entries (independent of submission status)
+      await syncCloseEntries(active);
       const { data, error } = await persistOperatorFields(active.id, submit);
       if (error) { showToast("सहेजा नहीं जा सका: " + error.message, true); return; }
       if (!data || data.length === 0) {
@@ -504,6 +439,20 @@ export default function PulveriserOperatorPage() {
           html,
           factoryId:   active.factory_id,
           referenceId: active.id,
+          sheetData: {
+            type: "job_card",
+            row: {
+              job_number:                   active.job_number ?? active.id,
+              status:                       "submitted_for_qc",
+              actual_production_mt:         updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
+              expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
+              actual_oil_consumption_kg:    updatedCard?.actual_oil_consumption_kg ?? null,
+              oil_variance_kg:              updatedCard?.oil_variance_kg ?? null,
+              oil_extra_leftover_balance_kg: updatedCard?.oil_extra_leftover_balance_kg ?? null,
+              operator_by:                  profile?.full_name ?? null,
+              operator_submitted_at:        nowISO,
+            },
+          },
         });
       }
 
@@ -641,6 +590,99 @@ export default function PulveriserOperatorPage() {
         <textarea rows={2} value={workDetails} onChange={e => setWorkDetails(e.target.value)} />
       </div>
 
+      {/* Machine Close (Band) Times — ABOVE hourly readings */}
+      <div className="card">
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>मशीन बंद समय</h3>
+          <span className="count">{closeEntries.length}</span>
+        </div>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          शिफ्ट के दौरान जितनी बार मशीन बंद हो, हर बार एक नई प्रविष्टि जोड़ें।
+          नीचे <b>मशीन बंद समय सहेजें</b> दबाएँ — बाद में वापस आकर और प्रविष्टियाँ जोड़ सकते हैं।
+        </div>
+
+        {closeEntries.map((e, i) => (
+          <div key={e.id} style={{
+            border: "1px solid var(--line)", borderRadius: 8,
+            padding: 14, marginBottom: 10, background: "var(--surface)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>बंद #{i + 1}</span>
+              {closeEntries.length > 1 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
+                  onClick={() => removeCloseEntry(e)}
+                >
+                  हटाएँ
+                </button>
+              )}
+            </div>
+
+            <div className="row3">
+              <div>
+                <label>तारीख</label>
+                <input
+                  type="date"
+                  value={e.close_date}
+                  onChange={ev => updateCloseEntry(e.id, "close_date", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>बंद समय *</label>
+                <input
+                  type="time"
+                  value={e.close_time}
+                  onChange={ev => updateCloseEntry(e.id, "close_time", ev.target.value)}
+                />
+              </div>
+              <div>
+                <label>पुनः शुरू समय</label>
+                <input
+                  type="time"
+                  value={e.restart_time}
+                  onChange={ev => updateCloseEntry(e.id, "restart_time", ev.target.value)}
+                />
+              </div>
+            </div>
+
+            <label>कारण / टिप्पणी</label>
+            <input
+              type="text"
+              placeholder="जैसे: मेंटेनेन्स, ब्रेक, माल खत्म…"
+              value={e.reason}
+              onChange={ev => updateCloseEntry(e.id, "reason", ev.target.value)}
+            />
+          </div>
+        ))}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+          <button type="button" className="btn btn-ghost" onClick={addCloseEntry}>
+            + बंद समय जोड़ें
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={submitting}
+            onClick={async () => {
+              if (!active || !user) return;
+              setSubmitting(true);
+              try {
+                await syncCloseEntries(active);
+                showToast("मशीन बंद समय सहेजा गया ✓");
+              } catch (e: unknown) {
+                showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+          >
+            {submitting ? "सहेजा जा रहा है…" : "मशीन बंद समय सहेजें"}
+          </button>
+        </div>
+      </div>
+
       {/* Hourly readings (repeatable) */}
       <div className="card">
         <div className="helper-row">
@@ -753,117 +795,6 @@ export default function PulveriserOperatorPage() {
           <span>जाली के कपड़े की जाँच</span>
         </div>
       </div>
-
-      {/* ── Shutdown Log (Sept 16 meeting item 4) ─────────────────────────────
-          Operator logs one row per shutdown period in the shift.
-          start_time / end_time use the same coded meter scale as hourly readings.
-          ─────────────────────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="helper-row">
-          <h3 style={{ margin: 0 }}>शटडाउन लॉग (यदि कोई हो)</h3>
-          <span className="count">{shutdowns.length}</span>
-        </div>
-        <div className="field-hint" style={{ marginBottom: 10 }}>
-          इस शिफ्ट में जितनी बार मशीन बंद रही, हर बार की रीडिंग यहाँ दर्ज करें।
-          खाली छोड़ना ठीक है अगर कोई शटडाउन नहीं था।
-        </div>
-
-        {shutdowns.map((s, i) => {
-          const hrs = shutdownHours(s);
-          return (
-            <div key={s.id} style={{
-              border: "1px solid var(--line)", borderRadius: 8,
-              padding: 14, marginBottom: 10, background: "var(--surface)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>शटडाउन {i + 1}</span>
-                <button type="button" className="btn btn-ghost"
-                  style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
-                  onClick={() => removeShutdown(s)}
-                  disabled={!!s.persistedId && false /* always deletable while pending */}>
-                  हटाएँ
-                </button>
-              </div>
-
-              <div className="row3">
-                <div>
-                  <label>बंद रीडिंग (शुरू)</label>
-                  <input type="number" inputMode="numeric" placeholder="जैसे 1000"
-                    value={s.start_time}
-                    onChange={e => updateShutdown(s.id, "start_time", e.target.value)} />
-                </div>
-                <div>
-                  <label>चालू रीडिंग (खत्म)</label>
-                  <input type="number" inputMode="numeric" placeholder="जैसे 1200"
-                    value={s.end_time}
-                    onChange={e => updateShutdown(s.id, "end_time", e.target.value)} />
-                </div>
-                <div>
-                  <label>बंद समय</label>
-                  <input type="text" disabled
-                    value={hrs !== null ? formatCodedHM(Math.round(hrs * 100)) : ""}
-                    placeholder="0 घं 0 मि" />
-                </div>
-              </div>
-
-              <label>कारण (वैकल्पिक)</label>
-              <input type="text" placeholder="जैसे मशीन खराबी, बिजली कटौती…"
-                value={s.reason}
-                onChange={e => updateShutdown(s.id, "reason", e.target.value)} />
-            </div>
-          );
-        })}
-
-        <button type="button" className="btn btn-ghost" onClick={addShutdown}>
-          + शटडाउन जोड़ें
-        </button>
-      </div>
-
-      {/* ── Shift-time reconciliation warning ──────────────────────────────
-          Computes: (shift_duration) - (total_shutdown) vs sum(hourly_total_hours).
-          Does NOT block submission — surfaces a discrepancy for Lab to see.
-          ─────────────────────────────────────────────────────────────────── */}
-      {(() => {
-        const result = reconcileShiftTime(rows, shutdowns);
-        if (!result) return null;   // not enough data to check
-        if (result.ok) {
-          // Reconciled — show a quiet confirmation.
-          return (
-            <div style={{
-              padding: "10px 14px", borderRadius: 8,
-              background: "color-mix(in srgb, var(--ok) 12%, transparent)",
-              border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)",
-              fontSize: 13, color: "var(--ink-soft)",
-            }}>
-              ✓ शिफ्ट समय मेल खाता है —{" "}
-              चालू घंटे {result.runningHours.toFixed(2)} घं ≈{" "}
-              शिफ्ट {result.shiftDuration.toFixed(2)} घं − शटडाउन {result.shutdownTotal.toFixed(2)} घं
-            </div>
-          );
-        }
-        return (
-          <div style={{
-            padding: "10px 14px", borderRadius: 8,
-            background: "color-mix(in srgb, var(--warn) 10%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)",
-            fontSize: 13,
-          }}>
-            <div style={{ fontWeight: 700, color: "var(--warn)", marginBottom: 4 }}>
-              ⚠ शिफ्ट समय मेल नहीं खाता
-            </div>
-            <div>
-              <b>चालू घंटे (रीडिंग से):</b> {result.runningHours.toFixed(2)} घं
-            </div>
-            <div>
-              <b>अनुमानित चालू घंटे:</b> शिफ्ट {result.shiftDuration.toFixed(2)} − शटडाउन {result.shutdownTotal.toFixed(2)} = {result.accountedHours.toFixed(2)} घं
-            </div>
-            <div style={{ marginTop: 4, color: "var(--warn)" }}>
-              अंतर: {result.diffHours.toFixed(2)} घं — कृपया रीडिंग या शटडाउन जाँचें।
-              सबमिट करने पर Lab को यह चेतावनी दिखेगी।
-            </div>
-          </div>
-        );
-      })()}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="btn btn-ghost" type="button"

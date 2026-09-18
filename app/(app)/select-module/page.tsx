@@ -59,7 +59,7 @@ export function setDemoRole(role: AppRole | null): void {
 const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string; desc: string }[] = [
   { role: "production_incharge", label: "Production",  labelHi: "प्रोडक्शन", icon: "🏭", desc: "Pulveriser job card — fill production details" },
   { role: "chemist",             label: "Lab / QC",    labelHi: "लैब / QC",  icon: "🧪", desc: "Job card lab fields + Lab QC module" },
-  { role: "stores",              label: "Stores",       labelHi: "स्टोर्स",   icon: "🛢️", desc: "Stock ledger, oil issue, material issue slip, PRN, dispatch" },
+  { role: "stores",              label: "Stores",       labelHi: "स्टोर्स",   icon: "🛢️", desc: "Issue oil for pulveriser batches" },
   { role: "operator",            label: "Operator",     labelHi: "ऑपरेटर",   icon: "⚙️", desc: "Run the pulveriser, fill shift details" },
 ];
 

@@ -3,6 +3,7 @@
 // =============================================================================
 // Preventive Maintenance — Form JSCI/PROD/06
 // A-20/1 only · Access: production_incharge, factory_admin, company_admin
+// redeploy: 2026-09-17
 //
 // Layout:
 //   - Table grouped by machine
@@ -90,6 +91,8 @@ export default function MaintenancePage() {
   const [itemsWithStatus, setItemsWithStatus] = useState<PmItemWithStatus[]>([]);
   const [loading, setLoading]                 = useState(true);
   const [markingId, setMarkingId]             = useState<string | null>(null);
+  // Per-row remark text — keyed by schedule_item_id
+  const [remarks, setRemarks]                 = useState<Record<string, string>>({});
 
   // Filter controls
   const [filterMachine, setFilterMachine]   = useState<string>("All");
@@ -159,7 +162,7 @@ export default function MaintenancePage() {
           schedule_item_id: itemId,
           completed_at:     completedAt,
           completed_by:     user.id,
-          notes:            null,
+          notes:            remarks[itemId]?.trim() || null,
         });
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
@@ -174,7 +177,7 @@ export default function MaintenancePage() {
           frequencyWeeks:  itemWithStatus.item.frequency_weeks,
           completedAt,
           completedByName: profile?.full_name ?? "—",
-          notes:           null,
+          notes:           remarks[itemId]?.trim() || null,
         });
         void notifyEvent({
           eventType:  "pm_completion",
@@ -182,6 +185,21 @@ export default function MaintenancePage() {
           html,
           factoryId:  activeFactory?.id,
           referenceId: itemId,
+          sheetData: {
+            type:   "append",
+            tab:    "Preventive Maintenance",
+            values: [
+              itemId,
+              itemWithStatus.item.machine,
+              itemWithStatus.item.component,
+              itemWithStatus.item.task,
+              itemWithStatus.item.frequency_weeks,
+              completedAt,
+              profile?.full_name ?? null,
+              remarks[itemId]?.trim() || null,
+              activeFactory?.id ?? null,
+            ],
+          },
         });
       }
 
@@ -332,6 +350,7 @@ export default function MaintenancePage() {
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--ink-soft)" }}>Next Due</th>
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--ink-soft)" }}>Status</th>
                     <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--ink-soft)" }}>Action</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--ink-soft)" }}>Remark</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -368,6 +387,20 @@ export default function MaintenancePage() {
                         >
                           {markingId === i.item.id ? "Saving…" : "Mark done today"}
                         </button>
+                      </td>
+                      <td style={{ padding: "8px 12px", minWidth: 180 }}>
+                        <input
+                          type="text"
+                          placeholder="Add remark…"
+                          value={remarks[i.item.id] ?? ""}
+                          onChange={e => setRemarks(prev => ({ ...prev, [i.item.id]: e.target.value }))}
+                          style={{
+                            width: "100%", fontSize: 12,
+                            padding: "4px 8px", borderRadius: 6,
+                            border: "1px solid var(--line)",
+                            background: "var(--surface)",
+                          }}
+                        />
                       </td>
                     </tr>
                   ))}

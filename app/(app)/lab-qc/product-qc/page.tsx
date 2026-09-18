@@ -388,7 +388,33 @@ export default function ProductQcPage() {
           submittedAt:     pqcUpdISO,
           isUpdate:        true,
         });
-        void notifyEvent({ eventType: "lab_qc_product_qc", subject: pqcUpdSubj, html: pqcUpdHtml, factoryId: activeFactory.id, referenceId: existingRecord.id });
+        void notifyEvent({
+          eventType: "lab_qc_product_qc",
+          subject: pqcUpdSubj,
+          html: pqcUpdHtml,
+          factoryId: activeFactory.id,
+          referenceId: existingRecord.id,
+          sheetData: {
+            type: "append",
+            tab: "Product QC",
+            values: [
+              existingRecord.id,
+              selectedProduct?.name ?? null,
+              batches.find(b => b.id === existingRecord.batch_id)?.batch_number ?? null,
+              phase,
+              testDate,
+              values["colour_physical_state"] ?? null,
+              appearanceOk,
+              "pending",  // overall_result — not available at this point
+              JSON.stringify(testResults),
+              remarks.trim() || null,
+              profile?.full_name ?? null,
+              pqcUpdISO,
+              true,  // isUpdate
+              activeFactory.id,
+            ],
+          },
+        });
 
         showToast("Product QC updated ✓");
       } else {
@@ -443,7 +469,33 @@ export default function ProductQcPage() {
           submittedAt:     pqcInsISO,
           isUpdate:        false,
         });
-        void notifyEvent({ eventType: "lab_qc_product_qc", subject: pqcInsSubj, html: pqcInsHtml, factoryId: activeFactory.id, referenceId: newRow.id });
+        void notifyEvent({
+          eventType: "lab_qc_product_qc",
+          subject: pqcInsSubj,
+          html: pqcInsHtml,
+          factoryId: activeFactory.id,
+          referenceId: newRow.id,
+          sheetData: {
+            type: "append",
+            tab: "Product QC",
+            values: [
+              newRow.id,
+              selectedProduct?.name ?? null,
+              batchNum,
+              phase,
+              testDate,
+              values["colour_physical_state"] ?? null,
+              appearanceOk,
+              "pending",  // overall_result — not available at this point
+              JSON.stringify(testResults),
+              remarks.trim() || null,
+              profile?.full_name ?? null,
+              pqcInsISO,
+              false,  // isUpdate
+              activeFactory.id,
+            ],
+          },
+        });
 
         showToast("Product QC saved ✓");
         setBatchId("");

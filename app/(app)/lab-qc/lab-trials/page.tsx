@@ -147,7 +147,32 @@ export default function LabTrialsPage() {
         submittedByName: profile?.full_name ?? "—",
         submittedAt:     ltNowISO,
       });
-      void notifyEvent({ eventType: "lab_qc_lab_trial", subject: ltSubj, html: ltHtml, factoryId: activeFactory.id, referenceId: trialId });
+      void notifyEvent({
+        eventType: "lab_qc_lab_trial",
+        subject: ltSubj,
+        html: ltHtml,
+        factoryId: activeFactory.id,
+        referenceId: trialId,
+        sheetData: {
+          type: "append",
+          tab: "Lab Trials",
+          values: [
+            trialId,
+            trialCode,
+            selectedProduct?.name ?? null,
+            trialDate,
+            status,
+            objective.trim() || null,
+            appearance || null,
+            conclusion.trim() || null,
+            JSON.stringify(testResults),
+            remarks.trim() || null,
+            profile?.full_name ?? null,
+            ltNowISO,
+            activeFactory.id,
+          ],
+        },
+      });
 
       showToast("Lab trial saved ✓");
       setTrialCode(""); setObjective(""); setAppearance(""); setDensity("");
