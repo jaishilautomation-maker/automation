@@ -294,6 +294,9 @@ interface RmEntry {
   closing_balance: number | null;
   status: StockStatus | "";
   remarks: string;
+  // Formula-computed fields (editable overrides; auto-filled from formulas)
+  qty_issued_to_bal_mill: string;   // Formula 11 — Qty issued to Ball Mill
+  net_balance: string;              // Formula 22 — Net balance after deduction
 }
 
 interface SavedRmRow {
@@ -309,6 +312,8 @@ interface SavedRmRow {
   closing_balance: number;
   status: string;
   remarks: string;
+  qty_issued_to_bal_mill: number;
+  net_balance: number;
 }
 
 function computeRmClosing(e: RmEntry): number | null {
@@ -328,6 +333,7 @@ function blankRmEntry(): RmEntry {
     opening_balance: "", qty_received: "", material_return: "",
     qty_issued_prodn: "", qty_issued_bal: "", dispatch_as_is: "",
     closing_balance: null, status: "", remarks: "",
+    qty_issued_to_bal_mill: "", net_balance: "",
   };
 }
 
@@ -377,6 +383,8 @@ function RawMaterialSection() {
           closing_balance:  p.closing_balance  ?? 0,
           status:           p.status           ?? "",
           remarks:          p.remarks          ?? "",
+          qty_issued_to_bal_mill: p.qty_issued_to_bal_mill ?? 0,
+          net_balance:            p.net_balance            ?? 0,
         });
       } catch { /* skip */ }
     }
@@ -402,12 +410,13 @@ function RawMaterialSection() {
     setSubmitting(true);
     try {
       const { data: itemData } = await supabase
-        .from("stores_stock_items").select("id")
+        .from("stores_stock_items").select("id, factory_id")
         .eq("category", "raw_material")
         .ilike("item_name", "%" + entry.product + "%")
         .limit(1).maybeSingle();
-      const itemId = (itemData as { id: string } | null)?.id;
-      if (!itemId) {
+      const itemId = (itemData as { id: string; factory_id: string } | null)?.id;
+      const factoryId = (itemData as { id: string; factory_id: string } | null)?.factory_id;
+      if (!itemId || !factoryId) {
         showToast("No item found for \"" + entry.product + "\". Add it in Stock Ledger first.", true);
         setSubmitting(false); return;
       }
@@ -424,9 +433,12 @@ function RawMaterialSection() {
         closing_balance:  closing,
         status: entry.status,
         remarks: entry.remarks,
+        qty_issued_to_bal_mill: Number(entry.qty_issued_to_bal_mill) || 0,
+        net_balance:            Number(entry.net_balance)            || closing,
       };
       const { error } = await supabase.from("stores_stock_ledger").insert({
         item_id: itemId,
+        factory_id: factoryId,
         transaction_date: entry.date,
         transaction_source: "manual",
         qty_received: payload.qty_received + payload.material_return,
@@ -535,6 +547,44 @@ function RawMaterialSection() {
               onChange={e => setField("remarks", e.target.value)} />
           </div>
         </div>
+
+        {/* Formula-computed fields (from Excel formulas -- editable overrides) */}
+        <div style={{ marginTop: 10, padding: "10px 12px",
+          background: "var(--clay-soft)", borderRadius: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+            textTransform: "uppercase", marginBottom: 8 }}>
+            Formula Fields (Excel cross-references)
+          </div>
+          <div className="row3">
+            <div>
+              <label style={{ fontSize: 11 }}>
+                Closing Balance (C3+D3+E3-F3-G3-H3)
+              </label>
+              <input type="text" disabled
+                value={closing != null ? closing.toFixed(3) : "N/A"}
+                style={{ fontWeight: 700,
+                  color: closing != null && closing < 0 ? "var(--warn)" : "var(--ok)" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11 }}>
+                Qty Issued to Ball Mill (G col)
+              </label>
+              <input type="number" step="0.001" placeholder="0"
+                value={entry.qty_issued_to_bal_mill}
+                onChange={e => setField("qty_issued_to_bal_mill", e.target.value)} />
+              <div className="field-hint">Ref: VLOOKUP DAILY PRODN col 22</div>
+            </div>
+            <div>
+              <label style={{ fontSize: 11 }}>
+                Net Balance (M col = I - N)
+              </label>
+              <input type="number" step="0.001" placeholder="0"
+                value={entry.net_balance}
+                onChange={e => setField("net_balance", e.target.value)} />
+              <div className="field-hint">Override: closing - fixed deduction</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <button className="btn btn-primary" type="button"
@@ -571,6 +621,8 @@ function RawMaterialSection() {
                       <th style={{ textAlign: "right" }}>Issued Bal</th>
                       <th style={{ textAlign: "right" }}>Dispatch</th>
                       <th style={{ textAlign: "right" }}>C/Bal</th>
+                      <th style={{ textAlign: "right" }}>Ball Mill</th>
+                      <th style={{ textAlign: "right" }}>Net Bal</th>
                       <th>Status</th>
                       <th>Remarks</th>
                     </tr>
@@ -599,6 +651,13 @@ function RawMaterialSection() {
                         <td style={{ textAlign: "right", fontWeight: 700,
                           color: row.closing_balance < 0 ? "var(--warn)" : undefined }}>
                           {fmt(row.closing_balance)}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {row.qty_issued_to_bal_mill > 0 ? fmt(row.qty_issued_to_bal_mill) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: row.net_balance < 0 ? "var(--warn)" : undefined }}>
+                          {fmt(row.net_balance)}
                         </td>
                         <td>
                           <span style={{
@@ -2028,6 +2087,7 @@ function IssueSlipSection() {
 
       const { error } = await supabase.from("stores_stock_ledger").insert({
         item_id:            selectedItemId,
+        factory_id:         selectedItem?.factory_id ?? null,
         transaction_date:   slipDate,
         transaction_source: "manual",
         qty_received:       0,
@@ -2546,6 +2606,7 @@ function DispatchSection() {
       ].filter(Boolean);
       const { error } = await supabase.from("stores_stock_ledger").insert({
         item_id: selectedItemId,
+        factory_id: selectedItem?.factory_id ?? null,
         transaction_date: dispatchDate,
         transaction_source: "dispatch",
         qty_received: 0, qty_issued: 0,
