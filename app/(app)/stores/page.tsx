@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -96,6 +96,7 @@ export default function StoresPage() {
     { id: "oil",        label: "Oil Issue" },
     { id: "rm",         label: "Raw Material" },
     { id: "received",   label: "Received" },
+    { id: "supplied",   label: "Supplied" },
     { id: "daily_prod", label: "Daily Production" },
     { id: "ledger",     label: "Stock Ledger" },
     { id: "issue",      label: "Issue Slip" },
@@ -129,6 +130,7 @@ export default function StoresPage() {
       {tab === "oil"        && <OilIssueSection />}
       {tab === "rm"         && <RawMaterialSection />}
       {tab === "received"   && <ReceivedSection />}
+      {tab === "supplied"   && <SuppliedSection />}
       {tab === "daily_prod" && <DailyProductionSection />}
       {tab === "ledger"     && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
@@ -639,7 +641,152 @@ function RawMaterialSection() {
 // predefined values from the Excel filter list.
 // =============================================================================
 
-const RECEIVED_REMARKS = [
+// =============================================================================
+// SHARED -- Searchable Code dropdown (used by both Received and Supplied)
+// =============================================================================
+
+/** Reusable searchable single-select dropdown for Code fields */
+function CodeDropdown({
+  codes,
+  value,
+  onChange,
+  placeholder,
+}: {
+  codes: readonly string[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [search, setSearch]   = useState("");
+  const [open, setOpen]       = useState(false);
+  const filtered = search.trim()
+    ? codes.filter(c => c.toLowerCase().includes(search.toLowerCase()))
+    : codes;
+  return (
+    <div style={{ position: "relative" }}>
+      <div onClick={() => setOpen(p => !p)} style={{
+        width: "100%", padding: "10px 12px",
+        border: "1px solid var(--line)", borderRadius: 8,
+        fontSize: 15, background: "#fff", cursor: "pointer",
+        color: value ? "var(--ink)" : "var(--ink-soft)", userSelect: "none",
+      }}>
+        {value || placeholder || "-- Select code --"}
+      </div>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0,
+          background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+          zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,.12)",
+          maxHeight: 300, display: "flex", flexDirection: "column",
+        }}>
+          <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
+            <input autoFocus type="text" placeholder="Search..."
+              value={search} onChange={e => setSearch(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ width: "100%", padding: "6px 10px",
+                border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }} />
+          </div>
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            <div onClick={() => { onChange(""); setOpen(false); setSearch(""); }}
+              style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                color: "var(--ink-soft)", borderBottom: "1px solid var(--line)",
+                background: !value ? "var(--clay-soft)" : undefined }}>
+              (Blanks) -- Clear
+            </div>
+            {filtered.map(c => (
+              <div key={c} onClick={() => { onChange(c); setOpen(false); setSearch(""); }}
+                style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                  background: value === c ? "var(--clay-soft)" : undefined,
+                  color: value === c ? "var(--clay)" : "var(--ink)" }}>
+                {c}
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-soft)" }}>
+                No results
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Reusable multi-select filter dropdown for history table */
+function CodeFilterDropdown({
+  codes,
+  selected,
+  onToggle,
+  onClear,
+  onClose,
+}: {
+  codes: readonly string[];
+  selected: string[];
+  onToggle: (v: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = search.trim()
+    ? codes.filter(c => c.toLowerCase().includes(search.toLowerCase()))
+    : codes;
+  return (
+    <div style={{
+      position: "absolute", top: "100%", right: 0,
+      background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+      zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,.12)",
+      width: 280, maxHeight: 340, display: "flex", flexDirection: "column",
+    }}>
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
+        <input autoFocus type="text" placeholder="Search..."
+          value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: "100%", padding: "6px 10px",
+            border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }} />
+      </div>
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8,
+          padding: "9px 14px", cursor: "pointer", fontSize: 13,
+          fontWeight: 700, borderBottom: "1px solid var(--line)" }}>
+          <input type="checkbox" checked={selected.length === 0}
+            onChange={() => onClear()} />
+          (Select All)
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8,
+          padding: "9px 14px", cursor: "pointer", fontSize: 13,
+          borderBottom: "1px solid var(--line)" }}>
+          <input type="checkbox" checked={selected.includes("")}
+            onChange={() => onToggle("")} />
+          (Blanks)
+        </label>
+        {filtered.map(c => (
+          <label key={c} style={{ display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
+            <input type="checkbox" checked={selected.includes(c)}
+              onChange={() => onToggle(c)} />
+            {c}
+          </label>
+        ))}
+      </div>
+      <div style={{ padding: "8px 10px", borderTop: "1px solid var(--line)", display: "flex", gap: 8 }}>
+        <button type="button" className="btn btn-primary"
+          style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+          onClick={onClose}>Apply</button>
+        <button type="button" className="btn btn-ghost"
+          style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
+          onClick={() => { onClear(); onClose(); }}>Clear</button>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// TAB 3 -- RECEIVED ENTRY BOOK
+// Columns: Date | Particular | Transport | Materials | Vehicle No | O/WT |
+//          F/Wt | Bags/Loose | INV/CHL No | Code (dropdown) | Remarks (free text) | PO No
+// =============================================================================
+
+const RECEIVED_CODES = [
   "008/2026-27","Apollo bag","Ceat108 bag","Chem Grind Oil","Code R5299",
   "Crude Sulphur Shifting","DC no. 323","Document not Received","DS-10",
   "ELASTO 541 OIL","Export Pallet Loading","For Lab","For Repair",
@@ -708,19 +855,17 @@ interface ReceivedEntry {
   f_wt: string;
   bags_loose: string;
   inv_chl_no: string;
-  remark: string;
+  code: string;
+  remarks: string;
   po_no: string;
 }
-
-interface SavedReceivedRow extends ReceivedEntry {
-  id: string;
-}
+interface SavedReceivedRow extends ReceivedEntry { id: string; }
 
 function blankReceivedEntry(): ReceivedEntry {
   return {
     date: today(), particular: "", transport: "", materials: "",
     vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
-    inv_chl_no: "", remark: "", po_no: "",
+    inv_chl_no: "", code: "", remarks: "", po_no: "",
   };
 }
 
@@ -733,15 +878,8 @@ function ReceivedSection() {
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory]       = useState<SavedReceivedRow[]>([]);
   const [histLoading, setHistLoading] = useState(true);
-
-  // Remark dropdown state
-  const [remarkSearch, setRemarkSearch]       = useState("");
-  const [remarkDropOpen, setRemarkDropOpen]   = useState(false);
-
-  // History filter state (multi-select)
-  const [filterRemarks, setFilterRemarks]     = useState<string[]>([]);  // empty = All
-  const [filterSearch, setFilterSearch]       = useState("");
-  const [filterDropOpen, setFilterDropOpen]   = useState(false);
+  const [filterCodes, setFilterCodes] = useState<string[]>([]);
+  const [filterDropOpen, setFilterDropOpen] = useState(false);
 
   const setField = (k: keyof ReceivedEntry, v: string) =>
     setEntry(prev => ({ ...prev, [k]: v }));
@@ -755,53 +893,30 @@ function ReceivedSection() {
       .order("transaction_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(500);
-    if (error) { showToast("Could not load history: " + error.message, true); setHistLoading(false); return; }
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
     const rows: SavedReceivedRow[] = [];
     for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
       try {
         const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry>;
         rows.push({
-          id: row.id,
-          date: row.transaction_date,
-          particular:  p.particular  ?? "",
-          transport:   p.transport   ?? "",
-          materials:   p.materials   ?? "",
-          vehicle_no:  p.vehicle_no  ?? "",
-          o_wt:        p.o_wt        ?? "",
-          f_wt:        p.f_wt        ?? "",
-          bags_loose:  p.bags_loose  ?? "",
-          inv_chl_no:  p.inv_chl_no  ?? "",
-          remark:      p.remark      ?? "",
-          po_no:       p.po_no       ?? "",
+          id: row.id, date: row.transaction_date,
+          particular: p.particular ?? "", transport: p.transport ?? "",
+          materials: p.materials ?? "", vehicle_no: p.vehicle_no ?? "",
+          o_wt: p.o_wt ?? "", f_wt: p.f_wt ?? "",
+          bags_loose: p.bags_loose ?? "", inv_chl_no: p.inv_chl_no ?? "",
+          code: p.code ?? (p as Record<string,string>).remark ?? "",
+          remarks: p.remarks ?? "", po_no: p.po_no ?? "",
         });
       } catch { /* skip */ }
     }
-    setHistory(rows);
-    setHistLoading(false);
+    setHistory(rows); setHistLoading(false);
   }, [supabase, showToast]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Remarks filtered by search in dropdown
-  const remarkFiltered = remarkSearch.trim()
-    ? RECEIVED_REMARKS.filter(r => r.toLowerCase().includes(remarkSearch.toLowerCase()))
-    : RECEIVED_REMARKS;
-
-  // History filtered by selected remark tags
-  const histFiltered = filterRemarks.length === 0
+  const histFiltered = filterCodes.length === 0
     ? history
-    : history.filter(r => filterRemarks.includes(r.remark));
-
-  // Filter dropdown search
-  const filterRemarksFiltered = filterSearch.trim()
-    ? RECEIVED_REMARKS.filter(r => r.toLowerCase().includes(filterSearch.toLowerCase()))
-    : RECEIVED_REMARKS;
-
-  const toggleFilterRemark = (val: string) => {
-    setFilterRemarks(prev =>
-      prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val]
-    );
-  };
+    : history.filter(r => filterCodes.includes(r.code));
 
   const handleSave = async () => {
     if (!entry.date) { showToast("Enter a date.", true); return; }
@@ -811,51 +926,31 @@ function ReceivedSection() {
     if (!user) return;
     setSubmitting(true);
     try {
-      // Need an item_id FK anchor -- use first active item
       const { data: itemData } = await supabase
-        .from("stores_stock_items")
-        .select("id, factory_id")
-        .eq("is_active", true)
-        .limit(1).maybeSingle();
-
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
       if (!itemData) {
         showToast("No stock items found. Run migration 027 in Supabase first.", true);
         setSubmitting(false); return;
       }
-
       const payload: ReceivedEntry = {
-        date:        entry.date,
-        particular:  entry.particular.trim(),
-        transport:   entry.transport.trim(),
-        materials:   entry.materials.trim(),
-        vehicle_no:  entry.vehicle_no.trim(),
-        o_wt:        entry.o_wt.trim(),
-        f_wt:        entry.f_wt.trim(),
-        bags_loose:  entry.bags_loose.trim(),
-        inv_chl_no:  entry.inv_chl_no.trim(),
-        remark:      entry.remark,
-        po_no:       entry.po_no.trim(),
+        date: entry.date, particular: entry.particular.trim(),
+        transport: entry.transport.trim(), materials: entry.materials.trim(),
+        vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
+        f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
+        inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
+        remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
       };
-
       const { error } = await supabase.from("stores_stock_ledger").insert({
-        item_id:            itemData.id,
-        factory_id:         itemData.factory_id,
-        transaction_date:   entry.date,
-        transaction_source: "manual",
-        qty_received:       0,
-        qty_issued:         0,
-        dispatch_qty:       0,
-        closing_balance:    0,
-        reference_type:     "received_entry",
-        remark:             JSON.stringify(payload),
-        entered_by:         user.id,
+        item_id: itemData.id, factory_id: itemData.factory_id,
+        transaction_date: entry.date, transaction_source: "manual",
+        qty_received: 0, qty_issued: 0, dispatch_qty: 0, closing_balance: 0,
+        reference_type: "received_entry", remark: JSON.stringify(payload),
+        entered_by: user.id,
       });
-
       if (error) { showToast("Save failed: " + error.message, true); return; }
       showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
-      setEntry(blankReceivedEntry());
-      setRemarkSearch(""); setRemarkDropOpen(false);
-      loadHistory();
+      setEntry(blankReceivedEntry()); loadHistory();
     } catch (e: unknown) {
       showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
     } finally { setSubmitting(false); }
@@ -863,152 +958,73 @@ function ReceivedSection() {
 
   return (
     <>
-      {/* ── Entry form ── */}
       <div className="card">
         <h3>Received Entry Book</h3>
-
-        {/* Row 1: Date | Particular | Transport */}
         <div className="row3">
           <div>
             <label>Date *</label>
-            <input type="date" value={entry.date}
-              onChange={e => setField("date", e.target.value)} />
+            <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
           </div>
           <div>
             <label>Particular</label>
             <input type="text" placeholder="e.g. Aquaproof Plastics"
-              value={entry.particular}
-              onChange={e => setField("particular", e.target.value)} />
+              value={entry.particular} onChange={e => setField("particular", e.target.value)} />
           </div>
           <div>
             <label>Transport</label>
             <input type="text" placeholder="e.g. Party Transport"
-              value={entry.transport}
-              onChange={e => setField("transport", e.target.value)} />
+              value={entry.transport} onChange={e => setField("transport", e.target.value)} />
           </div>
         </div>
-
-        {/* Row 2: Materials | Vehicle No | O/WT */}
         <div className="row3">
           <div>
             <label>Materials</label>
             <input type="text" placeholder="e.g. HDPE/PP bags for Apollo 160108 25 Kg"
-              value={entry.materials}
-              onChange={e => setField("materials", e.target.value)} />
+              value={entry.materials} onChange={e => setField("materials", e.target.value)} />
           </div>
           <div>
             <label>Vehicle No.</label>
             <input type="text" placeholder="e.g. MH05EL3625"
-              value={entry.vehicle_no}
-              onChange={e => setField("vehicle_no", e.target.value)} />
+              value={entry.vehicle_no} onChange={e => setField("vehicle_no", e.target.value)} />
           </div>
           <div>
             <label>O/WT</label>
             <input type="text" placeholder="e.g. 2034.000"
-              value={entry.o_wt}
-              onChange={e => setField("o_wt", e.target.value)} />
+              value={entry.o_wt} onChange={e => setField("o_wt", e.target.value)} />
           </div>
         </div>
-
-        {/* Row 3: F/Wt | Bags/Loose | INV/CHL No */}
         <div className="row3">
           <div>
             <label>F/Wt</label>
             <input type="text" placeholder="e.g. 2034 Nos"
-              value={entry.f_wt}
-              onChange={e => setField("f_wt", e.target.value)} />
+              value={entry.f_wt} onChange={e => setField("f_wt", e.target.value)} />
           </div>
           <div>
             <label>Bags / Loose</label>
             <input type="text" placeholder="e.g. Size 20x32 Printed"
-              value={entry.bags_loose}
-              onChange={e => setField("bags_loose", e.target.value)} />
+              value={entry.bags_loose} onChange={e => setField("bags_loose", e.target.value)} />
           </div>
           <div>
             <label>INV / CHL No.</label>
             <input type="text" placeholder="e.g. AP/0049/2026-27"
-              value={entry.inv_chl_no}
-              onChange={e => setField("inv_chl_no", e.target.value)} />
+              value={entry.inv_chl_no} onChange={e => setField("inv_chl_no", e.target.value)} />
           </div>
         </div>
-
-        {/* Row 4: Remarks (searchable dropdown) | PO No */}
-        <div className="row2">
-          <div style={{ position: "relative" }}>
-            <label>Remarks</label>
-            {/* Display box */}
-            <div
-              onClick={() => setRemarkDropOpen(prev => !prev)}
-              style={{
-                width: "100%", padding: "10px 12px",
-                border: "1px solid var(--line)", borderRadius: 8,
-                fontSize: 15, background: "#fff", cursor: "pointer",
-                color: entry.remark ? "var(--ink)" : "var(--ink-soft)",
-                userSelect: "none",
-              }}>
-              {entry.remark || "-- Select remark --"}
-            </div>
-
-            {/* Dropdown panel */}
-            {remarkDropOpen && (
-              <div style={{
-                position: "absolute", top: "100%", left: 0, right: 0,
-                background: "#fff", border: "1px solid var(--line)",
-                borderRadius: 8, zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,.12)",
-                maxHeight: 300, display: "flex", flexDirection: "column",
-              }}>
-                {/* Search box inside dropdown */}
-                <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
-                  <input
-                    type="text"
-                    placeholder="Search remarks..."
-                    value={remarkSearch}
-                    onChange={e => setRemarkSearch(e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    style={{ width: "100%", padding: "6px 10px",
-                      border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }}
-                    autoFocus
-                  />
-                </div>
-                {/* Options list */}
-                <div style={{ overflowY: "auto", flex: 1 }}>
-                  {/* Clear / blank option */}
-                  <div
-                    onClick={() => { setField("remark", ""); setRemarkDropOpen(false); setRemarkSearch(""); }}
-                    style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
-                      color: "var(--ink-soft)", borderBottom: "1px solid var(--line)",
-                      background: !entry.remark ? "var(--clay-soft)" : undefined }}>
-                    (Blanks) -- Clear selection
-                  </div>
-                  {remarkFiltered.map(r => (
-                    <div key={r}
-                      onClick={() => { setField("remark", r); setRemarkDropOpen(false); setRemarkSearch(""); }}
-                      style={{
-                        padding: "9px 14px", cursor: "pointer", fontSize: 13,
-                        background: entry.remark === r ? "var(--clay-soft)" : undefined,
-                        color: entry.remark === r ? "var(--clay)" : "var(--ink)",
-                      }}
-                      onMouseEnter={e => { if (entry.remark !== r) (e.target as HTMLDivElement).style.background = "#f9f8f5"; }}
-                      onMouseLeave={e => { if (entry.remark !== r) (e.target as HTMLDivElement).style.background = ""; }}
-                    >
-                      {r}
-                    </div>
-                  ))}
-                  {remarkFiltered.length === 0 && (
-                    <div style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-soft)" }}>
-                      No results for "{remarkSearch}"
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+        <div className="row3">
+          <div>
+            <label>Code</label>
+            <CodeDropdown codes={RECEIVED_CODES} value={entry.code}
+              onChange={v => setField("code", v)} placeholder="-- Select code --" />
           </div>
-
+          <div>
+            <label>Remarks (free text)</label>
+            <input type="text" placeholder="Enter remark manually..."
+              value={entry.remarks} onChange={e => setField("remarks", e.target.value)} />
+          </div>
           <div>
             <label>PO No.</label>
             <input type="text" placeholder="e.g. 34/26-27"
-              value={entry.po_no}
-              onChange={e => setField("po_no", e.target.value)} />
+              value={entry.po_no} onChange={e => setField("po_no", e.target.value)} />
           </div>
         </div>
       </div>
@@ -1018,158 +1034,346 @@ function ReceivedSection() {
         {submitting ? "Saving..." : "Save Received Entry"}
       </button>
 
-      {/* ── History table with filter ── */}
       <div className="card" style={{ marginTop: 16 }}>
         <div className="helper-row">
           <h3 style={{ margin: 0 }}>
             Received History
-            {filterRemarks.length > 0
-              ? " (filtered: " + filterRemarks.length + ")"
-              : " (all)"}
+            {filterCodes.length > 0 ? " (filtered: " + filterCodes.length + ")" : " (all)"}
           </h3>
-
-          {/* Filter by Remarks multi-select */}
           <div style={{ position: "relative" }}>
             <button type="button"
-              onClick={() => setFilterDropOpen(prev => !prev)}
+              onClick={() => setFilterDropOpen(p => !p)}
               style={{
-                padding: "6px 14px", border: "1px solid var(--line)",
-                borderRadius: 6, background: filterRemarks.length > 0
-                  ? "var(--clay)" : "#fff",
-                color: filterRemarks.length > 0 ? "#fff" : "var(--ink-soft)",
+                padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
+                background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
+                color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
                 fontSize: 12, fontWeight: 700, cursor: "pointer",
               }}>
-              Filter Remarks {filterRemarks.length > 0 ? "(" + filterRemarks.length + ")" : ""}
+              Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
             </button>
-
             {filterDropOpen && (
-              <div style={{
-                position: "absolute", top: "100%", right: 0,
-                background: "#fff", border: "1px solid var(--line)",
-                borderRadius: 8, zIndex: 100,
-                boxShadow: "0 4px 16px rgba(0,0,0,.12)",
-                width: 280, maxHeight: 320,
-                display: "flex", flexDirection: "column",
-              }}>
-                <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
-                  <input type="text" placeholder="Search..."
-                    value={filterSearch}
-                    onChange={e => setFilterSearch(e.target.value)}
-                    style={{ width: "100%", padding: "6px 10px",
-                      border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }}
-                    autoFocus
-                  />
-                </div>
-                <div style={{ overflowY: "auto", flex: 1 }}>
-                  {/* Select All */}
-                  <label style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "9px 14px", cursor: "pointer", fontSize: 13,
-                    fontWeight: 700, borderBottom: "1px solid var(--line)",
-                  }}>
-                    <input type="checkbox"
-                      checked={filterRemarks.length === 0}
-                      onChange={() => setFilterRemarks([])}
-                    />
-                    (Select All)
-                  </label>
-                  {/* (Blanks) */}
-                  <label style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "9px 14px", cursor: "pointer", fontSize: 13,
-                    borderBottom: "1px solid var(--line)",
-                  }}>
-                    <input type="checkbox"
-                      checked={filterRemarks.includes("")}
-                      onChange={() => toggleFilterRemark("")}
-                    />
-                    (Blanks)
-                  </label>
-                  {filterRemarksFiltered.map(r => (
-                    <label key={r} style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "8px 14px", cursor: "pointer", fontSize: 13,
-                    }}>
-                      <input type="checkbox"
-                        checked={filterRemarks.includes(r)}
-                        onChange={() => toggleFilterRemark(r)}
-                      />
-                      {r}
-                    </label>
-                  ))}
-                </div>
-                <div style={{ padding: "8px 10px", borderTop: "1px solid var(--line)",
-                  display: "flex", gap: 8 }}>
-                  <button type="button" className="btn btn-primary"
-                    style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
-                    onClick={() => setFilterDropOpen(false)}>
-                    Apply
-                  </button>
-                  <button type="button" className="btn btn-ghost"
-                    style={{ padding: "6px 14px", fontSize: 12, marginTop: 0 }}
-                    onClick={() => { setFilterRemarks([]); setFilterSearch(""); setFilterDropOpen(false); }}>
-                    Clear
-                  </button>
-                </div>
-              </div>
+              <CodeFilterDropdown
+                codes={RECEIVED_CODES}
+                selected={filterCodes}
+                onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
+                onClear={() => setFilterCodes([])}
+                onClose={() => setFilterDropOpen(false)}
+              />
             )}
           </div>
         </div>
-
-        {histLoading
-          ? <div className="empty">Loading...</div>
-          : histFiltered.length === 0
-            ? <div className="empty">No entries found.</div>
-            : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="dash" style={{ minWidth: 1000 }}>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Particular</th>
-                      <th>Transport</th>
-                      <th>Materials</th>
-                      <th>Vehicle No.</th>
-                      <th style={{ textAlign: "right" }}>O/WT</th>
-                      <th style={{ textAlign: "right" }}>F/Wt</th>
-                      <th>Bags/Loose</th>
-                      <th>INV/CHL No.</th>
-                      <th>Remarks</th>
-                      <th>PO No.</th>
+        {histLoading ? <div className="empty">Loading...</div>
+          : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
+          : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash" style={{ minWidth: 1100 }}>
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Particular</th><th>Transport</th>
+                    <th>Materials</th><th>Vehicle No.</th>
+                    <th style={{ textAlign: "right" }}>O/WT</th>
+                    <th style={{ textAlign: "right" }}>F/Wt</th>
+                    <th>Bags/Loose</th><th>INV/CHL No.</th>
+                    <th>Code</th><th>Remarks</th><th>PO No.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histFiltered.map(row => (
+                    <tr key={row.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
+                      <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
+                      <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
+                      <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.f_wt)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
+                      <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>{nilText(row.code)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {histFiltered.map(row => (
-                      <tr key={row.id}>
-                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
-                        <td style={{ fontSize: 12, maxWidth: 180, whiteSpace: "normal" }}>
-                          {nilText(row.materials)}
-                        </td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
-                        <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
-                        <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.f_wt)}</td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
-                        <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>
-                          {nilText(row.remark)}
-                        </td>
-                        <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-        }
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
       </div>
     </>
   );
 }
 
 // =============================================================================
-// TAB 4 -- DAILY PRODUCTION
+// TAB 4 -- SUPPLIED
+// Same structure as Received but for outgoing/supplied entries.
+// Code dropdown has its own list (shorter, supply-focused codes).
+// =============================================================================
+
+const SUPPLIED_CODES = [
+  "Code 160108","Code 2615","Code Ceat 108","Code Crude","Code Export",
+  "Code JKI","Code Lanxess","Code Lanxess 2% Oil","Code M2615","Code Old",
+  "Code R5299","Code Rubber","Code SC","Code W10","DS-10",
+  "For Apollo","For Repair","For Repairing","Replace",
+] as const;
+
+interface SuppliedEntry {
+  date: string;
+  particular: string;
+  transport: string;
+  materials: string;
+  vehicle_no: string;
+  o_wt: string;
+  f_wt: string;
+  bags_loose: string;
+  inv_chl_no: string;
+  code: string;
+  remarks: string;
+  po_no: string;
+}
+interface SavedSuppliedRow extends SuppliedEntry { id: string; }
+
+function blankSuppliedEntry(): SuppliedEntry {
+  return {
+    date: today(), particular: "", transport: "", materials: "",
+    vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
+    inv_chl_no: "", code: "", remarks: "", po_no: "",
+  };
+}
+
+function SuppliedSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<SuppliedEntry>(blankSuppliedEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedSuppliedRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [filterCodes, setFilterCodes] = useState<string[]>([]);
+  const [filterDropOpen, setFilterDropOpen] = useState(false);
+
+  const setField = (k: keyof SuppliedEntry, v: string) =>
+    setEntry(prev => ({ ...prev, [k]: v }));
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "supplied_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedSuppliedRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SuppliedEntry>;
+        rows.push({
+          id: row.id, date: row.transaction_date,
+          particular: p.particular ?? "", transport: p.transport ?? "",
+          materials: p.materials ?? "", vehicle_no: p.vehicle_no ?? "",
+          o_wt: p.o_wt ?? "", f_wt: p.f_wt ?? "",
+          bags_loose: p.bags_loose ?? "", inv_chl_no: p.inv_chl_no ?? "",
+          code: p.code ?? "", remarks: p.remarks ?? "", po_no: p.po_no ?? "",
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const histFiltered = filterCodes.length === 0
+    ? history
+    : history.filter(r => filterCodes.includes(r.code));
+
+  const handleSave = async () => {
+    if (!entry.date) { showToast("Enter a date.", true); return; }
+    if (!entry.particular.trim() && !entry.materials.trim()) {
+      showToast("Enter at least Particular or Materials.", true); return;
+    }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: itemData } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!itemData) {
+        showToast("No stock items found. Run migration 027 in Supabase first.", true);
+        setSubmitting(false); return;
+      }
+      const payload: SuppliedEntry = {
+        date: entry.date, particular: entry.particular.trim(),
+        transport: entry.transport.trim(), materials: entry.materials.trim(),
+        vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
+        f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
+        inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
+        remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
+      };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id: itemData.id, factory_id: itemData.factory_id,
+        transaction_date: entry.date, transaction_source: "manual",
+        qty_received: 0, qty_issued: 0, dispatch_qty: 0, closing_balance: 0,
+        reference_type: "supplied_entry", remark: JSON.stringify(payload),
+        entered_by: user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Supplied entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
+      setEntry(blankSuppliedEntry()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <>
+      <div className="card">
+        <h3>Supplied Entry Book</h3>
+        <div className="row3">
+          <div>
+            <label>Date *</label>
+            <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
+          </div>
+          <div>
+            <label>Particular</label>
+            <input type="text" placeholder="e.g. Aquaproof Plastics"
+              value={entry.particular} onChange={e => setField("particular", e.target.value)} />
+          </div>
+          <div>
+            <label>Transport</label>
+            <input type="text" placeholder="e.g. Party Transport"
+              value={entry.transport} onChange={e => setField("transport", e.target.value)} />
+          </div>
+        </div>
+        <div className="row3">
+          <div>
+            <label>Materials</label>
+            <input type="text" placeholder="e.g. HDPE/PP bags 25 Kg"
+              value={entry.materials} onChange={e => setField("materials", e.target.value)} />
+          </div>
+          <div>
+            <label>Vehicle No.</label>
+            <input type="text" placeholder="e.g. MH05EL3625"
+              value={entry.vehicle_no} onChange={e => setField("vehicle_no", e.target.value)} />
+          </div>
+          <div>
+            <label>O/WT</label>
+            <input type="text" placeholder="e.g. 2034.000"
+              value={entry.o_wt} onChange={e => setField("o_wt", e.target.value)} />
+          </div>
+        </div>
+        <div className="row3">
+          <div>
+            <label>F/Wt</label>
+            <input type="text" placeholder="e.g. 2034 Nos"
+              value={entry.f_wt} onChange={e => setField("f_wt", e.target.value)} />
+          </div>
+          <div>
+            <label>Bags / Loose</label>
+            <input type="text" placeholder="e.g. Size 20x32 Printed"
+              value={entry.bags_loose} onChange={e => setField("bags_loose", e.target.value)} />
+          </div>
+          <div>
+            <label>INV / CHL No.</label>
+            <input type="text" placeholder="e.g. AP/0049/2026-27"
+              value={entry.inv_chl_no} onChange={e => setField("inv_chl_no", e.target.value)} />
+          </div>
+        </div>
+        <div className="row3">
+          <div>
+            <label>Code</label>
+            <CodeDropdown codes={SUPPLIED_CODES} value={entry.code}
+              onChange={v => setField("code", v)} placeholder="-- Select code --" />
+          </div>
+          <div>
+            <label>Remarks (free text)</label>
+            <input type="text" placeholder="Enter remark manually..."
+              value={entry.remarks} onChange={e => setField("remarks", e.target.value)} />
+          </div>
+          <div>
+            <label>PO No.</label>
+            <input type="text" placeholder="e.g. 34/26-27"
+              value={entry.po_no} onChange={e => setField("po_no", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Supplied Entry"}
+      </button>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>
+            Supplied History
+            {filterCodes.length > 0 ? " (filtered: " + filterCodes.length + ")" : " (all)"}
+          </h3>
+          <div style={{ position: "relative" }}>
+            <button type="button"
+              onClick={() => setFilterDropOpen(p => !p)}
+              style={{
+                padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
+                background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
+                color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+              Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
+            </button>
+            {filterDropOpen && (
+              <CodeFilterDropdown
+                codes={SUPPLIED_CODES}
+                selected={filterCodes}
+                onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
+                onClear={() => setFilterCodes([])}
+                onClose={() => setFilterDropOpen(false)}
+              />
+            )}
+          </div>
+        </div>
+        {histLoading ? <div className="empty">Loading...</div>
+          : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
+          : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash" style={{ minWidth: 1100 }}>
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Particular</th><th>Transport</th>
+                    <th>Materials</th><th>Vehicle No.</th>
+                    <th style={{ textAlign: "right" }}>O/WT</th>
+                    <th style={{ textAlign: "right" }}>F/Wt</th>
+                    <th>Bags/Loose</th><th>INV/CHL No.</th>
+                    <th>Code</th><th>Remarks</th><th>PO No.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histFiltered.map(row => (
+                    <tr key={row.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
+                      <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
+                      <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
+                      <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.f_wt)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
+                      <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>{nilText(row.code)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
+                      <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </div>
+    </>
+  );
+}
+// =============================================================================
+// TAB 5 -- DAILY PRODUCTION
 //
 // Mirrors the DAILY PRODN tab in the DPR Excel exactly.
 // Columns (matching the Excel left-to-right):
