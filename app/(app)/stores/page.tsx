@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -95,13 +95,14 @@ export default function StoresPage() {
   const TABS: { id: Tab; label: string }[] = [
     { id: "oil",        label: "Oil Issue" },
     { id: "rm",         label: "Raw Material" },
-    { id: "received",   label: "Received" },
-    { id: "supplied",   label: "Supplied" },
-    { id: "daily_prod", label: "Daily Production" },
-    { id: "ledger",     label: "Stock Ledger" },
-    { id: "issue",      label: "Issue Slip" },
-    { id: "prn",        label: "PRN" },
-    { id: "dispatch",   label: "Dispatch" },
+    { id: "received",       label: "Received" },
+    { id: "supplied",       label: "Supplied" },
+    { id: "daily_prod",     label: "Daily Production" },
+    { id: "daily_dispatch", label: "Daily Dispatch" },
+    { id: "ledger",         label: "Stock Ledger" },
+    { id: "issue",          label: "Issue Slip" },
+    { id: "prn",            label: "PRN" },
+    { id: "dispatch",       label: "Dispatch" },
   ];
 
   return (
@@ -131,8 +132,9 @@ export default function StoresPage() {
       {tab === "rm"         && <RawMaterialSection />}
       {tab === "received"   && <ReceivedSection />}
       {tab === "supplied"   && <SuppliedSection />}
-      {tab === "daily_prod" && <DailyProductionSection />}
-      {tab === "ledger"     && <StockLedgerSection />}
+      {tab === "daily_prod"     && <DailyProductionSection />}
+      {tab === "daily_dispatch" && <DailyDispatchSection />}
+      {tab === "ledger"         && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
       {tab === "prn"        && <PrnSection />}
       {tab === "dispatch"   && <DispatchSection />}
@@ -1767,6 +1769,328 @@ function DailyProductionSection() {
                       <td style={{ textAlign: "right", fontWeight: 700,
                         color: "var(--clay)", fontSize: 14 }}>
                         {grandTotalMt.toFixed(3)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// DAILY DISPATCH SECTION
+//
+// Mirrors the DAILY DISPATCH 2026-27 tab in the DPR Excel.
+// Columns (B through O + TOTAL MT):
+//   B  CEAT 108/EXPORT      25 kg bags
+//   C  M2615                25 kg bags
+//   D  PLAIN-2615           25 kg bags
+//   E  APOLLO 160108        25 kg bags
+//   F  LANXESS              25 kg bags
+//   G  CEAT R5299           25 kg bags
+//   H  PLAIN/WE-10          25 kg bags
+//   I  Lanxess 2% Oil       25 kg bags
+//   J  JKI-108              50 kg bags
+//   K  OLD BAGS 50 KG       50 kg bags
+//   L  RUBBER MAKER 50 KG   50 kg bags
+//   M  Sulphur Powder for Pesticide Formulation  50 kg bags
+//   N  JUMBO BAG-500 KG     550 kg bags
+//   O  Export Plan Bag W/O 25 Kg  25 kg bags
+//
+// TOTAL MT formula (from Excel):
+//   =(B*25+C*25+D*25+E*25+F*25+G*25+H*25+I*25+O*25)/1000
+//   +(J*50+K*50+L*50+M*50)/1000
+//   +(N*550)/1000
+// =============================================================================
+
+interface DailyDispatchCol {
+  key: string;
+  label: string;
+  shortLabel: string;
+  bagKg: number;
+}
+
+const DAILY_DISPATCH_COLS: DailyDispatchCol[] = [
+  { key: "ceat_108_export",  label: "CEAT 108/EXPORT",                          shortLabel: "CEAT 108",   bagKg: 25  },
+  { key: "m2615",            label: "M2615",                                    shortLabel: "M2615",      bagKg: 25  },
+  { key: "plain_2615",       label: "PLAIN-2615",                               shortLabel: "PLAIN-2615", bagKg: 25  },
+  { key: "apollo_160108",    label: "APOLLO 160108",                            shortLabel: "APOLLO",     bagKg: 25  },
+  { key: "lanxess",          label: "LANXESS",                                  shortLabel: "LANXESS",    bagKg: 25  },
+  { key: "ceat_r5299",       label: "CEAT R5299",                               shortLabel: "CEAT R5299", bagKg: 25  },
+  { key: "plain_we10",       label: "PLAIN / WE-10",                            shortLabel: "PLAIN/WE-10",bagKg: 25  },
+  { key: "lanxess_2pct_oil", label: "Lanxess 2% Oil",                           shortLabel: "LANX 2%",   bagKg: 25  },
+  { key: "jki_108",          label: "JKI-108",                                  shortLabel: "JKI-108",    bagKg: 50  },
+  { key: "old_bags_50kg",    label: "OLD BAGS 50 KG",                           shortLabel: "OLD 50",     bagKg: 50  },
+  { key: "rubber_maker_50kg",label: "RUBBER MAKER 50 KG",                       shortLabel: "RUBBER 50",  bagKg: 50  },
+  { key: "sulphur_pesticide",label: "Sulphur Powder for Pesticide Formulation", shortLabel: "SUL PEST",   bagKg: 50  },
+  { key: "jumbo_bag_500kg",  label: "JUMBO BAG-500 KG",                         shortLabel: "JUMBO 500",  bagKg: 550 },
+  { key: "export_plan_25kg", label: "Export Plan Bag W/O 25 Kg",                shortLabel: "EXP PLAN",   bagKg: 25  },
+];
+
+// Keys grouped by bag weight for the formula
+const DISPATCH_25KG  = ["ceat_108_export","m2615","plain_2615","apollo_160108",
+                         "lanxess","ceat_r5299","plain_we10","lanxess_2pct_oil","export_plan_25kg"];
+const DISPATCH_50KG  = ["jki_108","old_bags_50kg","rubber_maker_50kg","sulphur_pesticide"];
+const DISPATCH_550KG = ["jumbo_bag_500kg"];
+
+type DailyDispatchRow = Record<string, string> & { date: string };
+
+interface SavedDailyDispatchRow {
+  id: string;
+  date: string;
+  values: Record<string, number>;
+  total_mt: number;
+}
+
+/** Excel formula:
+ *  =(B*25+C*25+D*25+E*25+F*25+G*25+H*25+I*25+O*25)/1000
+ *  +(J*50+K*50+L*50+M*50)/1000
+ *  +(N*550)/1000
+ */
+function calcDispatchTotalMt(vals: Record<string, string>): number {
+  const n = (k: string) => Number(vals[k]) || 0;
+  const sum25  = DISPATCH_25KG.reduce((s, k) => s + n(k), 0);
+  const sum50  = DISPATCH_50KG.reduce((s, k) => s + n(k), 0);
+  const sum550 = DISPATCH_550KG.reduce((s, k) => s + n(k), 0);
+  return (sum25 * 25) / 1000 + (sum50 * 50) / 1000 + (sum550 * 550) / 1000;
+}
+
+function blankDispatchRow(): DailyDispatchRow {
+  const row: DailyDispatchRow = { date: today() };
+  DAILY_DISPATCH_COLS.forEach(c => { row[c.key] = ""; });
+  return row;
+}
+
+function DailyDispatchSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]             = useState<DailyDispatchRow>(blankDispatchRow());
+  const [submitting, setSubmitting]   = useState(false);
+  const [history, setHistory]         = useState<SavedDailyDispatchRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+
+  const totalMt = calcDispatchTotalMt(entry);
+
+  const setField = (key: string, val: string) =>
+    setEntry(prev => ({ ...prev, [key]: val }));
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "daily_dispatch")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(90);
+    if (error) {
+      showToast("Could not load history: " + error.message, true);
+      setHistLoading(false); return;
+    }
+    const rows: SavedDailyDispatchRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as { values?: Record<string, number>; total_mt?: number };
+        rows.push({
+          id: row.id, date: row.transaction_date,
+          values: p.values ?? {}, total_mt: p.total_mt ?? 0,
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleSave = async () => {
+    if (!entry.date) { showToast("Enter a date.", true); return; }
+    const hasAny = DAILY_DISPATCH_COLS.some(c => Number(entry[c.key]) > 0);
+    if (!hasAny) { showToast("Enter at least one dispatch quantity.", true); return; }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: itemData } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!itemData) {
+        showToast("No stock items found. Run migrations in Supabase first.", true);
+        setSubmitting(false); return;
+      }
+      const numVals: Record<string, number> = {};
+      DAILY_DISPATCH_COLS.forEach(c => { numVals[c.key] = Number(entry[c.key]) || 0; });
+      const payload = { date: entry.date, values: numVals, total_mt: totalMt };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            itemData.id,
+        factory_id:         itemData.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received: 0, qty_issued: 0, dispatch_qty: 0,
+        closing_balance: 0,
+        reference_type: "daily_dispatch",
+        remark: JSON.stringify(payload),
+        entered_by: user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Daily dispatch saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+      setEntry(blankDispatchRow()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  // Column totals for TOTAL row
+  const colTotals: Record<string, number> = {};
+  DAILY_DISPATCH_COLS.forEach(c => {
+    colTotals[c.key] = history.reduce((s, r) => s + (r.values[c.key] ?? 0), 0);
+  });
+  const grandTotal = history.reduce((s, r) => s + r.total_mt, 0);
+
+  return (
+    <>
+      <div className="card">
+        <h3>Daily Dispatch Entry</h3>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Date *</label>
+          <input type="date" value={entry.date}
+            onChange={e => setField("date", e.target.value)}
+            style={{ maxWidth: 200 }} />
+        </div>
+
+        {/* 25 kg columns */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 8 }}>
+          25 kg Bags
+        </div>
+        <div className="row2">
+          {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 25).map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* 50 kg columns */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
+          50 kg Bags
+        </div>
+        <div className="row2">
+          {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 50).map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* 550 kg (Jumbo) column */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
+          550 kg Bags (Jumbo)
+        </div>
+        <div style={{ maxWidth: 220 }}>
+          {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 550).map(col => (
+            <div key={col.key}>
+              <label style={{ fontSize: 11 }}>{col.label}</label>
+              <input type="number" min="0" step="1" placeholder="0"
+                value={entry[col.key]}
+                onChange={e => setField(col.key, e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* TOTAL MT */}
+        <div style={{
+          marginTop: 14, padding: "12px 16px",
+          background: "var(--clay-soft)", borderRadius: 8,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>TOTAL MT</span>
+            <div className="field-hint" style={{ marginTop: 2 }}>
+              (25kg cols x 25 + 50kg cols x 50 + JUMBO x 550) / 1000
+            </div>
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 20, color: "var(--clay)" }}>
+            {totalMt.toFixed(3)} MT
+          </span>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Daily Dispatch"}
+      </button>
+
+      {/* History table */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Daily Dispatch History</h3>
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : history.length === 0
+            ? <div className="empty">No entries yet.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 1100 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      {DAILY_DISPATCH_COLS.map(c => (
+                        <th key={c.key} style={{ textAlign: "right", fontSize: 10 }}>
+                          {c.shortLabel}
+                          <div style={{ fontWeight: 400, color: "var(--ink-soft)" }}>
+                            {c.bagKg}kg
+                          </div>
+                        </th>
+                      ))}
+                      <th style={{ textAlign: "right", color: "var(--clay)" }}>
+                        TOTAL MT
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>
+                          {fmtDate(row.date)}
+                        </td>
+                        {DAILY_DISPATCH_COLS.map(c => (
+                          <td key={c.key} style={{ textAlign: "right" }}>
+                            {(row.values[c.key] ?? 0) > 0
+                              ? (row.values[c.key]).toFixed(0)
+                              : <span style={{ color: "var(--line)" }}>-</span>}
+                          </td>
+                        ))}
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: "var(--clay)" }}>
+                          {row.total_mt.toFixed(3)}
+                        </td>
+                      </tr>
+                    ))}
+                    {/* TOTAL row */}
+                    <tr style={{ borderTop: "2px solid var(--line)",
+                      background: "var(--clay-soft)" }}>
+                      <td style={{ fontWeight: 700 }}>TOTAL</td>
+                      {DAILY_DISPATCH_COLS.map(c => (
+                        <td key={c.key} style={{ textAlign: "right", fontWeight: 700 }}>
+                          {colTotals[c.key] > 0 ? colTotals[c.key].toFixed(0) : "-"}
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "right", fontWeight: 700,
+                        color: "var(--clay)", fontSize: 14 }}>
+                        {grandTotal.toFixed(3)}
                       </td>
                     </tr>
                   </tbody>
