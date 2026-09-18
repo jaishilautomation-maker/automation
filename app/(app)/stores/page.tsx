@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -98,8 +98,9 @@ export default function StoresPage() {
     { id: "received",       label: "Received" },
     { id: "supplied",       label: "Supplied" },
     { id: "daily_prod",     label: "Daily Production" },
-    { id: "daily_dispatch", label: "Daily Dispatch" },
-    { id: "ledger",         label: "Stock Ledger" },
+    { id: "daily_dispatch",   label: "Daily Dispatch" },
+    { id: "packing_material", label: "Packing Material" },
+    { id: "ledger",           label: "Stock Ledger" },
     { id: "issue",          label: "Issue Slip" },
     { id: "prn",            label: "PRN" },
     { id: "dispatch",       label: "Dispatch" },
@@ -133,8 +134,9 @@ export default function StoresPage() {
       {tab === "received"   && <ReceivedSection />}
       {tab === "supplied"   && <SuppliedSection />}
       {tab === "daily_prod"     && <DailyProductionSection />}
-      {tab === "daily_dispatch" && <DailyDispatchSection />}
-      {tab === "ledger"         && <StockLedgerSection />}
+      {tab === "daily_dispatch"   && <DailyDispatchSection />}
+      {tab === "packing_material" && <PackingMaterialSection />}
+      {tab === "ledger"           && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
       {tab === "prn"        && <PrnSection />}
       {tab === "dispatch"   && <DispatchSection />}
@@ -2093,6 +2095,395 @@ function DailyDispatchSection() {
                         {grandTotal.toFixed(3)}
                       </td>
                     </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// PACKING MATERIAL SECTION
+//
+// Mirrors the PACKING MATERIAL 2026-27 tab in the DPR Excel.
+// Columns:
+//   Date | Name of Product | Op. Bal (C) | Qty.Rec (D) | BY TRANSFER (E) |
+//   Qty. issued (F) | TO TRANSFER (G) | Cl. Bal (H) | Status (I) | Remark (J)
+//
+// Closing Balance formula: H = C + D + E - F - G
+// =============================================================================
+
+const PM_PRODUCTS = [
+  "CEAT 108/EXPORT",
+  "MRF-M-2615",
+  "LANXESS",
+  "WOODEN PALLETS",
+  "CEAT R5299",
+  "APOLLO TYRE - 160108",
+  "Plain Bags EXPORT 25 kg for Export",
+  "THREAD CONE",
+  "BRIDGESTONE WE-10",
+  "RUBBER MAKER 50 KG",
+  "JKI-108 50 KG",
+  "JUMBO BAGS 500 KG",
+  "Old Bags",
+] as const;
+type PmProduct = (typeof PM_PRODUCTS)[number];
+
+const PM_STATUS_OPTIONS = ["GOOD", "LESS", "OUT OF STOCK"] as const;
+
+interface PmEntry {
+  date: string;
+  product: PmProduct | "";
+  op_bal: string;
+  qty_received: string;
+  by_transfer: string;
+  qty_issued: string;
+  to_transfer: string;
+  cl_bal: number | null;   // computed: C + D + E - F - G
+  status: string;
+  remark: string;
+}
+
+interface SavedPmRow {
+  id: string;
+  date: string;
+  product: string;
+  op_bal: number;
+  qty_received: number;
+  by_transfer: number;
+  qty_issued: number;
+  to_transfer: number;
+  cl_bal: number;
+  status: string;
+  remark: string;
+}
+
+function computePmCl(e: PmEntry): number | null {
+  const c = Number(e.op_bal);
+  const d = Number(e.qty_received);
+  const ee = Number(e.by_transfer);
+  const f = Number(e.qty_issued);
+  const g = Number(e.to_transfer);
+  if ([c, d, ee, f, g].some(v => !Number.isFinite(v))) return null;
+  return c + d + ee - f - g;
+}
+
+function blankPmEntry(): PmEntry {
+  return {
+    date: today(), product: "",
+    op_bal: "", qty_received: "", by_transfer: "",
+    qty_issued: "", to_transfer: "",
+    cl_bal: null, status: "", remark: "",
+  };
+}
+
+function PackingMaterialSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<PmEntry>(blankPmEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedPmRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [filterProduct, setFilterProduct] = useState<PmProduct | "ALL">("ALL");
+
+  const clBal = computePmCl(entry);
+
+  const setField = <K extends keyof PmEntry>(key: K, val: PmEntry[K]) => {
+    setEntry(prev => {
+      const next = { ...prev, [key]: val };
+      return { ...next, cl_bal: computePmCl(next) };
+    });
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "pm_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedPmRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SavedPmRow>;
+        rows.push({
+          id: row.id, date: row.transaction_date,
+          product:      p.product      ?? "",
+          op_bal:       p.op_bal       ?? 0,
+          qty_received: p.qty_received ?? 0,
+          by_transfer:  p.by_transfer  ?? 0,
+          qty_issued:   p.qty_issued   ?? 0,
+          to_transfer:  p.to_transfer  ?? 0,
+          cl_bal:       p.cl_bal       ?? 0,
+          status:       p.status       ?? "",
+          remark:       p.remark       ?? "",
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Auto-fill op_bal from last closing balance for this product
+  const handleProductChange = (product: PmProduct | "") => {
+    const last = history.find(r => r.product === product);
+    setEntry(prev => ({
+      ...blankPmEntry(),
+      date: prev.date,
+      product,
+      op_bal: last ? String(last.cl_bal) : "",
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!entry.product) { showToast("Select a product.", true); return; }
+    if (clBal == null) { showToast("Fill all numeric fields.", true); return; }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      // Look up item for FK -- use packing_material category
+      const { data: itemData } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true)
+        .eq("category", "packaging_material")
+        .limit(1).maybeSingle();
+
+      // Fallback to any item if no PM item found
+      const { data: fallback } = itemData
+        ? { data: itemData }
+        : await supabase.from("stores_stock_items").select("id, factory_id")
+            .eq("is_active", true).limit(1).maybeSingle();
+
+      const anchor = (fallback ?? itemData) as { id: string; factory_id: string } | null;
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 in Supabase first.", true);
+        setSubmitting(false); return;
+      }
+
+      const payload: SavedPmRow = {
+        id: "",
+        date:         entry.date,
+        product:      entry.product,
+        op_bal:       Number(entry.op_bal)       || 0,
+        qty_received: Number(entry.qty_received) || 0,
+        by_transfer:  Number(entry.by_transfer)  || 0,
+        qty_issued:   Number(entry.qty_issued)   || 0,
+        to_transfer:  Number(entry.to_transfer)  || 0,
+        cl_bal:       clBal,
+        status:       entry.status,
+        remark:       entry.remark,
+      };
+
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received:       payload.qty_received + payload.by_transfer,
+        qty_issued:         payload.qty_issued + payload.to_transfer,
+        dispatch_qty:       0,
+        closing_balance:    clBal,
+        reference_type:     "pm_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Saved -- " + entry.product + " Cl. Bal: " + clBal.toFixed(0));
+      setEntry(blankPmEntry()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  const filtered = filterProduct === "ALL"
+    ? history
+    : history.filter(r => r.product === filterProduct);
+
+  return (
+    <>
+      <div className="card">
+        <h3>Packing Material Entry</h3>
+
+        {/* Row 1: Date | Name of Product */}
+        <div className="row2">
+          <div>
+            <label>Date *</label>
+            <input type="date" value={entry.date}
+              onChange={e => setField("date", e.target.value)} />
+          </div>
+          <div>
+            <label>Name of Product *</label>
+            <select value={entry.product}
+              onChange={e => handleProductChange(e.target.value as PmProduct | "")}>
+              <option value="">-- Select product --</option>
+              {PM_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Op. Bal (C) | Qty.Rec (D) | By Transfer (E) */}
+        <div className="row3">
+          <div>
+            <label>Op. Bal (C)</label>
+            <input type="number" step="1" placeholder="0"
+              value={entry.op_bal}
+              onChange={e => setField("op_bal", e.target.value)} />
+          </div>
+          <div>
+            <label>Qty. Rec (D)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.qty_received}
+              onChange={e => setField("qty_received", e.target.value)} />
+          </div>
+          <div>
+            <label>By Transfer (E)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.by_transfer}
+              onChange={e => setField("by_transfer", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 3: Qty. Issued (F) | To Transfer (G) | Cl. Bal (H) computed */}
+        <div className="row3">
+          <div>
+            <label>Qty. Issued (F)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.qty_issued}
+              onChange={e => setField("qty_issued", e.target.value)} />
+          </div>
+          <div>
+            <label>To Transfer (G)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.to_transfer}
+              onChange={e => setField("to_transfer", e.target.value)} />
+          </div>
+          <div>
+            <label>Cl. Bal (H = C+D+E-F-G)</label>
+            <input type="text" disabled
+              value={clBal != null ? clBal.toFixed(0) : "N/A"}
+              style={{
+                fontWeight: 700,
+                color: clBal != null && clBal < 0 ? "var(--warn)" : "var(--ok)",
+              }} />
+          </div>
+        </div>
+
+        {/* Row 4: Status | Remark */}
+        <div className="row2">
+          <div>
+            <label>Status (I)</label>
+            <select value={entry.status}
+              onChange={e => setField("status", e.target.value)}>
+              <option value="">-- Select --</option>
+              {PM_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Remark (J)</label>
+            <input type="text" placeholder="Optional note..."
+              value={entry.remark}
+              onChange={e => setField("remark", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting || !entry.product || clBal == null}
+        onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Packing Material Entry"}
+      </button>
+
+      {/* History table */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>Packing Material History</h3>
+          <select value={filterProduct}
+            onChange={e => setFilterProduct(e.target.value as PmProduct | "ALL")}
+            style={{ width: "auto", padding: "6px 10px", fontSize: 12 }}>
+            <option value="ALL">All Products</option>
+            {PM_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : filtered.length === 0
+            ? <div className="empty">No entries yet.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 820 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Name of Product</th>
+                      <th style={{ textAlign: "right" }}>Op. Bal (C)</th>
+                      <th style={{ textAlign: "right" }}>Qty.Rec (D)</th>
+                      <th style={{ textAlign: "right" }}>By Transfer (E)</th>
+                      <th style={{ textAlign: "right" }}>Qty. Issued (F)</th>
+                      <th style={{ textAlign: "right" }}>To Transfer (G)</th>
+                      <th style={{ textAlign: "right" }}>Cl. Bal (H)</th>
+                      <th>Status (I)</th>
+                      <th>Remark (J)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                        <td style={{ fontSize: 12, fontWeight: 600 }}>{row.product}</td>
+                        <td style={{ textAlign: "right" }}>{row.op_bal.toFixed(0)}</td>
+                        <td style={{ textAlign: "right",
+                          color: row.qty_received > 0 ? "var(--ok)" : undefined }}>
+                          {row.qty_received > 0 ? "+" + row.qty_received.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.by_transfer > 0 ? "var(--ok)" : undefined }}>
+                          {row.by_transfer > 0 ? "+" + row.by_transfer.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.qty_issued > 0 ? "var(--warn)" : undefined }}>
+                          {row.qty_issued > 0 ? row.qty_issued.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.to_transfer > 0 ? "var(--clay)" : undefined }}>
+                          {row.to_transfer > 0 ? row.to_transfer.toFixed(0) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: row.cl_bal < 0 ? "var(--warn)" : undefined }}>
+                          {row.cl_bal.toFixed(0)}
+                        </td>
+                        <td>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700,
+                            padding: "2px 6px", borderRadius: 6,
+                            background: row.status === "GOOD" ? "var(--ok-soft)"
+                              : row.status === "OUT OF STOCK" ? "var(--warn-soft)"
+                              : row.status === "LESS" ? "#fff3cd"
+                              : "transparent",
+                            color: row.status === "GOOD" ? "var(--ok)"
+                              : row.status === "OUT OF STOCK" ? "var(--warn)"
+                              : row.status === "LESS" ? "#7d6608"
+                              : "var(--ink-soft)",
+                          }}>
+                            {row.status || "N/A"}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+                          {nilText(row.remark)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
