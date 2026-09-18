@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -102,6 +102,7 @@ export default function StoresPage() {
     { id: "packing_material", label: "Packing Material" },
     { id: "finished_goods",   label: "Finished Goods" },
     { id: "ball_mill",        label: "Ball Mill" },
+    { id: "batch_wise",       label: "Batch Wise" },
     { id: "ledger",           label: "Stock Ledger" },
     { id: "issue",          label: "Issue Slip" },
     { id: "prn",            label: "PRN" },
@@ -140,6 +141,7 @@ export default function StoresPage() {
       {tab === "packing_material" && <PackingMaterialSection />}
       {tab === "finished_goods"   && <FinishedGoodsSection />}
       {tab === "ball_mill"        && <BallMillSection />}
+      {tab === "batch_wise"       && <BatchWiseSection />}
       {tab === "ledger"           && <StockLedgerSection />}
       {tab === "issue"      && <IssueSlipSection />}
       {tab === "prn"        && <PrnSection />}
@@ -3435,6 +3437,479 @@ function BallMillSection() {
               )}
             </div>
           ))
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// BATCH WISE SECTION
+//
+// Columns (from the Excel Batch Wise tab):
+//   A  Batch No.
+//   B  Qty in Bags
+//   C  Code
+//   D  Mfg Date
+//   E  Qty in MT        = IF(Code="Rubber" OR "JKI", B*50, B*25) / 1000
+//   F  1st Dispatch Date
+//   G  1st Inv No.
+//   H  1st Qty in Bag
+//   I  2nd Dispatch Date
+//   J  2nd Inv No.
+//   K  2nd Qty in Bag
+//   (more dispatch slots can be added)
+//   O  Remaining Qty in Bags = B - H - K - N...
+//   P  Remaining Qty in MT   = IF(Code="Rubber" OR "JKI", O*50, O*25) / 1000
+//
+// Dispatch slots: starts with 2, user can add more (3rd, 4th, etc.)
+// Column B also supports manual arithmetic expressions (e.g. "12+49+51").
+// =============================================================================
+
+const BATCH_CODES = [
+  "JKI","MRF","P2615","w10","Ceat","Apollo","R5299","Rubber",
+  "Export","Lanxess","160108","Shakti","2615","BKT",
+] as const;
+type BatchCode = (typeof BATCH_CODES)[number];
+
+// Codes that use 50 kg bags
+const HEAVY_CODES: string[] = ["Rubber", "JKI"];
+
+function bagKgForCode(code: string): number {
+  return HEAVY_CODES.includes(code) ? 50 : 25;
+}
+
+/** Evaluate a simple arithmetic expression like "12+49+51" safely */
+function evalArith(s: string): number | null {
+  const trimmed = s.trim();
+  if (trimmed === "") return null;
+  // Only allow digits, +, -, spaces, dots
+  if (!/^[\d\s+\-.]+$/.test(trimmed)) return null;
+  try {
+    // Split on + and -, parse as sum
+    const parts = trimmed.split("+").map(p => p.trim());
+    const total = parts.reduce((sum, p) => {
+      const n = Number(p);
+      return Number.isFinite(n) ? sum + n : NaN;
+    }, 0);
+    return Number.isFinite(total) ? total : null;
+  } catch { return null; }
+}
+
+interface DispatchSlot {
+  date: string;
+  inv_no: string;
+  qty_bags: string;
+}
+
+interface BatchWiseEntry {
+  batch_no: string;
+  qty_bags: string;          // B — supports "12+49+51" arithmetic
+  code: BatchCode | "";
+  mfg_date: string;
+  dispatches: DispatchSlot[];
+}
+
+interface SavedBatchRow {
+  id: string;
+  batch_no: string;
+  qty_bags_expr: string;
+  qty_bags: number;
+  code: string;
+  mfg_date: string;
+  qty_mt: number;
+  dispatches: DispatchSlot[];
+  remaining_bags: number;
+  remaining_mt: number;
+}
+
+function blankDispatchSlot(): DispatchSlot {
+  return { date: "", inv_no: "", qty_bags: "" };
+}
+
+function blankBatchEntry(): BatchWiseEntry {
+  return {
+    batch_no: "", qty_bags: "", code: "", mfg_date: today(),
+    dispatches: [blankDispatchSlot(), blankDispatchSlot()],
+  };
+}
+
+function computeBatchDerived(e: BatchWiseEntry): {
+  qtyBags: number | null;
+  qtyMt: number | null;
+  remainingBags: number | null;
+  remainingMt: number | null;
+} {
+  const qtyBags = evalArith(e.qty_bags);
+  const bkKg = bagKgForCode(e.code);
+  const qtyMt = qtyBags != null ? (qtyBags * bkKg) / 1000 : null;
+
+  const totalDispatched = e.dispatches.reduce((s, d) => {
+    const n = evalArith(d.qty_bags);
+    return s + (n ?? 0);
+  }, 0);
+
+  const remainingBags = qtyBags != null ? qtyBags - totalDispatched : null;
+  const remainingMt   = remainingBags != null ? (remainingBags * bkKg) / 1000 : null;
+
+  return { qtyBags, qtyMt, remainingBags, remainingMt };
+}
+
+function BatchWiseSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<BatchWiseEntry>(blankBatchEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedBatchRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [filterCode, setFilterCode] = useState<BatchCode | "ALL">("ALL");
+
+  const derived = computeBatchDerived(entry);
+
+  const setField = <K extends keyof BatchWiseEntry>(key: K, val: BatchWiseEntry[K]) =>
+    setEntry(prev => ({ ...prev, [key]: val }));
+
+  const updateDispatch = (idx: number, patch: Partial<DispatchSlot>) =>
+    setEntry(prev => ({
+      ...prev,
+      dispatches: prev.dispatches.map((d, i) => i === idx ? { ...d, ...patch } : d),
+    }));
+
+  const addDispatch = () =>
+    setEntry(prev => ({ ...prev, dispatches: [...prev.dispatches, blankDispatchSlot()] }));
+
+  const removeDispatch = (idx: number) => {
+    if (entry.dispatches.length <= 2) {
+      showToast("Minimum 2 dispatch slots required.", true); return;
+    }
+    setEntry(prev => ({ ...prev, dispatches: prev.dispatches.filter((_, i) => i !== idx) }));
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "batch_wise_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedBatchRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SavedBatchRow>;
+        rows.push({
+          id: row.id,
+          batch_no:       p.batch_no       ?? "",
+          qty_bags_expr:  p.qty_bags_expr  ?? "",
+          qty_bags:       p.qty_bags       ?? 0,
+          code:           p.code           ?? "",
+          mfg_date:       p.mfg_date       ?? row.transaction_date,
+          qty_mt:         p.qty_mt         ?? 0,
+          dispatches:     p.dispatches     ?? [],
+          remaining_bags: p.remaining_bags ?? 0,
+          remaining_mt:   p.remaining_mt   ?? 0,
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleSave = async () => {
+    if (!entry.batch_no.trim()) { showToast("Enter a Batch No.", true); return; }
+    if (!entry.code) { showToast("Select a Code.", true); return; }
+    if (derived.qtyBags == null) { showToast("Enter a valid Qty in Bags (numbers or arithmetic like 12+49+51).", true); return; }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: anchor } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 first.", true);
+        setSubmitting(false); return;
+      }
+      const totalDispatched = entry.dispatches.reduce((s, d) => s + (evalArith(d.qty_bags) ?? 0), 0);
+      const payload: Omit<SavedBatchRow, "id"> = {
+        batch_no:       entry.batch_no.trim(),
+        qty_bags_expr:  entry.qty_bags.trim(),
+        qty_bags:       derived.qtyBags ?? 0,
+        code:           entry.code,
+        mfg_date:       entry.mfg_date,
+        qty_mt:         derived.qtyMt ?? 0,
+        dispatches:     entry.dispatches,
+        remaining_bags: derived.remainingBags ?? 0,
+        remaining_mt:   derived.remainingMt   ?? 0,
+      };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   entry.mfg_date || today(),
+        transaction_source: "manual",
+        qty_received:       derived.qtyBags ?? 0,
+        qty_issued:         totalDispatched,
+        dispatch_qty:       0,
+        closing_balance:    derived.remainingBags ?? 0,
+        reference_type:     "batch_wise_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Batch saved -- " + entry.batch_no + " Remaining: " + (derived.remainingBags ?? 0) + " bags / " + (derived.remainingMt ?? 0).toFixed(3) + " MT");
+      setEntry(blankBatchEntry()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  const filtered = filterCode === "ALL" ? history : history.filter(r => r.code === filterCode);
+
+  return (
+    <>
+      <div className="card">
+        <h3>Batch Wise Entry</h3>
+
+        {/* Row 1: Batch No | Code | Mfg Date */}
+        <div className="row3">
+          <div>
+            <label>Batch No. (A) *</label>
+            <input type="text" placeholder="e.g. 164, Ex61"
+              value={entry.batch_no}
+              onChange={e => setField("batch_no", e.target.value)} />
+          </div>
+          <div>
+            <label>Code (C) *</label>
+            <select value={entry.code}
+              onChange={e => setField("code", e.target.value as BatchCode | "")}>
+              <option value="">-- Select code --</option>
+              {BATCH_CODES.map(c => (
+                <option key={c} value={c}>
+                  {c} {HEAVY_CODES.includes(c) ? "(50 kg/bag)" : "(25 kg/bag)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label>Mfg Date (D)</label>
+            <input type="date" value={entry.mfg_date}
+              onChange={e => setField("mfg_date", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 2: Qty in Bags (supports arithmetic) | Qty in MT (computed) */}
+        <div className="row2">
+          <div>
+            <label>Qty in Bags (B) -- supports arithmetic like 12+49+51</label>
+            <input type="text" placeholder="e.g. 200 or 12+49+51"
+              value={entry.qty_bags}
+              onChange={e => setField("qty_bags", e.target.value)} />
+            {derived.qtyBags != null && entry.qty_bags.includes("+") && (
+              <div className="field-hint">= {derived.qtyBags} bags</div>
+            )}
+          </div>
+          <div>
+            <label>
+              Qty in MT (E = B x {entry.code ? bagKgForCode(entry.code) : 25} / 1000)
+            </label>
+            <input type="text" disabled
+              value={derived.qtyMt != null ? derived.qtyMt.toFixed(3) : "N/A"}
+              style={{ fontWeight: 700, color: "var(--ok)" }} />
+          </div>
+        </div>
+
+        {/* Dispatch Slots */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "center", marginBottom: 8 }}>
+            <label style={{ margin: 0, fontSize: 13, fontWeight: 700,
+              color: "var(--clay)", textTransform: "uppercase" }}>
+              Dispatch Details ({entry.dispatches.length} slots)
+            </label>
+            <button type="button" className="btn btn-ghost"
+              style={{ width: "auto", padding: "5px 12px", fontSize: 12, marginTop: 0 }}
+              onClick={addDispatch}>
+              + Add Dispatch Slot
+            </button>
+          </div>
+
+          {entry.dispatches.map((d, idx) => (
+            <div key={idx} style={{
+              border: "1px solid var(--line)", borderRadius: 8,
+              padding: 10, marginBottom: 8, background: "var(--surface)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between",
+                marginBottom: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 12,
+                  color: "var(--ink-soft)" }}>
+                  {idx === 0 ? "1st" : idx === 1 ? "2nd" : idx === 2 ? "3rd" : (idx+1)+"th"} Dispatch
+                </span>
+                {entry.dispatches.length > 2 && (
+                  <button type="button"
+                    onClick={() => removeDispatch(idx)}
+                    style={{ background: "none", border: "none",
+                      color: "var(--warn)", cursor: "pointer",
+                      fontSize: 12, fontWeight: 700 }}>
+                    Remove
+                  </button>
+                )}
+              </div>
+              <div className="row3">
+                <div>
+                  <label style={{ fontSize: 11 }}>
+                    {idx === 0 ? "F" : idx === 1 ? "I" : idx === 2 ? "L" : String.fromCharCode(70 + idx*3)} — Dispatch Date
+                  </label>
+                  <input type="date" value={d.date}
+                    onChange={e => updateDispatch(idx, { date: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11 }}>
+                    {idx === 0 ? "G" : idx === 1 ? "J" : idx === 2 ? "M" : "-"} — Inv No.
+                  </label>
+                  <input type="text" placeholder="e.g. C/119/26-27"
+                    value={d.inv_no}
+                    onChange={e => updateDispatch(idx, { inv_no: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11 }}>
+                    {idx === 0 ? "H" : idx === 1 ? "K" : idx === 2 ? "N" : "-"} — Qty in Bags (arithmetic ok)
+                  </label>
+                  <input type="text" placeholder="e.g. 28 or 2+12+26"
+                    value={d.qty_bags}
+                    onChange={e => updateDispatch(idx, { qty_bags: e.target.value })} />
+                  {d.qty_bags.includes("+") && evalArith(d.qty_bags) != null && (
+                    <div className="field-hint">= {evalArith(d.qty_bags)} bags</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Remaining summary */}
+        <div style={{
+          marginTop: 12, padding: "12px 16px",
+          background: "var(--clay-soft)", borderRadius: 8,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                Remaining Qty in Bags (O = B - H - K - N...)
+              </div>
+              <div className="field-hint">
+                {derived.qtyBags ?? 0}{" "}
+                {entry.dispatches.map((d, i) => {
+                  const n = evalArith(d.qty_bags);
+                  return n != null && n > 0 ? " - " + n : "";
+                }).join("")}
+                {" "}= {derived.remainingBags ?? 0}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 700, fontSize: 18,
+                color: (derived.remainingBags ?? 0) < 0 ? "var(--warn)" : "var(--clay)" }}>
+                {derived.remainingBags ?? 0} bags
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14,
+                color: "var(--ink-soft)" }}>
+                {derived.remainingMt != null ? derived.remainingMt.toFixed(3) : "0.000"} MT
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting || !entry.batch_no.trim() || !entry.code}
+        onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Batch Entry"}
+      </button>
+
+      {/* History table */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>Batch Wise History</h3>
+          <select value={filterCode}
+            onChange={e => setFilterCode(e.target.value as BatchCode | "ALL")}
+            style={{ width: "auto", padding: "6px 10px", fontSize: 12 }}>
+            <option value="ALL">All Codes</option>
+            {BATCH_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {histLoading ? <div className="empty">Loading...</div>
+          : filtered.length === 0 ? <div className="empty">No entries yet.</div>
+          : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="dash" style={{ minWidth: 900 }}>
+                <thead>
+                  <tr>
+                    <th>Batch No (A)</th>
+                    <th>Code (C)</th>
+                    <th>Mfg Date (D)</th>
+                    <th style={{ textAlign: "right" }}>Qty Bags (B)</th>
+                    <th style={{ textAlign: "right" }}>Qty MT (E)</th>
+                    {[0, 1, 2].map(i => (
+                      <th key={i} style={{ textAlign: "center", fontSize: 10 }}>
+                        {i === 0 ? "1st" : i === 1 ? "2nd" : "3rd"} Dispatch
+                        <br />(Date / Inv / Bags)
+                      </th>
+                    ))}
+                    <th style={{ textAlign: "right" }}>Rem. Bags (O)</th>
+                    <th style={{ textAlign: "right" }}>Rem. MT (P)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(row => (
+                    <tr key={row.id}>
+                      <td style={{ fontWeight: 700 }}>{row.batch_no}</td>
+                      <td style={{ fontSize: 12, fontWeight: 600,
+                        color: HEAVY_CODES.includes(row.code) ? "var(--clay)" : "var(--ok)" }}>
+                        {row.code}
+                      </td>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.mfg_date)}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {row.qty_bags_expr !== String(row.qty_bags)
+                          ? <span title={row.qty_bags_expr}>{row.qty_bags}</span>
+                          : row.qty_bags}
+                      </td>
+                      <td style={{ textAlign: "right", color: "var(--ok)" }}>
+                        {row.qty_mt.toFixed(3)}
+                      </td>
+                      {[0, 1, 2].map(i => {
+                        const d = row.dispatches[i];
+                        return (
+                          <td key={i} style={{ textAlign: "center", fontSize: 11,
+                            color: "var(--ink-soft)" }}>
+                            {d && (d.date || d.qty_bags) ? (
+                              <>
+                                {fmtDate(d.date)}<br />
+                                {nilText(d.inv_no)}<br />
+                                <b>{(evalArith(d.qty_bags) ?? d.qty_bags) || "0"}</b>
+                              </>
+                            ) : "-"}
+                          </td>
+                        );
+                      })}
+                      <td style={{ textAlign: "right", fontWeight: 700,
+                        color: row.remaining_bags < 0 ? "var(--warn)" : undefined }}>
+                        {row.remaining_bags}
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700,
+                        color: "var(--clay)" }}>
+                        {row.remaining_mt.toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         }
       </div>
     </>
