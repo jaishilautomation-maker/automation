@@ -309,10 +309,15 @@ export default function BatchAnalysisPage() {
             test_results:  testResults,
             remarks:       remarks.trim() || null,
           })
-          .select("id")
+          .select("*")
           .single();
 
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+        // Reflect the just-saved record immediately so the "already exists"
+        // banner shows and re-saving takes the UPDATE path — otherwise the
+        // page kept showing "Batch found — no analysis yet" after a
+        // successful save (existingAnalysis was never populated post-insert).
+        setExistingAnalysis(newRow as BatchAnalysis);
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
         void notifyQcFinalized({
           sourceTable:   "batch_analysis",
