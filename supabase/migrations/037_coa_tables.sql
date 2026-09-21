@@ -180,4 +180,4 @@ VALUES
     ('Dalmia',          'colour_appearance',     'Appearance',             NULL,  NULL,  NULL,  'SULPHUR_POWDER_FG')
 ON CONFLICT (customer_name, parameter, product_code) DO NOTHING;
 
-RAISE NOTICE 'Migration 014: COA tables (coa_customer_specs, coa_documents) created successfully.';
+-- Migration 037 complete: coa_customer_specs and coa_documents tables created.
