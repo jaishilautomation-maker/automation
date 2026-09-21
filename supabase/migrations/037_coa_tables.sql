@@ -60,6 +60,9 @@ CREATE INDEX IF NOT EXISTS idx_coa_customer_specs_customer
 
 ALTER TABLE public.coa_customer_specs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "coa_specs_select" ON public.coa_customer_specs;
+DROP POLICY IF EXISTS "coa_specs_write"  ON public.coa_customer_specs;
+
 CREATE POLICY "coa_specs_select" ON public.coa_customer_specs
     FOR SELECT TO authenticated USING (true);
 
@@ -115,6 +118,10 @@ CREATE INDEX IF NOT EXISTS idx_coa_docs_customer
 
 ALTER TABLE public.coa_documents ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "coa_docs_select" ON public.coa_documents;
+DROP POLICY IF EXISTS "coa_docs_insert" ON public.coa_documents;
+DROP POLICY IF EXISTS "coa_docs_update" ON public.coa_documents;
+
 CREATE POLICY "coa_docs_select" ON public.coa_documents
     FOR SELECT TO authenticated
     USING (factory_id IN (SELECT fn_user_factory_ids()));
@@ -135,18 +142,18 @@ CREATE POLICY "coa_docs_update" ON public.coa_documents
 
 GRANT SELECT, INSERT, UPDATE ON public.coa_documents TO authenticated;
 
--- ─── Audit triggers ───────────────────────────────────────────────────────
+-- ─── Audit trigger ────────────────────────────────────────────────────────
+-- IMPORTANT: fn_audit_log() reads NEW.factory_id / OLD.factory_id, so the audit
+-- trigger can ONLY be attached to tables that have a factory_id column.
+--
+--   coa_documents      → HAS factory_id  → audited (below).
+--   coa_customer_specs → NO  factory_id  → NOT audited. It is a global
+--                        reference table (like materials / products /
+--                        qc_test_definitions, which are also un-audited for
+--                        the same reason). Attaching the trigger here would
+--                        raise: 42703 record "new" has no field "factory_id".
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_trigger
-        WHERE tgname = 'trg_audit_coa_customer_specs'
-    ) THEN
-        CREATE TRIGGER trg_audit_coa_customer_specs
-        AFTER INSERT OR UPDATE OR DELETE ON public.coa_customer_specs
-        FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
-    END IF;
-
     IF NOT EXISTS (
         SELECT 1 FROM pg_trigger
         WHERE tgname = 'trg_audit_coa_documents'
@@ -157,6 +164,10 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Safety net: if a previous partial run already created the invalid trigger on
+-- coa_customer_specs, remove it so re-running this migration succeeds.
+DROP TRIGGER IF EXISTS trg_audit_coa_customer_specs ON public.coa_customer_specs;
 
 -- ─── Seed: common customer specs for Sulphur Powder ──────────────────────
 -- These are example entries matching the MRF / Dalmia style specs visible on
