@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
   packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "job_cards" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -93,20 +93,21 @@ export default function StoresPage() {
   const [tab, setTab] = useState<Tab>("oil");
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: "oil",        label: "Oil Issue" },
-    { id: "rm",         label: "Raw Material" },
-    { id: "received",       label: "Received" },
-    { id: "supplied",       label: "Supplied" },
-    { id: "daily_prod",     label: "Daily Production" },
+    { id: "job_cards",        label: "Job Cards" },
+    { id: "oil",              label: "Oil Issue" },
+    { id: "rm",               label: "Raw Material" },
+    { id: "received",         label: "Received" },
+    { id: "supplied",         label: "Supplied" },
+    { id: "daily_prod",       label: "Daily Production" },
     { id: "daily_dispatch",   label: "Daily Dispatch" },
     { id: "packing_material", label: "Packing Material" },
     { id: "finished_goods",   label: "Finished Goods" },
     { id: "ball_mill",        label: "Ball Mill" },
     { id: "batch_wise",       label: "Batch Wise" },
     { id: "ledger",           label: "Stock Ledger" },
-    { id: "issue",          label: "Issue Slip" },
-    { id: "prn",            label: "PRN" },
-    { id: "dispatch",       label: "Dispatch" },
+    { id: "issue",            label: "Issue Slip" },
+    { id: "prn",              label: "PRN" },
+    { id: "dispatch",         label: "Dispatch" },
   ];
 
   return (
@@ -132,8 +133,9 @@ export default function StoresPage() {
         ))}
       </div>
 
-      {tab === "oil"        && <OilIssueSection />}
-      {tab === "rm"         && <RawMaterialSection />}
+      {tab === "job_cards"      && <JobCardsSection onGoToTab={setTab} />}
+      {tab === "oil"            && <OilIssueSection />}
+      {tab === "rm"             && <RawMaterialSection />}
       {tab === "received"   && <ReceivedSection />}
       {tab === "supplied"   && <SuppliedSection />}
       {tab === "daily_prod"     && <DailyProductionSection />}
@@ -147,6 +149,289 @@ export default function StoresPage() {
       {tab === "prn"        && <PrnSection />}
       {tab === "dispatch"   && <DispatchSection />}
     </div>
+  );
+}
+
+// =============================================================================
+// TAB 0 -- JOB CARDS FROM PRODUCTION
+//
+// Shows ALL pulveriser job cards that Production has created, grouped by status.
+// Stores can see everything Production filled in without re-entering any data.
+// From here Stores can:
+//   1. Issue oil (jumps to Oil Issue tab with the card pre-selected)
+//   2. Create a pre-filled Material Issue Slip for sulphur or oil
+//   3. View finalized cards for reference
+//
+// Status filter: Pending Stores (action needed) | All Recent
+// =============================================================================
+function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [cards, setCards]         = useState<PulveriserJobCard[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [filter, setFilter]       = useState<"pending" | "all">("pending");
+  const [selected, setSelected]   = useState<PulveriserJobCard | null>(null);
+
+  const loadCards = useCallback(async () => {
+    setLoading(true);
+    let q = supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (filter === "pending") {
+      q = q.eq("status", "pending_stores");
+    }
+    const { data, error } = await q;
+    if (error) showToast("Could not load job cards: " + error.message, true);
+    else setCards((data ?? []) as PulveriserJobCard[]);
+    setLoading(false);
+  }, [supabase, showToast, filter]);
+
+  useEffect(() => { loadCards(); }, [loadCards]);
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, { label: string; color: string; bg: string }> = {
+      pending_stores:   { label: "Pending Stores",  color: "var(--warn)",  bg: "var(--warn-soft)" },
+      pending:          { label: "Pending Operator", color: "var(--clay)",  bg: "var(--clay-soft)" },
+      submitted_for_qc: { label: "In QC Review",    color: "#1a6b3c",      bg: "#e4efe3" },
+      finalized:        { label: "Finalized",        color: "var(--ok)",    bg: "var(--ok-soft)" },
+    };
+    const s = map[status] ?? { label: status, color: "var(--ink-soft)", bg: "var(--line)" };
+    return (
+      <span style={{
+        fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
+        color: s.color, background: s.bg, whiteSpace: "nowrap",
+      }}>
+        {s.label}
+      </span>
+    );
+  };
+
+  // Detail view for a single card
+  if (selected) {
+    const jc = selected;
+    return (
+      <>
+        <button className="back-link" type="button" onClick={() => setSelected(null)}>
+          Back to Job Cards
+        </button>
+
+        {/* Status + action banner */}
+        <div style={{
+          padding: "12px 16px", borderRadius: 8, marginBottom: 14,
+          background: jc.status === "pending_stores" ? "var(--warn-soft)" : "var(--clay-soft)",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>
+              Job {jc.job_number ?? jc.id.slice(0, 8)}
+            </div>
+            <div style={{ fontSize: 12, marginTop: 2 }}>
+              {statusBadge(jc.status)}
+            </div>
+          </div>
+          {jc.status === "pending_stores" && (
+            <button type="button" className="btn btn-primary"
+              style={{ width: "auto", padding: "8px 18px", marginTop: 0, fontSize: 13 }}
+              onClick={() => { setSelected(null); onGoToTab("oil"); }}>
+              Go to Oil Issue
+            </button>
+          )}
+        </div>
+
+        {/* Production details -- read only, exactly as Production filled */}
+        <div className="card">
+          <h3>Production Details (filled by Production Incharge)</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
+            fontSize: 13, lineHeight: 1.8 }}>
+            <div><b>Machine:</b> {jc.machine_number ?? "N/A"}</div>
+            <div><b>Job Number:</b> {jc.job_number ?? "N/A"}</div>
+            <div><b>Date:</b> {fmtDate(jc.job_date)}</div>
+            <div><b>Shift:</b> {jc.shift ?? "N/A"}</div>
+            <div><b>Batch No. (Material Code):</b> {jc.material_code ?? "N/A"}</div>
+            <div><b>Party / CODE:</b> {jc.party_code ?? "N/A"}</div>
+            <div><b>Planned Production:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</div>
+            <div>
+              <b>Oil Required (auto):</b>{" "}
+              <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+                {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Sulphur details */}
+        <div className="card">
+          <h3>Sulphur Details</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
+            fontSize: 13, lineHeight: 1.8 }}>
+            <div><b>Supplier:</b> {jc.sulphur_supplier ?? "N/A"}</div>
+            <div><b>Lot Number:</b> {jc.sulphur_lot_number ?? "N/A"}</div>
+            <div><b>Empty Date:</b> {fmtDate(jc.sulphur_empty_date)}</div>
+          </div>
+        </div>
+
+        {/* Oil details */}
+        <div className="card">
+          <h3>Oil Details</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
+            fontSize: 13, lineHeight: 1.8 }}>
+            <div><b>Supplier:</b> {jc.oil_supplier ?? "N/A"}</div>
+            <div><b>Batch Number:</b> {jc.oil_batch_number ?? "N/A"}</div>
+            <div><b>Quantity:</b> {jc.oil_quantity != null ? jc.oil_quantity + " L" : "N/A"}</div>
+            <div>
+              <b>Oil Issued by Stores:</b>{" "}
+              <span style={{ fontWeight: 700,
+                color: jc.oil_issued_kg != null ? "var(--ok)" : "var(--warn)" }}>
+                {jc.oil_issued_kg != null ? jc.oil_issued_kg + " kg" : "Not yet issued"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Operator details (if filled) */}
+        {jc.actual_production_mt != null && (
+          <div className="card">
+            <h3>Operator Details</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
+              fontSize: 13, lineHeight: 1.8 }}>
+              <div><b>Actual Production:</b> {jc.actual_production_mt} MT</div>
+              <div><b>Expected Oil:</b> {jc.expected_oil_kg ?? "N/A"} kg</div>
+              <div><b>Actual Oil Consumption:</b> {jc.actual_oil_consumption_kg ?? "N/A"} kg</div>
+              <div><b>Oil Variance:</b> {jc.oil_variance_kg ?? "N/A"} kg</div>
+            </div>
+          </div>
+        )}
+
+        {/* Quick actions for Stores */}
+        {jc.status === "pending_stores" && (
+          <div className="card">
+            <h3>Stores Actions</h3>
+            <div className="field-hint" style={{ marginBottom: 12 }}>
+              Use these shortcuts to pre-fill other sections based on this job card.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-secondary"
+                style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+                onClick={() => { setSelected(null); onGoToTab("oil"); }}>
+                Issue Oil
+              </button>
+              <button type="button" className="btn btn-secondary"
+                style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+                onClick={() => { setSelected(null); onGoToTab("issue"); }}>
+                Create Issue Slip
+              </button>
+              <button type="button" className="btn btn-secondary"
+                style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+                onClick={() => { setSelected(null); onGoToTab("rm"); }}>
+                Update Raw Material
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // List view
+  const groups = groupByJobNumber(cards);
+
+  return (
+    <>
+      {/* Filter + refresh */}
+      <div style={{ display: "flex", justifyContent: "space-between",
+        alignItems: "center", marginBottom: 12 }}>
+        <div className="chip-group" style={{ margin: 0 }}>
+          <button type="button"
+            className={"chip" + (filter === "pending" ? " selected" : "")}
+            onClick={() => setFilter("pending")}>
+            Pending Stores
+          </button>
+          <button type="button"
+            className={"chip" + (filter === "all" ? " selected" : "")}
+            onClick={() => setFilter("all")}>
+            All Recent
+          </button>
+        </div>
+        <button type="button" className="btn btn-ghost"
+          style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
+          onClick={loadCards}>
+          Refresh
+        </button>
+      </div>
+
+      {/* Info banner */}
+      {filter === "pending" && (
+        <div style={{
+          padding: "10px 14px", borderRadius: 8, marginBottom: 14,
+          background: "var(--warn-soft)", fontSize: 13, color: "var(--warn)",
+          fontWeight: 600,
+        }}>
+          These job cards are waiting for you to issue oil before the operator can start the batch.
+        </div>
+      )}
+
+      {loading ? <div className="empty">Loading...</div>
+        : groups.length === 0
+          ? <div className="empty">
+              {filter === "pending"
+                ? "No job cards waiting for oil issue."
+                : "No job cards found."}
+            </div>
+          : groups.map(group => (
+            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 16 }}>
+              {/* Job number header */}
+              <div style={{
+                fontSize: 12, fontWeight: 700, color: "var(--ink-soft)",
+                margin: "4px 2px 6px", textTransform: "uppercase", letterSpacing: "0.5px",
+              }}>
+                Job: {group.jobNumber ?? "No Job Number"}
+                {group.entries.length > 1 && " (" + group.entries.length + " entries)"}
+              </div>
+
+              {group.entries.map((jc, i) => (
+                <div key={jc.id}
+                  className="pending-item"
+                  style={{ marginBottom: 8 }}
+                  onClick={() => setSelected(jc)}>
+                  <div className="pi-top">
+                    <span style={{ fontWeight: 700 }}>
+                      Entry {i + 1} -- {jc.machine_number} -- {fmtDate(jc.job_date)} -- {jc.shift ?? "N/A"} Shift
+                    </span>
+                    {statusBadge(jc.status)}
+                  </div>
+                  <div className="pi-sub" style={{ marginTop: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" }}>
+                      <span><b>Batch:</b> {jc.material_code ?? "N/A"}</span>
+                      <span><b>Party/Code:</b> {jc.party_code ?? "N/A"}</span>
+                      <span><b>Planned:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</span>
+                      <span>
+                        <b>Oil Required:</b>{" "}
+                        <span style={{ color: "var(--clay)", fontWeight: 700 }}>
+                          {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}
+                        </span>
+                      </span>
+                      {jc.oil_issued_kg != null && (
+                        <span>
+                          <b>Oil Issued:</b>{" "}
+                          <span style={{ color: "var(--ok)", fontWeight: 700 }}>
+                            {jc.oil_issued_kg} kg
+                          </span>
+                        </span>
+                      )}
+                      {jc.sulphur_supplier && (
+                        <span><b>Sulphur:</b> {jc.sulphur_supplier} / {jc.sulphur_lot_number ?? "N/A"}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))
+      }
+    </>
   );
 }
 
