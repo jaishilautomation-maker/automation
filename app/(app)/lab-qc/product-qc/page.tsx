@@ -77,7 +77,7 @@ export default function ProductQcPage() {
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
-  // ── COA generation state ─────────────────────────────────────────────────
+  // ── COA generation state (report generated FROM already-saved QC data) ──
   const [coaModalOpen, setCoaModalOpen]   = useState(false);
   const [coaGenerating, setCoaGenerating] = useState(false);
   const [coaCustomers, setCoaCustomers]   = useState<string[]>([]);
@@ -265,7 +265,7 @@ export default function ProductQcPage() {
   );
 
   // -------------------------------------------------------------------------
-  // COA: load the distinct customer list (for the modal dropdown)
+  // COA: load distinct customer names for the modal dropdown
   // -------------------------------------------------------------------------
   useEffect(() => {
     supabase
@@ -289,15 +289,17 @@ export default function ProductQcPage() {
     const lotNo   = batches.find(b => b.id === existingRecord.batch_id)?.lot_number ?? "";
     setCoaForm(prev => ({
       ...prev,
-      batch_no: batchNo,
-      lot_no:   lotNo ?? "",
+      batch_no: isA20 ? directBatchNumber : batchNo,
+      lot_no:   isA20 ? directLotNumber   : (lotNo ?? ""),
       mfg_date: existingRecord.test_date ?? new Date().toISOString().slice(0, 10),
     }));
     setCoaModalOpen(true);
   };
 
   // -------------------------------------------------------------------------
-  // COA: generate — POST to /api/lab-qc/generate-coa
+  // COA: generate — POST to /api/lab-qc/generate-coa (reads test_results from
+  // the already-saved product_qc row; no data is entered here beyond
+  // customer/dispatch metadata not already on the QC record).
   // -------------------------------------------------------------------------
   const handleGenerateCoa = async () => {
     if (!activeFactory || !existingRecord) { showToast("Session error — refresh.", true); return; }
@@ -804,14 +806,14 @@ export default function ProductQcPage() {
               : "Save QC Record"}
           </button>
 
-          {/* ── Generate COA (only for finalized/saved records) ── */}
+          {/* ── Generate COA report (reads already-saved QC data — no re-entry) ── */}
           {existingRecord && (
             <div className="card" style={{ marginTop: 16 }}>
               <h3>Certificate of Analysis</h3>
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Generate a customer-facing COA PDF from this finalized QC record.
-                Actual results are compared against the selected customer&rsquo;s
-                specification limits, then emailed and logged to Google Sheets.
+                Actual results are pulled from the saved test data above and
+                compared against the selected customer&rsquo;s spec limits.
               </div>
               <button
                 className="btn btn-secondary"
