@@ -23,6 +23,7 @@ import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material, QcTestDefinition } from "@/lib/types";
+import { computeRmQcGrade, RM_QC_GRADE_THRESHOLDS, type RmQcGrade } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 
@@ -85,6 +86,25 @@ export default function RmQcPage() {
   const [chemistName, setChemistName] = useState("");
   const [remarks, setRemarks]         = useState("");
   const [submitting, setSubmitting]   = useState(false);
+
+  // ── Computed grade for A-20/1 Crude Sulphur incoming inspection ──────────
+  // Derived live from values; does NOT require its own state slot.
+  const computedGrade = ((): RmQcGrade | null => {
+    if (!isA20_1 || qcRmType !== "crude_sulphur") return null;
+    const p1 = parseFloat(values["s1_purity_cs2"] ?? "");
+    const p2 = parseFloat(values["s2_purity_cs2"] ?? "");
+    if (isNaN(p1) || isNaN(p2)) return null;
+    const avgP  = (p1 + p2) / 2;
+    const avgA  = parseFloat(values["avg_acidity_h2so4"] ?? "");
+    const avgAs = parseFloat(values["avg_ash_content"] ?? "");
+    const avgH  = parseFloat(values["avg_heat_loss_70c_2hr"] ?? "");
+    return computeRmQcGrade(
+      avgP,
+      isNaN(avgA)  ? undefined : avgA,
+      isNaN(avgAs) ? undefined : avgAs,
+      isNaN(avgH)  ? undefined : avgH,
+    );
+  })();
 
   // Oil QC fields
   const [oilBatchNumber, setOilBatchNumber] = useState("");
@@ -305,10 +325,29 @@ export default function RmQcPage() {
   const handleChange = useCallback((key: string, val: string) => {
     setValues(prev => {
       const next = { ...prev, [key]: val };
+      // Run formula fields (averages, etc.)
       testDefs.filter(d => d.is_calculated && d.formula).forEach(d => {
         const result = evalFormula(d.formula!, next);
         next[d.test_key] = result !== null ? String(result) : "";
       });
+      // Auto-set incoming_grade from computed averages (A-20/1 crude sulphur)
+      if (isA20_1) {
+        const p1 = parseFloat(next["s1_purity_cs2"] ?? "");
+        const p2 = parseFloat(next["s2_purity_cs2"] ?? "");
+        if (!isNaN(p1) && !isNaN(p2)) {
+          const avgP  = (p1 + p2) / 2;
+          const avgA  = parseFloat(next["avg_acidity_h2so4"] ?? "");
+          const avgAs = parseFloat(next["avg_ash_content"] ?? "");
+          const avgH  = parseFloat(next["avg_heat_loss_70c_2hr"] ?? "");
+          const grade = computeRmQcGrade(
+            avgP,
+            isNaN(avgA)  ? undefined : avgA,
+            isNaN(avgAs) ? undefined : avgAs,
+            isNaN(avgH)  ? undefined : avgH,
+          );
+          next["incoming_grade"] = grade;
+        }
+      }
       return next;
     });
   }, [testDefs]);
@@ -518,6 +557,50 @@ export default function RmQcPage() {
                       photoUploadProps={photoProps}
                     />
                   ))}
+                </div>
+              )}
+
+              {/* ── Grade summary panel (auto-determined from dual-sample averages) ── */}
+              {computedGrade && (
+                <div className="card">
+                  <h3>Incoming Inspection Grade</h3>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 16,
+                    padding: "14px 18px",
+                    borderRadius: 10,
+                    background: computedGrade === "A"
+                      ? "var(--ok-soft)"
+                      : computedGrade === "B"
+                        ? "#fff8e1"
+                        : "#ffebee",
+                    border: `1.5px solid ${computedGrade === "A" ? "var(--ok)" : computedGrade === "B" ? "#f9a825" : "var(--warn)"}`,
+                  }}>
+                    <div style={{
+                      fontSize: 36, fontWeight: 800, lineHeight: 1,
+                      color: computedGrade === "A" ? "var(--ok)" : computedGrade === "B" ? "#f57f17" : "var(--warn)",
+                    }}>
+                      Grade {computedGrade}
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>
+                      {computedGrade === "A" && (
+                        <>Purity ≥ {RM_QC_GRADE_THRESHOLDS.A.purity_min}%,
+                        Acidity ≤ {RM_QC_GRADE_THRESHOLDS.A.acidity_max}%,
+                        Ash ≤ {RM_QC_GRADE_THRESHOLDS.A.ash_max}%,
+                        Heat Loss ≤ {RM_QC_GRADE_THRESHOLDS.A.heat_loss_max}%</>
+                      )}
+                      {computedGrade === "B" && (
+                        <>Purity in 90–97.99% range or secondary parameters above A-grade limits.
+                        Note specific deviations in Remarks.</>
+                      )}
+                      {computedGrade === "Reject" && (
+                        <>Purity below {RM_QC_GRADE_THRESHOLDS.reject_purity_below}% — batch does not meet minimum acceptance criteria.</>
+                      )}
+                    </div>
+                  </div>
+                  <div className="field-hint" style={{ marginTop: 8 }}>
+                    Grade is auto-determined from the average of both sample readings.
+                    The &ldquo;Grade (Auto-determined)&rdquo; field above reflects this and can be overridden if needed.
+                  </div>
                 </div>
               )}
 

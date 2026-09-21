@@ -1194,3 +1194,119 @@ export interface PurchaseRequisition {
   created_at: string;
   updated_at: string;
 }
+
+// =============================================================================
+// COA (Certificate of Analysis) — new in migration 014
+// =============================================================================
+
+/** coa_customer_specs — per-customer spec limits for COA generation. */
+export interface CoaCustomerSpec {
+  id: string;
+  customer_name: string;
+  parameter: string;           // matches test_key in qc_test_definitions
+  parameter_label: string;     // human label for the COA table column
+  unit: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  product_code: string | null; // null = applies to all products
+  is_active: boolean;
+  created_at: string;
+  created_by: string | null;
+}
+
+/** coa_documents — one row per generated Certificate of Analysis PDF. */
+export interface CoaDocument {
+  id: string;
+  product_qc_id: string;
+  factory_id: string;
+  customer_name: string;
+  customer_address: string | null;
+  test_report_no: number;
+  lot_no: string | null;
+  batch_no: string | null;
+  qty: string | null;
+  invoice_no: string | null;
+  vehicle_no: string | null;
+  mfg_date: string | null;     // ISO date
+  pdf_url: string | null;
+  pdf_storage_path: string | null;
+  generated_at: string;
+  generated_by: string;
+  email_sent_at: string | null;
+  sheet_synced_at: string | null;
+}
+
+/**
+ * Inputs needed when generating a COA from a finalized product_qc record.
+ * Collected via the "Generate COA" modal on the Product QC page.
+ */
+export interface CoaGenerateRequest {
+  product_qc_id: string;
+  factory_id: string;
+  customer_name: string;
+  customer_address?: string;
+  lot_no?: string;
+  batch_no?: string;
+  qty?: string;
+  invoice_no?: string;
+  vehicle_no?: string;
+  mfg_date?: string;  // ISO date
+}
+
+// =============================================================================
+// RM QC — Grade (Incoming Inspection, JSCI/QC/03)
+// =============================================================================
+
+export type RmQcGrade = "A" | "B" | "Reject";
+
+/**
+ * Grade thresholds for Crude Sulphur incoming inspection.
+ * Source: JSCI/QC/03.  B-grade upper bounds are intentionally left open
+ * ("above A-grade max" per spec) — the reject threshold is purity < 90.
+ */
+export const RM_QC_GRADE_THRESHOLDS = {
+  A: {
+    purity_min: 98.0,
+    purity_max: 100.0,
+    acidity_max: 0.010,
+    ash_max: 0.10,
+    heat_loss_max: 0.30,
+  },
+  B: {
+    purity_min: 90.0,
+    purity_max: 97.9999,   // < 98.00
+    // acidity / ash / heat_loss: above A-grade maxima — no hard upper limit
+    // specified in the source document; recorded in remarks by the chemist.
+  },
+  reject_purity_below: 90.0,
+} as const;
+
+/**
+ * Compute the incoming inspection grade from averaged sample readings.
+ * Returns "A", "B", or "Reject".
+ */
+export function computeRmQcGrade(
+  avgPurity: number,
+  avgAcidity?: number,
+  avgAsh?: number,
+  avgHeatLoss?: number,
+): RmQcGrade {
+  if (avgPurity < RM_QC_GRADE_THRESHOLDS.reject_purity_below) return "Reject";
+
+  const t = RM_QC_GRADE_THRESHOLDS.A;
+
+  // Grade A: purity in range AND all other parameters within A limits
+  if (
+    avgPurity >= t.purity_min &&
+    avgPurity <= t.purity_max &&
+    (avgAcidity === undefined || avgAcidity <= t.acidity_max) &&
+    (avgAsh === undefined || avgAsh <= t.ash_max) &&
+    (avgHeatLoss === undefined || avgHeatLoss <= t.heat_loss_max)
+  ) {
+    return "A";
+  }
+
+  // Grade B: purity in 90–97.99 range (or A-range purity but secondary
+  // parameters failing A-grade limits)
+  return "B";
+}
