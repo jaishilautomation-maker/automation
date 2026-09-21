@@ -1,5 +1,8 @@
 -- =============================================================================
--- A-20 Migration 013: Product QC — Sulphur Powder Full Parameter Panel (JSCI/QC/16)
+-- Migration 036 (A-20/1 project): Product QC — Sulphur Powder Full Parameter Panel (JSCI/QC/16)
+--
+-- Run on the Factory A-20/1 Supabase project (dezwaxrtxpszxsmrxpkm) — the same
+-- project as root migrations 001–033.
 --
 -- This adds a SULPHUR_POWDER product + its qc_test_definitions to the A-20/1
 -- project so the Product QC page can run final inspection on produced sulphur

@@ -1,5 +1,9 @@
 -- =============================================================================
--- A-20 Migration 011: RM QC — Crude Sulphur Incoming Inspection (JSCI/QC/03)
+-- Migration 034 (A-20/1 project): RM QC — Crude Sulphur Incoming Inspection (JSCI/QC/03)
+--
+-- Run on the Factory A-20/1 Supabase project (dezwaxrtxpszxsmrxpkm) — the same
+-- project as root migrations 001–033. Depends on the qc_test_definitions /
+-- materials schema created by 001_initial_schema.sql.
 --
 -- Adds dual-sample inspection parameters for Crude Sulphur (A-20/1 RM QC):
 --   purity_cs2  (% purity by CS2 extraction)

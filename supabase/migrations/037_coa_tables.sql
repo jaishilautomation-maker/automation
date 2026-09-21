@@ -1,5 +1,9 @@
 -- =============================================================================
--- A-20 Migration 014: COA (Certificate of Analysis) Tables
+-- Migration 037 (A-20/1 project): COA (Certificate of Analysis) Tables
+--
+-- Run on the Factory A-20/1 Supabase project (dezwaxrtxpszxsmrxpkm) — the same
+-- project as root migrations 001–033. Must run AFTER 036 (needs the
+-- SULPHUR_POWDER_FG product it creates).
 --
 -- Two new tables:
 --

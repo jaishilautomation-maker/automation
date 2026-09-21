@@ -1,5 +1,8 @@
 -- =============================================================================
--- A-20 Migration 012: Batch Analysis — Raw Input Fields + Auto-Calculated Results
+-- Migration 035 (A-20/1 project): Batch Analysis — Raw Input Fields + Auto-Calculated Results
+--
+-- Run on the Factory A-20/1 Supabase project (dezwaxrtxpszxsmrxpkm) — the same
+-- project as root migrations 001–033.
 --
 -- Context: batch_analysis uses qc_test_definitions WHERE material_id = SULPHUR_POWDER
 --          AND phase = 'B'.  The existing seed (003) contains only derived or
