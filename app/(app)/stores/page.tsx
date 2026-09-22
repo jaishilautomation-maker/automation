@@ -1203,8 +1203,8 @@ function CodeFilterDropdown({
     {filtered.map(c => (
      <label key={c} style={{ display: "flex", alignItems: "center", gap: 8,
       padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
-      <input type="checkbox" checked={selected.includes}
-       onChange={() => onToggle} />
+      <input type="checkbox" checked={selected.includes(c)}
+       onChange={() => onToggle(c)} />
       {c}
     </label>
    ))}
@@ -1877,9 +1877,9 @@ interface SavedDailyProdRow {
 function calcTotalMt(vals: Record<string, string>): number {
  const n = (k: string) => Number(vals[k]) || 0;
 
- const sum25 = BAGS_25KG.reduce((s, k) => s + n, 0);
- const sum50 = BAGS_50KG.reduce((s, k) => s + n, 0);
- const sum250 = BAGS_250KG.reduce((s, k) => s + n, 0);
+ const sum25 = BAGS_25KG.reduce((s, k) => s + n(k), 0);
+ const sum50 = BAGS_50KG.reduce((s, k) => s + n(k), 0);
+ const sum250 = BAGS_250KG.reduce((s, k) => s + n(k), 0);
 
  return (sum25 * 25) / 1000 + (sum50 * 50) / 1000 + (sum250 * 250) / 1000;
 }
@@ -2233,9 +2233,9 @@ interface SavedDailyDispatchRow {
  */
 function calcDispatchTotalMt(vals: Record<string, string>): number {
  const n = (k: string) => Number(vals[k]) || 0;
- const sum25 = DISPATCH_25KG.reduce((s, k) => s + n, 0);
- const sum50 = DISPATCH_50KG.reduce((s, k) => s + n, 0);
- const sum550 = DISPATCH_550KG.reduce((s, k) => s + n, 0);
+ const sum25 = DISPATCH_25KG.reduce((s, k) => s + n(k), 0);
+ const sum50 = DISPATCH_50KG.reduce((s, k) => s + n(k), 0);
+ const sum550 = DISPATCH_550KG.reduce((s, k) => s + n(k), 0);
  return (sum25 * 25) / 1000 + (sum50 * 50) / 1000 + (sum550 * 550) / 1000;
 }
 
@@ -3395,7 +3395,7 @@ function blankBmDispatchRow(): BmDispatchRow {
 
 function computeBmRow(r: BmProdRow): BmProdRow {
  const e = Number(r.qty_mfg);
- const kg = Number.isFinite && e >= 0 ? e * 25 : null;
+ const kg = Number.isFinite(e) && e >= 0 ? e * 25 : null;
  return { ...r, kg, total_mt: kg != null ? kg / 1000 : null };
 }
 
@@ -3861,8 +3861,8 @@ function evalArith(s: string): number | null {
   // Split on + and -, parse as sum
   const parts = trimmed.split("+").map(p => p.trim());
   const total = parts.reduce((sum, p) => {
-   const n = Number;
-   return Number.isFinite ? sum + n : NaN;
+   const n = Number(p);
+   return Number.isFinite(n) ? sum + n : NaN;
   }, 0);
   return Number.isFinite(total) ? total : null;
  } catch { return null; }
