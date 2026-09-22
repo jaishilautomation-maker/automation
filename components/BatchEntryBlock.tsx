@@ -5,6 +5,7 @@ export interface BatchEntry {
   from: string;
   to: string;
   material: string;
+  
   calcifier: string;
   blowerIn: string;
   blowerOut: string;
