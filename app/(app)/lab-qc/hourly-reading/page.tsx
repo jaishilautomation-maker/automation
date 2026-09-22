@@ -234,6 +234,7 @@ export default function HourlyReadingPage() {
         referenceId: newRow.id,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "Hourly Reading",
           values: [
             newRow.id,

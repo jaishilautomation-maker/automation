@@ -155,6 +155,7 @@ export default function LabTrialsPage() {
         referenceId: trialId,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "Lab Trials",
           values: [
             trialId,

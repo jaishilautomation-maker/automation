@@ -396,6 +396,7 @@ export default function RmQcPage() {
         referenceId: newRow.id,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "RM QC",
           values: [
             newRow.id,
@@ -792,6 +793,7 @@ export default function RmQcPage() {
                   referenceId: oilRow.id,
                   sheetData: {
                     type: "append",
+                    target: "lab",
                     tab: "RM QC",
                     values: [
                       oilRow.id,

@@ -187,6 +187,7 @@ export default function MaintenancePage() {
           referenceId: itemId,
           sheetData: {
             type:   "append",
+            target: "production",
             tab:    "Preventive Maintenance",
             values: [
               itemId,

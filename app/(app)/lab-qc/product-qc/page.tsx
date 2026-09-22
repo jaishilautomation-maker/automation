@@ -485,6 +485,7 @@ export default function ProductQcPage() {
           referenceId: existingRecord.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Product QC",
             values: [
               existingRecord.id,
@@ -566,6 +567,7 @@ export default function ProductQcPage() {
           referenceId: newRow.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Product QC",
             values: [
               newRow.id,

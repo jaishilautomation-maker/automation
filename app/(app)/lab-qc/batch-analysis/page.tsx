@@ -274,6 +274,7 @@ export default function BatchAnalysisPage() {
           referenceId: existingAnalysis.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Batch Analysis",
             values: [
               existingAnalysis.id,
@@ -345,6 +346,7 @@ export default function BatchAnalysisPage() {
           referenceId: newRow.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Batch Analysis",
             values: [
               newRow.id,

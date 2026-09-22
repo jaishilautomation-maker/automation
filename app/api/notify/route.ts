@@ -30,11 +30,12 @@ import {
   syncJobCardRow,
   appendRow,
   type JobCardSheetRow,
+  type SheetTarget,
 } from "@/lib/notifications/sheets-sync";
 
 type SheetSyncPayload =
   | { type: "job_card"; row: JobCardSheetRow }
-  | { type: "append";   tab: string; values: (string | number | boolean | null)[] };
+  | { type: "append"; target: SheetTarget; tab: string; values: (string | number | boolean | null)[] };
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
@@ -58,8 +59,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "eventType, subject, html required" }, { status: 400 });
   }
 
-  console.log(`[notify] eventType=${eventType} sheetData=${sheetData ? sheetData.type : "none"}`);
-
   // Run email and sheet sync concurrently — each is independently safe (never
   // throws). Await both so the Vercel lambda doesn't tear down mid-flight.
   await Promise.all([
@@ -69,7 +68,7 @@ export async function POST(req: NextRequest) {
       if (sheetData.type === "job_card") {
         await syncJobCardRow(sheetData.row);
       } else if (sheetData.type === "append") {
-        await appendRow(sheetData.tab, sheetData.values);
+        await appendRow(sheetData.target, sheetData.tab, sheetData.values);
       }
     })(),
   ]);
