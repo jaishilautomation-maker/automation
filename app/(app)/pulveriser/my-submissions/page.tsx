@@ -193,6 +193,26 @@ export default function MySubmissionsPage() {
                           {JC_STATUS_LABEL[jc.status]}
                         </span>
                       </div>
+                      {/* Timeline */}
+                      {(jc.production_at || jc.oil_issued_at || jc.operator_submitted_at) && (
+                        <div style={{ fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.8, marginTop: 4 }}>
+                          {jc.production_at && (
+                            <div>📋 Sent to Stores:{" "}
+                              <b>{fmtDate(jc.production_at)}</b>
+                            </div>
+                          )}
+                          {jc.oil_issued_at && (
+                            <div>🛢 Oil issued by Stores:{" "}
+                              <b>{fmtDate(jc.oil_issued_at)}</b>
+                            </div>
+                          )}
+                          {jc.operator_submitted_at && (
+                            <div>✅ Submitted for QC:{" "}
+                              <b>{fmtDate(jc.operator_submitted_at)}</b>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {trail.length > 0 && (
                         <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
                           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>

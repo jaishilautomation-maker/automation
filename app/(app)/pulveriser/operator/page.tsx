@@ -515,6 +515,16 @@ export default function PulveriserOperatorPage() {
                   <div className="pi-sub">
                     बैच नंबर: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
                   </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.6 }}>
+                    {jc.production_at && (
+                      <span>📋 Production ने भेजा: {new Date(jc.production_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    )}
+                    {jc.oil_issued_at && (
+                      <span style={{ marginLeft: jc.production_at ? 12 : 0 }}>
+                        🛢 Stores ने तेल दिया: {new Date(jc.oil_issued_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -591,6 +601,27 @@ export default function PulveriserOperatorPage() {
             <b>VFD मानक ({active.party_code}):</b>{" "}
             Classifier {vfdParam.classifier_vfd ?? "—"} · Feeder {vfdParam.feeder_vfd ?? "—"}
           </>
+        )}
+        {(active.production_at || active.oil_issued_at) && (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)",
+            fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.8 }}>
+            {active.production_at && (
+              <div>📋 <b>Production ने भेजा:</b>{" "}
+                {new Date(active.production_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </div>
+            )}
+            {active.oil_issued_at && (
+              <div>🛢 <b>Stores ने तेल दिया:</b>{" "}
+                {new Date(active.oil_issued_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

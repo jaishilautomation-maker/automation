@@ -170,6 +170,15 @@ export default function PulveriserLabPage() {
                   <div className="pi-sub">
                     Batch: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
                   </div>
+                  {jc.operator_submitted_at && (
+                    <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
+                      ✅ Submitted for QC:{" "}
+                      {new Date(jc.operator_submitted_at).toLocaleString("en-IN", {
+                        day: "2-digit", month: "short", year: "numeric",
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -221,6 +230,40 @@ export default function PulveriserLabPage() {
         <F label="Oil Quantity" value={active.oil_quantity} />
         <F label="Planned Production (MT)" value={active.planned_production_mt} />
         <F label="Oil Required (kg)" value={active.oil_required_kg} />
+        {(active.production_at || active.oil_issued_at || active.operator_submitted_at) && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 6 }}>
+              Timeline
+            </div>
+            {active.production_at && (
+              <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                📋 <b>Sent by Production:</b>{" "}
+                {new Date(active.production_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </div>
+            )}
+            {active.oil_issued_at && (
+              <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                🛢 <b>Oil issued by Stores:</b>{" "}
+                {new Date(active.oil_issued_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </div>
+            )}
+            {active.operator_submitted_at && (
+              <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                ✅ <b>Submitted for QC by Operator:</b>{" "}
+                {new Date(active.operator_submitted_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card">

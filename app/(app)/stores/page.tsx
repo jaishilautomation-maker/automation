@@ -257,6 +257,16 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
       <div><b>Batch No. (Material Code):</b> {jc.material_code ?? "N/A"}</div>
       <div><b>Party / CODE:</b> {jc.party_code ?? "N/A"}</div>
       <div><b>Planned Production:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</div>
+      <div><b>Oil Required (auto):</b> {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}</div>
+      {jc.production_at && (
+       <div style={{ gridColumn: "1 / -1", paddingTop: 6, borderTop: "1px solid var(--line)" }}>
+        <b>Sent by Production:</b>{" "}
+        {new Date(jc.production_at).toLocaleString("en-IN", {
+         day: "2-digit", month: "short", year: "numeric",
+         hour: "2-digit", minute: "2-digit",
+        })}
+       </div>
+      )}
       <div>
        <b>Oil Required (auto):</b>{" "}
        <span style={{ fontWeight: 700, color: "var(--clay)" }}>
@@ -592,6 +602,16 @@ function OilIssueSection() {
      <b>Planned:</b> {active.planned_production_mt ?? "N/A"} MT{" "}
      <b>Oil required:</b>{" "}
      {active.oil_required_kg != null ? active.oil_required_kg + " kg" : "NA"}
+     {active.production_at && (
+      <>
+       <br />
+       <b>Sent by Production:</b>{" "}
+       {new Date(active.production_at).toLocaleString("en-IN", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+       })}
+      </>
+     )}
     </div>
 
     <div className="card">
@@ -652,6 +672,14 @@ function OilIssueSection() {
           Batch: {jc.material_code} Party/Code: {jc.party_code ?? "N/A"}{" "}
           Oil required: {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "NA"}
          </div>
+         {jc.production_at && (
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
+           Sent by Production: {new Date(jc.production_at).toLocaleString("en-IN", {
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit",
+           })}
+          </div>
+         )}
         </div>
        ))}
       </div>

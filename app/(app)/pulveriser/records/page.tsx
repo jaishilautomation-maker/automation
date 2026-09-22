@@ -125,6 +125,39 @@ export default function PulveriserRecordsPage() {
                     </span>
                   </div>
 
+                  {/* Timeline — show all "sent at" timestamps for this card */}
+                  {(jc.production_at || jc.oil_issued_at || jc.operator_submitted_at) && (
+                    <div style={{
+                      marginTop: 6, fontSize: 11, color: "var(--ink-soft)",
+                      lineHeight: 1.8, paddingLeft: 2,
+                    }}>
+                      {jc.production_at && (
+                        <div>📋 Production → Stores:{" "}
+                          <b>{new Date(jc.production_at).toLocaleString("en-IN", {
+                            day: "2-digit", month: "short", year: "numeric",
+                            hour: "2-digit", minute: "2-digit",
+                          })}</b>
+                        </div>
+                      )}
+                      {jc.oil_issued_at && (
+                        <div>🛢 Stores → Operator:{" "}
+                          <b>{new Date(jc.oil_issued_at).toLocaleString("en-IN", {
+                            day: "2-digit", month: "short", year: "numeric",
+                            hour: "2-digit", minute: "2-digit",
+                          })}</b>
+                        </div>
+                      )}
+                      {jc.operator_submitted_at && (
+                        <div>✅ Operator → Lab:{" "}
+                          <b>{new Date(jc.operator_submitted_at).toLocaleString("en-IN", {
+                            day: "2-digit", month: "short", year: "numeric",
+                            hour: "2-digit", minute: "2-digit",
+                          })}</b>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {trail.length > 0 && (
                     <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
                       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
