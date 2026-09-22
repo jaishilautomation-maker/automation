@@ -93,8 +93,7 @@ export default function AppNav() {
       ];
     } else if (role === "stores") {
       links = [
-        { href: "/stores",             label: "Stores" },
-        { href: "/pulveriser/records", label: "Job Card Records" },
+        { href: "/stores", label: "Stores" },
       ];
     } else if (role === "production_incharge") {
       links = [

@@ -25,6 +25,7 @@ import {
   parseVfdRange,
   groupByJobNumber,
   type PulveriserJobCard,
+  type PulveriserShutdownLog,
   type VfdParameter,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
@@ -145,6 +146,11 @@ export default function PulveriserOperatorPage() {
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
 
+  // Rejection history for rework banner
+  const [rejectionHistory, setRejectionHistory] = useState<{
+    result: string; remark: string | null; reviewed_at: string; rejected_stage: string | null;
+  }[]>([]);
+
   const loadPending = useCallback(async () => {
     setLoadingList(true);
     const { data, error } = await supabase
@@ -225,9 +231,25 @@ export default function PulveriserOperatorPage() {
       reason:       r.reason      ?? "",
     })) as MachineCloseEntry[];
     setCloseEntries(existingClose.length ? existingClose : [blankCloseEntry()]);
+
+    // Load rejection history to show rework banner if this card was previously rejected
+    setRejectionHistory([]);
+    const { data: reviews } = await supabase
+      .from("pulveriser_job_card_reviews")
+      .select("result, remark, reviewed_at, rejected_stage")
+      .eq("job_card_id", jc.id)
+      .order("reviewed_at", { ascending: false });
+    if (reviews && reviews.length > 0) {
+      setRejectionHistory(reviews as {
+        result: string; remark: string | null; reviewed_at: string; rejected_stage: string | null;
+      }[]);
+    }
   };
 
-  const goBack = () => { setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]); setVfdParam(null); setActualMt(""); };
+  const goBack = () => {
+    setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]);
+    setVfdParam(null); setActualMt(""); setRejectionHistory([]);
+  };
 
   // Classifier VFD mismatch flag — reference only, never blocks submission.
   const classifierRange = useMemo(
@@ -507,6 +529,54 @@ export default function PulveriserOperatorPage() {
   return (
     <>
       <button className="back-link" type="button" onClick={goBack}>← सूची पर वापस जाएँ</button>
+
+      {/* REWORK banner — shown when this card has prior NOT OK reviews */}
+      {rejectionHistory.some(r => r.result === "not_ok") && (() => {
+        const lastReject = rejectionHistory.find(r => r.result === "not_ok");
+        return (
+          <div style={{
+            padding: "12px 16px", borderRadius: 8, marginBottom: 14,
+            background: "var(--warn-soft)",
+            border: "2px solid color-mix(in srgb, var(--warn) 50%, transparent)",
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "var(--warn)", marginBottom: 6 }}>
+              ! REWORK BATCH -- Lab QC ने पहले REJECT किया था
+            </div>
+            {lastReject?.remark && (
+              <div style={{
+                padding: "8px 12px", borderRadius: 6, background: "#fff",
+                border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
+                marginBottom: 6,
+              }}>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
+                  Lab की टिप्पणी ({new Date(lastReject.reviewed_at).toLocaleString("en-IN")}):
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--warn)" }}>
+                  {lastReject.remark}
+                </div>
+              </div>
+            )}
+            {active.stores_incharge_note && (
+              <div style={{
+                padding: "8px 12px", borderRadius: 6, background: "#fff",
+                border: "1px solid color-mix(in srgb, var(--ok) 30%, transparent)",
+              }}>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
+                  Stores का नोट:
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ok)" }}>
+                  {active.stores_incharge_note}
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
+              यह batch पहले reject हुई थी। Stores ने तेल दोबारा जारी किया है।
+              अपने काम में सुधार करें और QC के लिए फिर से submit करें।
+              कुल review cycles: {rejectionHistory.length}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Read-only production + stores reference */}
       <div className="readonly-block">

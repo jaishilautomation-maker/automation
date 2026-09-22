@@ -65,7 +65,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
  packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "job_cards" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "oil" | "job_cards" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "oil_consumption" | "approval" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -102,9 +102,11 @@ export default function StoresPage() {
   { id: "daily_dispatch",  label: "Daily Dispatch" },
   { id: "packing_material", label: "Packing Material" },
   { id: "finished_goods",  label: "Finished Goods" },
-  { id: "ball_mill",    label: "Ball Mill" },
-  { id: "batch_wise",    label: "Batch Wise" },
-  { id: "ledger",      label: "Stock Ledger" },
+  { id: "ball_mill",       label: "Ball Mill" },
+  { id: "batch_wise",      label: "Batch Wise" },
+  { id: "oil_consumption", label: "Oil Consumption" },
+  { id: "approval",        label: "Approved / Rejected" },
+  { id: "ledger",          label: "Stock Ledger" },
   { id: "issue",      label: "Issue Slip" },
   { id: "prn",       label: "PRN" },
   { id: "dispatch",     label: "Dispatch" },
@@ -143,8 +145,10 @@ export default function StoresPage() {
    {tab === "packing_material" && <PackingMaterialSection />}
    {tab === "finished_goods"  && <FinishedGoodsSection />}
    {tab === "ball_mill"    && <BallMillSection />}
-   {tab === "batch_wise"    && <BatchWiseSection />}
-   {tab === "ledger"      && <StockLedgerSection />}
+   {tab === "batch_wise"      && <BatchWiseSection />}
+   {tab === "oil_consumption" && <OilConsumptionSection />}
+   {tab === "approval"       && <ApprovalSection />}
+   {tab === "ledger"          && <StockLedgerSection />}
    {tab === "issue"   && <IssueSlipSection />}
    {tab === "prn"    && <PrnSection />}
    {tab === "dispatch"  && <DispatchSection />}
@@ -443,11 +447,15 @@ function OilIssueSection() {
  const { showToast } = useToast();
  const supabase = createClient();
 
- const [pending, setPending]    = useState<PulveriserJobCard[]>([]);
- const [loading, setLoading]    = useState(true);
- const [active, setActive]     = useState<PulveriserJobCard | null>(null);
- const [oilIssued, setOilIssued]  = useState("");
- const [submitting, setSubmitting] = useState(false);
+ const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
+ const [loading, setLoading]         = useState(true);
+ const [active, setActive]           = useState<PulveriserJobCard | null>(null);
+ const [oilIssued, setOilIssued]     = useState("");
+ const [storesNote, setStoresNote]   = useState("");
+ const [submitting, setSubmitting]   = useState(false);
+ const [rejectionHistory, setRejectionHistory] = useState<{
+  result: string; remark: string | null; reviewed_at: string;
+ }[]>([]);
 
  const loadPending = useCallback(async () => {
   setLoading(true);
@@ -463,10 +471,26 @@ function OilIssueSection() {
 
  useEffect(() => { loadPending(); }, [loadPending]);
 
+ const openCard = async (jc: PulveriserJobCard) => {
+  setActive(jc);
+  setOilIssued(jc.oil_issued_kg?.toString() ?? "");
+  setStoresNote(jc.stores_incharge_note ?? "");
+  setRejectionHistory([]);
+  // Check if this card has prior rejections
+  const { data: reviews } = await supabase
+   .from("pulveriser_job_card_reviews")
+   .select("result, remark, reviewed_at")
+   .eq("job_card_id", jc.id)
+   .order("reviewed_at", { ascending: false });
+  if (reviews && reviews.length > 0) {
+   setRejectionHistory(reviews as { result: string; remark: string | null; reviewed_at: string }[]);
+  }
+ };
+
  const handleIssue = async () => {
   if (!active || !user) return;
   const n = Number(oilIssued);
-  if (!Number.isFinite) {
+  if (!Number.isFinite(n)) {
    showToast("Enter a valid oil quantity.", true); return;
   }
   setSubmitting(true);
@@ -474,10 +498,11 @@ function OilIssueSection() {
    const { data, error } = await supabase
     .from("pulveriser_job_cards")
     .update({
-     oil_issued_kg: n,
-     oil_issued_by: user.id,
-     oil_issued_at: new Date().toISOString(),
-     status: "pending",
+     oil_issued_kg:        n,
+     oil_issued_by:        user.id,
+     oil_issued_at:        new Date().toISOString(),
+     stores_incharge_note: storesNote.trim() || null,
+     status:               "pending",
     })
     .eq("id", active.id).select("id");
    if (error) { showToast("Save failed: " + error.message, true); return; }
@@ -497,20 +522,68 @@ function OilIssueSection() {
     eventType: "pulveriser_stores", subject, html,
     factoryId: active.factory_id, referenceId: active.id,
    });
-   showToast("Oil issued -- operator can now run the batch.");
-   setActive(null); setOilIssued(""); loadPending();
+   const isRework = rejectionHistory.some(r => r.result === "not_ok");
+   showToast(isRework
+    ? "Rework oil re-issued -- operator will see the rejection context."
+    : "Oil issued -- operator can now run the batch.");
+   setActive(null); setOilIssued(""); setStoresNote(""); setRejectionHistory([]);
+   loadPending();
   } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
   } finally { setSubmitting(false); }
  };
+
+ const isReworkCard    = rejectionHistory.some(r => r.result === "not_ok");
+ const lastRejection   = rejectionHistory.find(r => r.result === "not_ok");
 
  if (active) {
   return (
    <>
     <button className="back-link" type="button"
-     onClick={() => { setActive(null); setOilIssued(""); }}>
+     onClick={() => { setActive(null); setOilIssued(""); setStoresNote(""); setRejectionHistory([]); }}>
      Back to list
     </button>
+
+    {/* REWORK banner -- shown if this card was previously rejected by Lab */}
+    {isReworkCard && (
+     <div style={{
+      padding: "12px 16px", borderRadius: 8, marginBottom: 14,
+      background: "var(--warn-soft)",
+      border: "2px solid color-mix(in srgb, var(--warn) 50%, transparent)",
+     }}>
+      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--warn)",
+       marginBottom: 6 }}>
+       ! REWORK BATCH -- Previously Rejected by Lab
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6 }}>
+       This batch was sent back from Lab QC. Review the rejection reason below
+       before re-issuing oil. The operator will see this context on their screen.
+      </div>
+      {lastRejection && (
+       <div style={{
+        padding: "8px 12px", borderRadius: 6,
+        background: "#fff", border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
+       }}>
+        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
+         Lab rejection ({new Date(lastRejection.reviewed_at).toLocaleString("en-IN")}):
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600,
+         color: lastRejection.remark ? "var(--warn)" : "var(--ink-soft)",
+         fontStyle: lastRejection.remark ? "normal" : "italic" }}>
+         {lastRejection.remark ?? "(No reason given by Lab)"}
+        </div>
+       </div>
+      )}
+      {rejectionHistory.length > 1 && (
+       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
+        Total review cycles: {rejectionHistory.length}
+        {" -- "}{rejectionHistory.filter(r => r.result === "not_ok").length} rejection(s),
+        {" "}{rejectionHistory.filter(r => r.result === "ok").length} approval(s)
+       </div>
+      )}
+     </div>
+    )}
+
     <div className="readonly-block">
      <b>{active.machine_number}</b> {fmtDate(active.job_date)} {active.shift ?? "N/A"} shift
      <br />
@@ -520,21 +593,36 @@ function OilIssueSection() {
      <b>Oil required:</b>{" "}
      {active.oil_required_kg != null ? active.oil_required_kg + " kg" : "NA"}
     </div>
+
     <div className="card">
-     <h3>Issue Oil</h3>
+     <h3>{isReworkCard ? "Re-Issue Oil (Rework)" : "Issue Oil"}</h3>
      <label>Oil Issued (kg) *</label>
      <input type="number" min="0" step="0.001" placeholder="0"
       value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
-     <div className="field-hint" style={{ marginTop: 6 }}>
-      Issuing oil will open the card for the operator.
+     <label style={{ marginTop: 12 }}>Stores Incharge Note</label>
+     <input type="text"
+      placeholder={isReworkCard
+       ? "e.g. Re-checked sulphur lot, confirmed batch quality..."
+       : "Optional note for the operator..."}
+      value={storesNote}
+      onChange={e => setStoresNote(e.target.value)} />
+     <div className="field-hint" style={{ marginTop: 4 }}>
+      {isReworkCard
+       ? "This note + the rejection reason will be shown to the operator."
+       : "This note will be visible to the operator."}
      </div>
     </div>
+
     <button className="btn btn-primary" type="button"
-     disabled={submitting || !oilIssued.trim()} onClick={handleIssue}>
-     {submitting ? "Saving..." : "Issue Oil and Send to Operator"}
+     disabled={submitting || !oilIssued.trim()}
+     onClick={handleIssue}
+     style={isReworkCard ? { background: "var(--warn)" } : undefined}>
+     {submitting ? "Saving..."
+      : isReworkCard ? "Re-Issue Oil for Rework Batch"
+      : "Issue Oil and Send to Operator"}
     </button>
    </>
- );
+  );
  }
 
  return (
@@ -555,7 +643,7 @@ function OilIssueSection() {
        </div>
        {group.entries.map((jc, i) => (
         <div className="pending-item" key={jc.id}
-         onClick={() => { setActive(jc); setOilIssued(jc.oil_issued_kg?.toString() ?? ""); }}>
+         onClick={() => openCard(jc)}>
          <div className="pi-top">
           <span>Entry {i + 1} {jc.machine_number} {fmtDate(jc.job_date)}</span>
           <span>{jc.shift ?? "N/A"}</span>
@@ -565,14 +653,13 @@ function OilIssueSection() {
           Oil required: {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "NA"}
          </div>
         </div>
-      ))}
+       ))}
       </div>
-    ))
+     ))
    }
   </div>
-);
+ );
 }
-
 // =============================================================================
 // TAB 2 -- RAW MATERIAL
 // DPR RM-style register matching the Excel RM tab columns exactly.
@@ -4202,6 +4289,665 @@ function BatchWiseSection() {
 }
 
 // =============================================================================
+// OIL CONSUMPTION SECTION
+//
+// Mirrors the Power Oil Citrine M 4150 Consumption Report.
+// Columns:
+//   Date | Tank Qty | Taken From Tank | Add To Tank |
+//   Tank Qty + Drum Qty | Drum No.1...N | Total Consumption
+//
+// Tank Qty + Drum Qty = Tank Qty + sum of all drum quantities
+// Total Consumption   = Taken From Tank
+// Drums start at 11 by default; user can add more dynamically.
+// =============================================================================
+
+const OIL_TYPES = [
+  "ELASTO 541 OIL",
+  "Chem Grind Oil",
+  "Poweroil Sapphire L3060",
+  "Poweroil Citrine L4070",
+  "Gear Oil 320/PARTHAN",
+  "Power Oil Citrine M 4150",
+] as const;
+type OilType = (typeof OIL_TYPES)[number];
+
+interface OilConsumptionEntry {
+  date: string;
+  oil_type: OilType | "";
+  tank_qty: string;
+  taken_from_tank: string;
+  add_to_tank: string;
+  tank_plus_drum_qty: string;  // manual entry
+  drums: string[];
+}
+
+interface SavedOilRow {
+  id: string;
+  date: string;
+  oil_type: string;
+  tank_qty: number;
+  taken_from_tank: number;
+  add_to_tank: number;
+  tank_plus_drum_qty: number;
+  drums: number[];
+  total_consumption: number;
+}
+
+function blankOilEntry(numDrums: number): OilConsumptionEntry {
+  return {
+    date: today(),
+    oil_type: "",
+    tank_qty: "",
+    taken_from_tank: "",
+    add_to_tank: "",
+    tank_plus_drum_qty: "",
+    drums: Array(numDrums).fill(""),
+  };
+}
+
+function OilConsumptionSection() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [entry, setEntry]           = useState<OilConsumptionEntry>(blankOilEntry(11));
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedOilRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+
+  // Computed values
+  const tankQty      = Number(entry.tank_qty) || 0;
+  const taken        = Number(entry.taken_from_tank) || 0;
+  const addToTank    = Number(entry.add_to_tank) || 0;
+  const drumValues   = entry.drums.map(d => Number(d) || 0);
+  const sumDrums     = drumValues.reduce((s, v) => s + v, 0);
+  // tankPlusDrum is manual -- user enters it directly
+  const tankPlusDrum = Number(entry.tank_plus_drum_qty) || 0;
+  const totalConsumption = taken;  // = Taken From Tank per the report
+
+  const setField = (key: keyof Omit<OilConsumptionEntry, "drums">, val: string) =>
+    setEntry(prev => ({ ...prev, [key]: val }));
+
+  const setDrum = (idx: number, val: string) =>
+    setEntry(prev => {
+      const drums = [...prev.drums];
+      drums[idx] = val;
+      return { ...prev, drums };
+    });
+
+  const addDrum = () =>
+    setEntry(prev => ({ ...prev, drums: [...prev.drums, ""] }));
+
+  const removeDrum = (idx: number) => {
+    if (entry.drums.length <= 1) return;
+    setEntry(prev => ({ ...prev, drums: prev.drums.filter((_, i) => i !== idx) }));
+  };
+
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "oil_consumption_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedOilRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<SavedOilRow>;
+        rows.push({
+          id: row.id,
+          date: row.transaction_date,
+          oil_type:           p.oil_type           ?? "",
+          tank_qty:           p.tank_qty            ?? 0,
+          taken_from_tank:    p.taken_from_tank     ?? 0,
+          add_to_tank:        p.add_to_tank         ?? 0,
+          tank_plus_drum_qty: p.tank_plus_drum_qty  ?? 0,
+          drums:              p.drums               ?? [],
+          total_consumption:  p.total_consumption   ?? 0,
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows);
+    // Auto-fill tank_qty from last entry's tank_qty
+    if (rows.length > 0 && !entry.tank_qty) {
+      setEntry(prev => ({ ...prev, tank_qty: String(rows[0].tank_qty) }));
+    }
+    setHistLoading(false);
+  }, [supabase, showToast]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleSave = async () => {
+    if (!entry.date) { showToast("Enter a date.", true); return; }
+    if (!entry.tank_qty.trim()) { showToast("Enter Tank Qty.", true); return; }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: anchor } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 first.", true);
+        setSubmitting(false); return;
+      }
+      const payload: Omit<SavedOilRow, "id"> = {
+        date:               entry.date,
+        oil_type:           entry.oil_type,
+        tank_qty:           tankQty,
+        taken_from_tank:    taken,
+        add_to_tank:        addToTank,
+        tank_plus_drum_qty: tankPlusDrum,
+        drums:              drumValues,
+        total_consumption:  totalConsumption,
+      };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   entry.date,
+        transaction_source: "manual",
+        qty_received:       addToTank,
+        qty_issued:         taken,
+        dispatch_qty:       0,
+        closing_balance:    tankQty,
+        reference_type:     "oil_consumption_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("Oil consumption saved -- " + entry.date + " Total: " + totalConsumption);
+      setEntry(blankOilEntry(entry.drums.length));
+      loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
+
+  // Max drums across all history rows (for table headers)
+  const maxDrums = Math.max(11, ...history.map(r => r.drums.length), entry.drums.length);
+
+  return (
+    <>
+      <div className="card">
+
+        {/* Row 1: Oil Type | Date */}
+        <div className="row2">
+          <div>
+            <label>Oil Type *</label>
+            <select value={entry.oil_type}
+              onChange={e => setField("oil_type", e.target.value)}>
+              <option value="">-- Select oil --</option>
+              {OIL_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Date *</label>
+            <input type="date" value={entry.date}
+              onChange={e => setField("date", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 2: Tank Qty | Taken From Tank | Add To Tank */}
+        <div className="row3">
+          <div>
+            <label>Tank Qty</label>
+            <input type="number" min="0" step="0.001" placeholder="0"
+              value={entry.tank_qty}
+              onChange={e => setField("tank_qty", e.target.value)} />
+          </div>
+          <div>
+            <label>Taken From Tank</label>
+            <input type="number" min="0" step="0.001" placeholder="0"
+              value={entry.taken_from_tank}
+              onChange={e => setField("taken_from_tank", e.target.value)} />
+          </div>
+          <div>
+            <label>Add To Tank</label>
+            <input type="number" min="0" step="0.001" placeholder="0"
+              value={entry.add_to_tank}
+              onChange={e => setField("add_to_tank", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 3: Tank Qty + Drum Qty (manual) */}
+        <div style={{ maxWidth: 280 }}>
+          <label>Tank Qty + Drum Qty (enter manually)</label>
+          <input type="number" min="0" step="0.001" placeholder="0"
+            value={entry.tank_plus_drum_qty}
+            onChange={e => setField("tank_plus_drum_qty", e.target.value)} />
+          <div className="field-hint" style={{ marginTop: 4 }}>
+            Sum of drums for reference: {sumDrums.toFixed(2)}
+          </div>
+        </div>
+
+        {/* Drum quantities */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "center", marginBottom: 8 }}>
+            <label style={{ margin: 0, fontWeight: 700, fontSize: 13,
+              color: "var(--clay)", textTransform: "uppercase" }}>
+              Drum Quantities ({entry.drums.length} drums)
+            </label>
+            <button type="button" className="btn btn-ghost"
+              style={{ width: "auto", padding: "5px 12px", fontSize: 12, marginTop: 0 }}
+              onClick={addDrum}>
+              + Add Drum
+            </button>
+          </div>
+
+          <div style={{ display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+            {entry.drums.map((val, idx) => (
+              <div key={idx} style={{ position: "relative" }}>
+                <label style={{ fontSize: 11 }}>Drum {idx + 1}</label>
+                <input type="number" min="0" step="0.001" placeholder="0"
+                  value={val}
+                  onChange={e => setDrum(idx, e.target.value)}
+                  style={{ paddingRight: entry.drums.length > 1 ? 24 : undefined }} />
+                {entry.drums.length > 1 && (
+                  <button type="button"
+                    onClick={() => removeDrum(idx)}
+                    style={{
+                      position: "absolute", right: 4, top: 28,
+                      background: "none", border: "none",
+                      color: "var(--warn)", cursor: "pointer",
+                      fontSize: 14, fontWeight: 700, lineHeight: 1,
+                    }}>
+                    x
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Drum sum */}
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-soft)" }}>
+            Sum of all drums: <b style={{ color: "var(--ink)" }}>{sumDrums.toFixed(2)}</b>
+          </div>
+        </div>
+
+        {/* Total Consumption summary */}
+        <div style={{
+          marginTop: 14, padding: "12px 16px",
+          background: "var(--clay-soft)", borderRadius: 8,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>Total Consumption</span>
+          <span style={{ fontWeight: 700, fontSize: 20, color: "var(--clay)" }}>
+            {totalConsumption.toFixed(2)}
+          </span>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting} onClick={handleSave}>
+        {submitting ? "Saving..." : "Save Oil Consumption Entry"}
+      </button>
+
+      {/* History table */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Oil Consumption History</h3>
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : history.length === 0
+            ? <div className="empty">No entries yet.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 900 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Oil Type</th>
+                      <th style={{ textAlign: "right" }}>Tank Qty</th>
+                      <th style={{ textAlign: "right" }}>Taken From Tank</th>
+                      <th style={{ textAlign: "right" }}>Add To Tank</th>
+                      <th style={{ textAlign: "right" }}>Tank+Drum Qty</th>
+                      {Array.from({ length: maxDrums }, (_, i) => (
+                        <th key={i} style={{ textAlign: "right", fontSize: 10 }}>
+                          Drum {i + 1}
+                        </th>
+                      ))}
+                      <th style={{ textAlign: "right", color: "var(--clay)" }}>
+                        Total Consumption
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+                        <td style={{ fontSize: 12, fontWeight: 600,
+                          color: "var(--clay)" }}>
+                          {nilText(row.oil_type)}
+                        </td>
+                        <td style={{ textAlign: "right" }}>{row.tank_qty.toFixed(2)}</td>
+                        <td style={{ textAlign: "right",
+                          color: row.taken_from_tank > 0 ? "var(--warn)" : undefined }}>
+                          {row.taken_from_tank > 0 ? row.taken_from_tank.toFixed(2) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right",
+                          color: row.add_to_tank > 0 ? "var(--ok)" : undefined }}>
+                          {row.add_to_tank > 0 ? row.add_to_tank.toFixed(2) : "0"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 600 }}>
+                          {row.tank_plus_drum_qty.toFixed(2)}
+                        </td>
+                        {Array.from({ length: maxDrums }, (_, i) => (
+                          <td key={i} style={{ textAlign: "right", fontSize: 12 }}>
+                            {row.drums[i] != null && row.drums[i] > 0
+                              ? row.drums[i]
+                              : <span style={{ color: "var(--line)" }}>0</span>}
+                          </td>
+                        ))}
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                          color: "var(--clay)" }}>
+                          {row.total_consumption.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
+}
+
+// =============================================================================
+// APPROVED / REJECTED SECTION
+//
+// Read-only view of ALL QC decisions made by chemists/lab — auto-populated
+// from two sources:
+//
+//   1. pulveriser_job_card_reviews  (result = 'ok' | 'not_ok')
+//      The chemist clicks OK or NOT OK on a submitted job card.
+//      Stores sees this as Approved / Rejected with full batch context.
+//
+//   2. product_qc  (overall_result = 'pass' | 'fail')
+//      Product QC results set by the DB trigger fn_evaluate_product_qc.
+//
+// Stores CANNOT edit anything here — this is purely a live feed of what
+// the chemist decided. The manual entry form has been removed.
+// =============================================================================
+
+interface QcDecisionRow {
+  id: string;
+  decided_at: string;
+  source: "Job Card QC" | "Product QC";
+  decision: "Approved" | "Rejected";
+  product_batch: string;
+  details: string;
+  remark: string | null;
+  reviewed_by_name?: string;
+}
+
+function ApprovalSection() {
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [rows, setRows]           = useState<QcDecisionRow[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [filter, setFilter]       = useState<"All" | "Approved" | "Rejected">("All");
+  const [search, setSearch]       = useState("");
+  const [days, setDays]           = useState<30 | 60 | 90>(30);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const collected: QcDecisionRow[] = [];
+
+    // ── Source 1: pulveriser_job_card_reviews ───────────────────────────────
+    const { data: reviews, error: revErr } = await supabase
+      .from("pulveriser_job_card_reviews")
+      .select(`
+        id, result, remark, reviewed_at,
+        pulveriser_job_cards (
+          job_number, material_code, party_code,
+          actual_production_mt, planned_production_mt, job_date, machine_number
+        )
+      `)
+      .gte("reviewed_at", since)
+      .order("reviewed_at", { ascending: false })
+      .limit(200);
+
+    if (revErr) {
+      showToast("Could not load job card reviews: " + revErr.message, true);
+    } else {
+      for (const r of (reviews ?? []) as Record<string, unknown>[]) {
+        const jc = r.pulveriser_job_cards as Record<string, unknown> | null;
+        collected.push({
+          id:         r.id as string,
+          decided_at: r.reviewed_at as string,
+          source:     "Job Card QC",
+          decision:   r.result === "ok" ? "Approved" : "Rejected",
+          product_batch: [
+            jc?.material_code ?? "N/A",
+            jc?.party_code ? "(" + jc.party_code + ")" : "",
+            jc?.job_number ? "Job: " + jc.job_number : "",
+          ].filter(Boolean).join(" "),
+          details: [
+            jc?.machine_number ? "Machine: " + jc.machine_number : "",
+            jc?.job_date ? "Date: " + fmtDate(jc.job_date as string) : "",
+            jc?.actual_production_mt
+              ? "Actual: " + jc.actual_production_mt + " MT"
+              : jc?.planned_production_mt
+                ? "Planned: " + jc.planned_production_mt + " MT"
+                : "",
+          ].filter(Boolean).join(" | "),
+          remark: r.remark as string | null,
+        });
+      }
+    }
+
+    // ── Source 2: product_qc (overall_result) ────────────────────────────────
+    const { data: pqc, error: pqcErr } = await supabase
+      .from("product_qc")
+      .select(`
+        id, overall_result, remarks, submitted_at, test_date, phase,
+        batches ( batch_number, lot_number, production_date ),
+        products ( name )
+      `)
+      .in("overall_result", ["pass", "fail"])
+      .gte("submitted_at", since)
+      .order("submitted_at", { ascending: false })
+      .limit(200);
+
+    if (pqcErr) {
+      showToast("Could not load product QC: " + pqcErr.message, true);
+    } else {
+      for (const r of (pqc ?? []) as Record<string, unknown>[]) {
+        const batch   = r.batches   as Record<string, unknown> | null;
+        const product = r.products  as Record<string, unknown> | null;
+        collected.push({
+          id:         r.id as string + "_pqc",
+          decided_at: r.submitted_at as string,
+          source:     "Product QC",
+          decision:   r.overall_result === "pass" ? "Approved" : "Rejected",
+          product_batch: [
+            product?.name ?? "Product",
+            batch?.batch_number ? "Batch: " + batch.batch_number : "",
+            batch?.lot_number   ? "Lot: "   + batch.lot_number   : "",
+          ].filter(Boolean).join(" | "),
+          details: [
+            "Phase: " + (r.phase ?? "none"),
+            "Test date: " + fmtDate(r.test_date as string),
+            batch?.production_date ? "Prod: " + fmtDate(batch.production_date as string) : "",
+          ].filter(Boolean).join(" | "),
+          remark: r.remarks as string | null,
+        });
+      }
+    }
+
+    // Sort combined list newest first
+    collected.sort((a, b) => b.decided_at.localeCompare(a.decided_at));
+    setRows(collected);
+    setLoading(false);
+  }, [supabase, showToast, days]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const approvedCount = rows.filter(r => r.decision === "Approved").length;
+  const rejectedCount = rows.filter(r => r.decision === "Rejected").length;
+
+  const filtered = rows.filter(r => {
+    const matchDecision = filter === "All" || r.decision === filter;
+    const matchSearch   = search.trim() === "" ||
+      r.product_batch.toLowerCase().includes(search.toLowerCase()) ||
+      r.details.toLowerCase().includes(search.toLowerCase());
+    return matchDecision && matchSearch;
+  });
+
+  return (
+    <>
+      {/* Summary badges */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{
+          flex: 1, padding: "12px 16px", borderRadius: 8, textAlign: "center",
+          background: "var(--ok-soft)",
+          border: "1px solid color-mix(in srgb, var(--ok) 30%, transparent)",
+        }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--ok)" }}>
+            {approvedCount}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ok)", fontWeight: 600 }}>Approved</div>
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
+            Last {days} days
+          </div>
+        </div>
+        <div style={{
+          flex: 1, padding: "12px 16px", borderRadius: 8, textAlign: "center",
+          background: "var(--warn-soft)",
+          border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
+        }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--warn)" }}>
+            {rejectedCount}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>Rejected</div>
+          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
+            Last {days} days
+          </div>
+        </div>
+      </div>
+
+      {/* Info banner */}
+      <div style={{
+        padding: "10px 14px", borderRadius: 8, marginBottom: 14,
+        background: "var(--clay-soft)", fontSize: 12, color: "var(--ink-soft)",
+      }}>
+        This view is automatically updated from chemist QC decisions.
+        Approved = Lab marked OK / Product QC passed.
+        Rejected = Lab marked NOT OK / Product QC failed.
+        You cannot edit these entries here.
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12,
+        alignItems: "center" }}>
+        <input type="text" placeholder="Search batch / product..."
+          value={search} onChange={e => setSearch(e.target.value)}
+          style={{ padding: "7px 10px", fontSize: 12,
+            border: "1px solid var(--line)", borderRadius: 6, width: 200 }} />
+
+        <div className="chip-group" style={{ margin: 0 }}>
+          {(["All", "Approved", "Rejected"] as const).map(f => (
+            <button key={f} type="button"
+              className={"chip" + (filter === f ? " selected" : "")}
+              onClick={() => setFilter(f)}
+              style={filter === f ? {
+                background: f === "Approved" ? "var(--ok)"
+                  : f === "Rejected" ? "var(--warn)"
+                  : "var(--clay)",
+                borderColor: "transparent",
+              } : {}}>
+              {f}
+            </button>
+          ))}
+        </div>
+
+        <select value={days}
+          onChange={e => setDays(Number(e.target.value) as 30 | 60 | 90)}
+          style={{ padding: "7px 10px", fontSize: 12,
+            border: "1px solid var(--line)", borderRadius: 6 }}>
+          <option value={30}>Last 30 days</option>
+          <option value={60}>Last 60 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+
+        <button type="button" className="btn btn-ghost"
+          style={{ width: "auto", padding: "7px 14px", marginTop: 0, fontSize: 12 }}
+          onClick={load}>
+          Refresh
+        </button>
+      </div>
+
+      {/* Results */}
+      {loading ? <div className="empty">Loading QC decisions...</div>
+        : filtered.length === 0
+          ? <div className="empty">No {filter !== "All" ? filter.toLowerCase() + " " : ""}QC decisions in the last {days} days.</div>
+          : filtered.map(row => (
+            <div key={row.id} style={{
+              border: "2px solid",
+              borderColor: row.decision === "Approved"
+                ? "color-mix(in srgb, var(--ok) 40%, transparent)"
+                : "color-mix(in srgb, var(--warn) 40%, transparent)",
+              borderRadius: 10, padding: "12px 14px", marginBottom: 10,
+              background: row.decision === "Approved" ? "var(--ok-soft)" : "var(--warn-soft)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between",
+                alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <span style={{
+                      fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 12,
+                      background: row.decision === "Approved" ? "var(--ok)" : "var(--warn)",
+                      color: "#fff",
+                    }}>
+                      {row.decision === "Approved" ? "APPROVED" : "REJECTED"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--ink-soft)",
+                      background: "#fff", padding: "2px 8px", borderRadius: 10,
+                      border: "1px solid var(--line)" }}>
+                      {row.source}
+                    </span>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+                    {row.product_batch}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                    {row.details}
+                  </div>
+                  {row.remark && (
+                    <div style={{ marginTop: 6, fontSize: 12, padding: "4px 8px",
+                      background: "#fff", borderRadius: 6,
+                      color: row.decision === "Rejected" ? "var(--warn)" : "var(--ok)",
+                      fontStyle: "italic" }}>
+                      "{row.remark}"
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign: "right", fontSize: 11,
+                  color: "var(--ink-soft)", whiteSpace: "nowrap", marginLeft: 12 }}>
+                  {new Date(row.decided_at).toLocaleDateString("en-IN", {
+                    day: "2-digit", month: "short", year: "numeric",
+                  })}
+                  <br />
+                  {new Date(row.decided_at).toLocaleTimeString("en-IN", {
+                    hour: "2-digit", minute: "2-digit",
+                  })}
+                </div>
+              </div>
+            </div>
+          ))
+      }
+    </>
+  );
+}
+
+// =============================================================================
 // TAB 4 -- STOCK LEDGER
 // =============================================================================
 function StockLedgerSection() {
@@ -4697,269 +5443,378 @@ function IssueSlipSection() {
 
 // =============================================================================
 // TAB 5 -- PRN
+// Columns matching the DPR PRN Status sheet:
+//   PRN Date | Item Description | Bifurcation | Requirements | Qty |
+//   Current Stock | Plant | Remark | Supplier Name |
+//   PO No. | PO Date | PO Qty | Nos./Kgs | Invoice No.
 // =============================================================================
+
+const BIFURCATION_OPTIONS = [
+  "HDPE JAR", "HDPE Bottle", "HDPE Caps", "Label", "Leaflet",
+  "Raw Material", "Packaging Material", "Finished Good", "Other",
+] as const;
+
+const PLANT_PRN_OPTIONS = ["A20", "A20/1", "A20 & A20/1"] as const;
+
+interface PrnEntry {
+  prn_date: string;
+  item_description: string;
+  bifurcation: string;
+  requirements: string;
+  qty: string;
+  current_stock: string;
+  plant: string;
+  remark: string;
+  supplier_name: string;
+  po_no: string;
+  po_date: string;
+  po_qty: string;
+  nos_kgs: string;
+  invoice_no: string;
+}
+
+interface SavedPrnRow extends PrnEntry {
+  id: string;
+}
+
+function blankPrnEntry(): PrnEntry {
+  return {
+    prn_date: today(),
+    item_description: "",
+    bifurcation: "",
+    requirements: "",
+    qty: "",
+    current_stock: "",
+    plant: "",
+    remark: "",
+    supplier_name: "",
+    po_no: "",
+    po_date: "",
+    po_qty: "",
+    nos_kgs: "",
+    invoice_no: "",
+  };
+}
+
 function PrnSection() {
- const { user } = useAuth();
- const { showToast } = useToast();
- const supabase = createClient();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const supabase = createClient();
 
- type PrnView = "list" | "create" | "detail";
- const [view, setView]        = useState<PrnView>("list");
- const [prns, setPrns]        = useState<(PurchaseRequisition & { item_name?: string })[]>([]);
- const [loading, setLoading]     = useState(true);
- const [filterStatus, setFilterStatus] = useState<"open" | "all">("open");
- const [activePrn, setActivePrn]   = useState<(PurchaseRequisition & { item_name?: string }) | null>(null);
- const [items, setItems]       = useState<StoresStockItem[]>([]);
- const [selectedItemId, setSelectedItemId] = useState("");
- const [poQty, setPoQty]       = useState("");
- const [supplier, setSupplier]    = useState("");
- const [requiredBy, setRequiredBy]  = useState("");
- const [reason, setReason]      = useState("");
- const [submitting, setSubmitting]  = useState(false);
- const [receiveQty, setReceiveQty]  = useState("");
+  const [entry, setEntry]           = useState<PrnEntry>(blankPrnEntry());
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory]       = useState<SavedPrnRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [filterBif, setFilterBif]   = useState<string>("ALL");
+  const [search, setSearch]         = useState("");
 
- const loadPrns = useCallback(async () => {
-  setLoading(true);
-  let q = supabase.from("purchase_requisitions")
-   .select("*, stores_stock_items(item_name)")
-   .order("raised_at", { ascending: false });
-  if (filterStatus === "open") q = q.in("status", OPEN_PRN_STATUSES);
-  const { data, error } = await q;
-  if (error) showToast("Could not load PRNs: " + error.message, true);
-  else setPrns((data ?? []).map((r: Record<string, unknown>) => ({
-   ...r,
-   item_name: (r.stores_stock_items as { item_name: string } | null)?.item_name,
-  })) as (PurchaseRequisition & { item_name?: string })[]);
-  setLoading(false);
- }, [supabase, showToast, filterStatus]);
+  const setField = (k: keyof PrnEntry, v: string) =>
+    setEntry(prev => ({ ...prev, [k]: v }));
 
- const loadItems = useCallback(async () => {
-  const { data } = await supabase.from("stores_stock_items").select("*")
-   .eq("is_active", true).order("category").order("item_name");
-  setItems((data ?? []) as StoresStockItem[]);
- }, [supabase]);
+  const loadHistory = useCallback(async () => {
+    setHistLoading(true);
+    const { data, error } = await supabase
+      .from("stores_stock_ledger")
+      .select("id, transaction_date, remark")
+      .eq("reference_type", "prn_entry")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
+    const rows: SavedPrnRow[] = [];
+    for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+      try {
+        const p = JSON.parse(row.remark ?? "{}") as Partial<PrnEntry>;
+        rows.push({
+          id: row.id,
+          prn_date:         p.prn_date         ?? row.transaction_date,
+          item_description: p.item_description ?? "",
+          bifurcation:      p.bifurcation      ?? "",
+          requirements:     p.requirements     ?? "",
+          qty:              p.qty              ?? "",
+          current_stock:    p.current_stock    ?? "",
+          plant:            p.plant            ?? "",
+          remark:           p.remark           ?? "",
+          supplier_name:    p.supplier_name    ?? "",
+          po_no:            p.po_no            ?? "",
+          po_date:          p.po_date          ?? "",
+          po_qty:           p.po_qty           ?? "",
+          nos_kgs:          p.nos_kgs          ?? "",
+          invoice_no:       p.invoice_no       ?? "",
+        });
+      } catch { /* skip */ }
+    }
+    setHistory(rows); setHistLoading(false);
+  }, [supabase, showToast]);
 
- useEffect(() => { loadPrns(); }, [loadPrns]);
- useEffect(() => { if (view === "create") loadItems(); }, [view, loadItems]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- const handleCreate = async () => {
-  if (!selectedItemId || !user) { showToast("Select an item.", true); return; }
-  setSubmitting(true);
-  try {
-   const prnNum = "PRN-" + new Date().toISOString().slice(0,10).replace(/-/g,"") +
-    "-" + String(Math.floor(Math.random() * 9000 + 1000));
-   const { error } = await supabase.from("purchase_requisitions").insert({
-    item_id: selectedItemId, prn_number: prnNum, status: "draft",
-    po_qty: poQty.trim() ? Number(poQty) : null, received_qty: 0,
-    preferred_supplier: supplier.trim() || null,
-    required_by_date: requiredBy || null,
-    reason: reason.trim() || null,
-    raised_by: user.id, raised_at: new Date().toISOString(),
-   });
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   showToast("PRN " + prnNum + " created.");
-   setSelectedItemId(""); setPoQty(""); setSupplier(""); setRequiredBy(""); setReason("");
-   setView("list"); loadPrns();
-  } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
-  } finally { setSubmitting(false); }
- };
+  const handleSave = async () => {
+    if (!entry.item_description.trim()) {
+      showToast("Enter Item Description.", true); return;
+    }
+    if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: anchor } = await supabase
+        .from("stores_stock_items").select("id, factory_id")
+        .eq("is_active", true).limit(1).maybeSingle();
+      if (!anchor) {
+        showToast("No stock items found. Run migration 027 first.", true);
+        setSubmitting(false); return;
+      }
+      const payload: PrnEntry = { ...entry };
+      const { error } = await supabase.from("stores_stock_ledger").insert({
+        item_id:            anchor.id,
+        factory_id:         anchor.factory_id,
+        transaction_date:   entry.prn_date || today(),
+        transaction_source: "manual",
+        qty_received:       0,
+        qty_issued:         0,
+        dispatch_qty:       0,
+        closing_balance:    0,
+        reference_type:     "prn_entry",
+        remark:             JSON.stringify(payload),
+        entered_by:         user.id,
+      });
+      if (error) { showToast("Save failed: " + error.message, true); return; }
+      showToast("PRN saved -- " + entry.item_description);
+      setEntry(blankPrnEntry()); loadHistory();
+    } catch (e: unknown) {
+      showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+    } finally { setSubmitting(false); }
+  };
 
- const handleUpdateReceived = async () => {
-  if (!activePrn || !receiveQty.trim()) return;
-  const addQty = Number(receiveQty);
-  if (!Number.isFinite(addQty) || addQty <= 0) {
-   showToast("Enter a valid quantity.", true); return;
-  }
-  const newReceived = (activePrn.received_qty ?? 0) + addQty;
-  const newStatus: PrnStatus =
-   (activePrn.po_qty ?? 0) > 0 && newReceived >= (activePrn.po_qty ?? 0)
-    ? "fulfilled" : "partial";
-  setSubmitting(true);
-  try {
-   const { error } = await supabase.from("purchase_requisitions")
-    .update({ received_qty: newReceived, status: newStatus })
-    .eq("id", activePrn.id);
-   if (error) { showToast("Update failed: " + error.message, true); return; }
-   showToast("Received qty updated -- total " + newReceived + " (" + newStatus + ")");
-   setReceiveQty("");
-   setActivePrn({ ...activePrn, received_qty: newReceived, status: newStatus });
-   loadPrns();
-  } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
-  } finally { setSubmitting(false); }
- };
+  // Filter history
+  const filtered = history.filter(r => {
+    const matchBif  = filterBif === "ALL" || r.bifurcation === filterBif;
+    const matchSearch = search.trim() === "" ||
+      r.item_description.toLowerCase().includes(search.toLowerCase()) ||
+      r.supplier_name.toLowerCase().includes(search.toLowerCase()) ||
+      r.po_no.toLowerCase().includes(search.toLowerCase());
+    return matchBif && matchSearch;
+  });
 
- if (view === "detail" && activePrn) {
-  const pending = activePrn.po_qty != null
-   ? activePrn.po_qty - (activePrn.received_qty ?? 0)
-   : null;
   return (
-   <>
-    <button className="back-link" type="button"
-     onClick={() => { setView("list"); setActivePrn(null); setReceiveQty(""); }}>
-     Back to PRN List
-    </button>
-    <div className="card">
-     <h3>PRN Detail</h3>
-     <div style={{ fontSize: 13, lineHeight: 2 }}>
-      <b>PRN No.:</b> {activePrn.prn_number ?? "N/A"}<br />
-      <b>Item:</b> {activePrn.item_name ?? activePrn.item_id.slice(0,8)}<br />
-      <b>Status:</b>{" "}
-      <span style={{ fontWeight: 700,
-       color: activePrn.status === "auto_flagged" ? "var(--warn)" : "var(--ok)" }}>
-       {PRN_STATUS_LABEL[activePrn.status]}
-      </span><br />
-      <b>PO Qty:</b> {activePrn.po_qty ?? "N/A"}{" "}
-      <b>Received:</b> {activePrn.received_qty ?? 0}<br />
-      <b>Pending:</b>{" "}
-      <span style={{ fontWeight: 700,
-       color: (pending ?? 0) > 0 ? "var(--warn)" : "var(--ok)" }}>
-       {pending ?? "N/A"}
-      </span><br />
-      <b>Supplier:</b> {activePrn.preferred_supplier ?? "N/A"}{" "}
-      <b>Required by:</b> {fmtDate(activePrn.required_by_date)}<br />
-      <b>Reason:</b> {activePrn.reason ?? "N/A"}<br />
-      {activePrn.auto_flagged_balance != null &&
-       <><b>Auto-flagged balance:</b> {activePrn.auto_flagged_balance}<br /></>}
-      <b>Raised:</b> {fmtDate(activePrn.raised_at)}
-     </div>
-    </div>
-    {!["fulfilled","cancelled"].includes(activePrn.status) && (
-     <div className="card">
-      <h3>Record Delivery</h3>
-      <label>Qty received in this delivery</label>
-      <input type="number" min="0.001" step="0.001" placeholder="0"
-       value={receiveQty} onChange={e => setReceiveQty(e.target.value)} />
-      <div className="field-hint">
-       Received so far: {activePrn.received_qty ?? 0}{" "}
-       Pending: {pending ?? "N/A"}
-      </div>
-      <button className="btn btn-primary" type="button" style={{ marginTop: 10 }}
-       disabled={submitting || !receiveQty.trim()}
-       onClick={handleUpdateReceived}>
-       {submitting ? "Updating..." : "Update Received Qty"}
-      </button>
-     </div>
-   )}
-    {!["fulfilled","cancelled"].includes(activePrn.status) && (
-     <button className="btn btn-ghost" type="button"
-      style={{ color: "var(--warn)", marginTop: 4 }}
-      onClick={async () => {
-       if (!confirm("Cancel PRN " + (activePrn.prn_number ?? "") + "?")) return;
-       await supabase.from("purchase_requisitions")
-        .update({ status: "cancelled" }).eq("id", activePrn.id);
-       showToast("PRN cancelled.");
-       setView("list"); loadPrns();
-      }}>
-      Cancel PRN
-     </button>
-   )}
-   </>
- );
- }
+    <>
+      {/* ── Entry form ── */}
+      <div className="card">
+        <h3>New PRN Entry</h3>
 
- if (view === "create") {
-  return (
-   <>
-    <button className="back-link" type="button" onClick={() => setView("list")}>
-     Back to PRN List
-    </button>
-    <div className="card">
-     <h3>Create New PRN</h3>
-     <label>Item *</label>
-     <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)}>
-      <option value="">-- Select item --</option>
-      {(["raw_material","packaging_material","finished_good"] as StockItemCategory[]).map(cat => (
-       <optgroup key={cat} label={CATEGORY_LABEL[cat]}>
-        {items.filter(i => i.category === cat).map(item => (
-         <option key={item.id} value={item.id}>{item.item_name} ({item.item_code})</option>
-       ))}
-       </optgroup>
-     ))}
-     </select>
-     <div className="row2">
-      <div>
-       <label>PO Qty (optional)</label>
-       <input type="number" min="0" step="1" placeholder="0"
-        value={poQty} onChange={e => setPoQty(e.target.value)} />
-      </div>
-      <div>
-       <label>Required by</label>
-       <input type="date" value={requiredBy} onChange={e => setRequiredBy(e.target.value)} />
-      </div>
-     </div>
-     <label>Preferred Supplier</label>
-     <input type="text" placeholder="Supplier name..."
-      value={supplier} onChange={e => setSupplier(e.target.value)} />
-     <label>Reason / Note</label>
-     <textarea rows={2} placeholder="Why is this needed..."
-      value={reason} onChange={e => setReason(e.target.value)} />
-    </div>
-    <button className="btn btn-primary" type="button"
-     disabled={submitting || !selectedItemId} onClick={handleCreate}>
-     {submitting ? "Saving..." : "Create PRN"}
-    </button>
-   </>
- );
- }
+        {/* Row 1: PRN Date | Item Description | Bifurcation */}
+        <div className="row3">
+          <div>
+            <label>PRN Date *</label>
+            <input type="date" value={entry.prn_date}
+              onChange={e => setField("prn_date", e.target.value)} />
+          </div>
+          <div>
+            <label>Item Description *</label>
+            <input type="text" placeholder="e.g. HDPE Empty Jar for ziddi 1 kg"
+              value={entry.item_description}
+              onChange={e => setField("item_description", e.target.value)} />
+          </div>
+          <div>
+            <label>Bifurcation</label>
+            <select value={entry.bifurcation}
+              onChange={e => setField("bifurcation", e.target.value)}>
+              <option value="">-- Select --</option>
+              {BIFURCATION_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+        </div>
 
- return (
-  <>
-   <div style={{ display: "flex", justifyContent: "space-between",
-    alignItems: "center", marginBottom: 12 }}>
-    <div className="chip-group" style={{ margin: 0 }}>
-     {(["open","all"] as const).map(f => (
-      <button key={f} type="button"
-       className={"chip" + (filterStatus === f ? " selected" : "")}
-       onClick={() => setFilterStatus}>
-       {f === "open" ? "Open" : "All"}
+        {/* Row 2: Requirements | Qty | Current Stock | Plant */}
+        <div className="row2">
+          <div>
+            <label>Requirements</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.requirements}
+              onChange={e => setField("requirements", e.target.value)} />
+          </div>
+          <div>
+            <label>Qty</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.qty}
+              onChange={e => setField("qty", e.target.value)} />
+          </div>
+        </div>
+
+        <div className="row2">
+          <div>
+            <label>Current Stock</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.current_stock}
+              onChange={e => setField("current_stock", e.target.value)} />
+          </div>
+          <div>
+            <label>Plant</label>
+            <select value={entry.plant}
+              onChange={e => setField("plant", e.target.value)}>
+              <option value="">-- Select --</option>
+              {PLANT_PRN_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 3: Remark */}
+        <div>
+          <label>Remark</label>
+          <input type="text" placeholder="e.g. Arrange PO"
+            value={entry.remark}
+            onChange={e => setField("remark", e.target.value)} />
+        </div>
+
+        {/* Separator */}
+        <div style={{ borderTop: "1px solid var(--line)", margin: "14px 0 10px",
+          fontSize: 11, fontWeight: 700, color: "var(--clay)",
+          textTransform: "uppercase", paddingTop: 10 }}>
+          Supplier / PO Details (fill when PO is raised)
+        </div>
+
+        {/* Row 4: Supplier Name | PO No. | PO Date */}
+        <div className="row3">
+          <div>
+            <label>Supplier Name</label>
+            <input type="text" placeholder="e.g. Makers Plastopack Production Company"
+              value={entry.supplier_name}
+              onChange={e => setField("supplier_name", e.target.value)} />
+          </div>
+          <div>
+            <label>PO No.</label>
+            <input type="text" placeholder="e.g. 286/26-27"
+              value={entry.po_no}
+              onChange={e => setField("po_no", e.target.value)} />
+          </div>
+          <div>
+            <label>PO Date</label>
+            <input type="date" value={entry.po_date}
+              onChange={e => setField("po_date", e.target.value)} />
+          </div>
+        </div>
+
+        {/* Row 5: PO Qty | Nos./Kgs | Invoice No. */}
+        <div className="row3">
+          <div>
+            <label>PO Qty</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={entry.po_qty}
+              onChange={e => setField("po_qty", e.target.value)} />
+          </div>
+          <div>
+            <label>Nos./Kgs</label>
+            <input type="text" placeholder="e.g. nos / kgs"
+              value={entry.nos_kgs}
+              onChange={e => setField("nos_kgs", e.target.value)} />
+          </div>
+          <div>
+            <label>Invoice No.</label>
+            <input type="text" placeholder="e.g. INV-001"
+              value={entry.invoice_no}
+              onChange={e => setField("invoice_no", e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary" type="button"
+        disabled={submitting || !entry.item_description.trim()}
+        onClick={handleSave}>
+        {submitting ? "Saving..." : "Save PRN Entry"}
       </button>
-    ))}
-    </div>
-    <button type="button" className="btn btn-secondary"
-     style={{ width: "auto", padding: "8px 16px", marginTop: 0 }}
-     onClick={() => setView("create")}>
-     + New PRN
-    </button>
-   </div>
-   {loading
-    ? <div className="empty">Loading...</div>
-    : prns.length === 0
-     ? <div className="empty">No PRNs found.</div>
-     : prns.map(prn => {
-      const pending = prn.po_qty != null
-       ? prn.po_qty - (prn.received_qty ?? 0)
-       : null;
-      return (
-       <div key={prn.id} className="pending-item"
-        onClick={() => { setActivePrn(prn); setView("detail"); }}>
-        <div className="pi-top">
-         <span>{prn.item_name ?? prn.item_id.slice(0,8)}</span>
-         <span style={{ fontSize: 11, fontWeight: 700,
-          color: prn.status === "auto_flagged" ? "var(--warn)"
-           : prn.status === "fulfilled" ? "var(--ok)"
-           : "var(--ink-soft)" }}>
-          {PRN_STATUS_LABEL[prn.status]}
-         </span>
+
+      {/* ── History table ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="helper-row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>PRN History</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* Search */}
+            <input type="text" placeholder="Search item / supplier / PO..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ padding: "6px 10px", fontSize: 12,
+                border: "1px solid var(--line)", borderRadius: 6, width: 220 }} />
+            {/* Bifurcation filter */}
+            <select value={filterBif}
+              onChange={e => setFilterBif(e.target.value)}
+              style={{ padding: "6px 10px", fontSize: 12,
+                border: "1px solid var(--line)", borderRadius: 6 }}>
+              <option value="ALL">All Bifurcations</option>
+              {BIFURCATION_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
         </div>
-        <div className="pi-sub">
-         {prn.prn_number ?? "N/A"} PO: {prn.po_qty ?? "?"}{" "}
-         Received: {prn.received_qty ?? 0}
-         {pending != null
-          ? <b style={{ color: pending > 0 ? "var(--warn)" : "var(--ok)",
-            marginLeft: 4 }}>
-            Pending: {pending}
-           </b>
-          : null}
-         {prn.preferred_supplier ? " " + prn.preferred_supplier : ""}
-        </div>
-       </div>
-     );
-     })
-   }
-  </>
-);
+
+        {histLoading
+          ? <div className="empty">Loading...</div>
+          : filtered.length === 0
+            ? <div className="empty">No PRN entries found.</div>
+            : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="dash" style={{ minWidth: 1200 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ whiteSpace: "nowrap" }}>PRN Date</th>
+                      <th>Item Description</th>
+                      <th>Bifurcation</th>
+                      <th style={{ textAlign: "right" }}>Requirements</th>
+                      <th style={{ textAlign: "right" }}>Qty</th>
+                      <th style={{ textAlign: "right" }}>Current Stock</th>
+                      <th>Plant</th>
+                      <th>Remark</th>
+                      <th>Supplier Name</th>
+                      <th>PO No.</th>
+                      <th style={{ whiteSpace: "nowrap" }}>PO Date</th>
+                      <th style={{ textAlign: "right" }}>PO Qty</th>
+                      <th>Nos./Kgs</th>
+                      <th>Invoice No.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.prn_date)}</td>
+                        <td style={{ fontSize: 12, maxWidth: 180, whiteSpace: "normal",
+                          fontWeight: 600 }}>
+                          {nilText(row.item_description)}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.bifurcation)}</td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>
+                          {row.requirements || "N/A"}
+                        </td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>
+                          {row.qty || "N/A"}
+                        </td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>
+                          {row.current_stock || "N/A"}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.plant)}</td>
+                        <td style={{ fontSize: 12, color: "var(--clay)" }}>
+                          {nilText(row.remark)}
+                        </td>
+                        <td style={{ fontSize: 12, maxWidth: 140, whiteSpace: "normal" }}>
+                          {nilText(row.supplier_name)}
+                        </td>
+                        <td style={{ fontSize: 12, fontWeight: 600 }}>
+                          {nilText(row.po_no)}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                          {row.po_date ? fmtDate(row.po_date) : "N/A"}
+                        </td>
+                        <td style={{ textAlign: "right", fontSize: 12 }}>
+                          {row.po_qty || "N/A"}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.nos_kgs)}</td>
+                        <td style={{ fontSize: 12 }}>{nilText(row.invoice_no)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+        }
+      </div>
+    </>
+  );
 }
 
 // =============================================================================
