@@ -30,6 +30,28 @@ import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
 const MAX_ENTRIES = 3;
 
+// Preferred display order for the Party/CODE dropdown (matches vfd_parameters
+// party_code labels after migration 043). Codes not listed here fall to the end,
+// alphabetically.
+const PARTY_CODE_ORDER = [
+  "Ceat 108",
+  "M2615",
+  "Plain-2615",
+  "Apollo 160108",
+  "LANXESS",
+  "Ceat R5299",
+  "Plain Lanxess",
+  "JKI-108",
+  "Shakti",
+  "Rubber",
+  "Sulphur Powder",
+] as const;
+
+function partyCodeRank(code: string): number {
+  const idx = PARTY_CODE_ORDER.indexOf(code as (typeof PARTY_CODE_ORDER)[number]);
+  return idx === -1 ? PARTY_CODE_ORDER.length : idx;
+}
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -304,9 +326,15 @@ export default function PulveriserProductionPage() {
                 <select value={e.partyCode}
                   onChange={ev => updateEntry(e.key, { partyCode: ev.target.value })}>
                   <option value="">— select party/code —</option>
-                  {millParams.map(p => (
-                    <option key={p.id} value={p.party_code}>{p.party_code}</option>
-                  ))}
+                  {[...millParams]
+                    .sort((a, b) => {
+                      const ra = partyCodeRank(a.party_code);
+                      const rb = partyCodeRank(b.party_code);
+                      return ra !== rb ? ra - rb : a.party_code.localeCompare(b.party_code);
+                    })
+                    .map(p => (
+                      <option key={p.id} value={p.party_code}>{p.party_code}</option>
+                    ))}
                 </select>
               </div>
               <div>
