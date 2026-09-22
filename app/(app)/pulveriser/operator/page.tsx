@@ -25,7 +25,6 @@ import {
   parseVfdRange,
   groupByJobNumber,
   type PulveriserJobCard,
-  type PulveriserShutdownLog,
   type VfdParameter,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
