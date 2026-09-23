@@ -38,6 +38,7 @@ const ACTIVITY_META: Record<string, { icon: string; desc: string }> = {
   product_qc:      { icon: "✅", desc: "Final product quality control entry" },
   post_production: { icon: "📅", desc: "Post-production stability & retest" },
   lab_trial:       { icon: "🧫", desc: "Trial batches and experimental products" },
+  packing_qc:      { icon: "🛍", desc: "Packing material QC — weight, drop & strength tests" },
 };
 
 // Map activity key → route
@@ -50,6 +51,7 @@ function activityRoute(activity: string): string {
     product_qc:      "/lab-qc/product-qc",
     post_production: "/lab-qc/post-production",
     lab_trial:       "/lab-qc/lab-trials",
+    packing_qc:      "/lab-qc/packing-qc",
   };
   return routes[activity] ?? `/lab-qc/${activity}`;
 }
