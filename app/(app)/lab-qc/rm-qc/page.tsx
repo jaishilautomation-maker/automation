@@ -50,6 +50,25 @@ interface QcImportRow {
   status: string;
 }
 
+interface SpecRow {
+  parameter: string;
+  parameter_label: string;
+  unit: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  target_value: number | null;
+  needs_verification: boolean;
+}
+
+type RiskStatus = "pass" | "fail" | "none";
+
+// Synthetic grade "party" codes seeded in migration 048 that carry the
+// IS-6655 A/B incoming spec limits for Crude Sulphur.
+const CRUDE_GRADE_OPTIONS: { code: string; label: string }[] = [
+  { code: "SULPHUR_A_GRADE", label: "A Grade" },
+  { code: "SULPHUR_B_GRADE", label: "B Grade" },
+];
+
 const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
 
 // A-20/1 QC type
@@ -81,6 +100,9 @@ export default function RmQcPage() {
   // A-20/1 Crude Sulphur: invoice number as direct text input (find-or-create batch)
   const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
   const [resolvingInvoice, setResolvingInvoice]     = useState(false);
+  // Crude Sulphur grade selector + loaded specs (drives inline pass/fail badge)
+  const [crudeGrade, setCrudeGrade] = useState("");
+  const [crudeSpecs, setCrudeSpecs] = useState<SpecRow[]>([]);
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [values, setValues]           = useState<Record<string, string>>({});
@@ -189,6 +211,21 @@ export default function RmQcPage() {
         setLoadingDefs(false);
       });
   }, [materialId, isSulphurPowder, supabase]);
+
+  // ---------------------------------------------------------------------------
+  // Crude Sulphur: load specs for the selected grade (drives live pass/fail).
+  // Uses the same coa_customer_specs table as Batch Analysis, keyed by the
+  // synthetic grade party codes seeded in migration 048.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!crudeGrade) { setCrudeSpecs([]); return; }
+    supabase
+      .from("coa_customer_specs")
+      .select("parameter, parameter_label, unit, min_value, max_value, target_value, needs_verification")
+      .eq("party_code", crudeGrade)
+      .eq("is_active", true)
+      .then(({ data }) => setCrudeSpecs((data ?? []) as SpecRow[]));
+  }, [crudeGrade, supabase]);
 
   // ---------------------------------------------------------------------------
   // Sulphur Powder: search qc_imports by batch number
@@ -315,6 +352,64 @@ export default function RmQcPage() {
       return next;
     });
   }, [testDefs]);
+
+  // ---------------------------------------------------------------------------
+  // Crude Sulphur: per-parameter spec lookup + pass/fail (mirrors Batch Analysis)
+  // ---------------------------------------------------------------------------
+  const crudeSpecFor = useCallback(
+    (paramKey: string): SpecRow | undefined => crudeSpecs.find(s => s.parameter === paramKey),
+    [crudeSpecs]
+  );
+
+  const crudeStatusFor = useCallback(
+    (paramKey: string, rawVal: string): RiskStatus => {
+      const spec = crudeSpecFor(paramKey);
+      if (!spec) return "none";
+      const v = parseFloat(rawVal);
+      if (rawVal === "" || isNaN(v)) return "none";
+      if (spec.min_value != null && v < spec.min_value) return "fail";
+      if (spec.max_value != null && v > spec.max_value) return "fail";
+      return "pass";
+    },
+    [crudeSpecFor]
+  );
+
+  const crudeSpecText = useCallback((s: SpecRow): string => {
+    const parts: string[] = [];
+    if (s.min_value != null) parts.push(`min ${s.min_value}`);
+    if (s.max_value != null) parts.push(`max ${s.max_value}`);
+    const base = parts.join(" · ") || "—";
+    return s.target_value != null ? `${base} (target ${s.target_value})` : base;
+  }, []);
+
+  const buildCrudeSpecBadge = useCallback((paramKey: string): React.ReactNode => {
+    const spec = crudeSpecFor(paramKey);
+    if (!spec) return null;
+    const raw = values[paramKey] ?? "";
+    const st = crudeStatusFor(paramKey, raw);
+    const color = st === "pass" ? "var(--ok)" : st === "fail" ? "#c0392b" : "var(--ink-soft)";
+    const label = st === "pass" ? "✓ Pass" : st === "fail" ? "✗ Fail" : "—";
+    return (
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+        <div style={{ color: "var(--ink-soft)" }}>
+          Spec: <strong>{crudeSpecText(spec)}</strong>
+          {spec.needs_verification && (
+            <span title="Spec needs verification against the physical sheet"
+              style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>
+          )}
+        </div>
+        <div style={{ color, fontWeight: 700 }}>{label}</div>
+      </div>
+    );
+  }, [crudeSpecFor, crudeStatusFor, values, crudeSpecText]);
+
+  // Overall pass/fail across crude parameters that have a spec + a value
+  const crudeEvaluatedRows = crudeSpecs
+    .map(s => ({ status: crudeStatusFor(s.parameter, values[s.parameter] ?? "") }))
+    .filter(r => r.status !== "none");
+  const crudeAnyFail = crudeEvaluatedRows.some(r => r.status === "fail");
+  const crudeOverallStatus: RiskStatus =
+    crudeEvaluatedRows.length === 0 ? "none" : crudeAnyFail ? "fail" : "pass";
 
   // ---------------------------------------------------------------------------
   // Crude Sulphur: resolve the typed invoice number to a batch (find-or-create)
@@ -552,6 +647,22 @@ export default function RmQcPage() {
                       onChange={e => setChemistName(e.target.value)} />
                   </div>
                 </div>
+                <div style={{ marginTop: 12 }}>
+                  <label>Grade (for spec check)</label>
+                  <select value={crudeGrade} onChange={e => setCrudeGrade(e.target.value)}>
+                    <option value="">— Select grade —</option>
+                    {CRUDE_GRADE_OPTIONS.map(g => (
+                      <option key={g.code} value={g.code}>{g.label}</option>
+                    ))}
+                  </select>
+                  <p className="field-hint" style={{ marginTop: 6 }}>
+                    Pick a grade to show each parameter&apos;s IS-6655 spec and pass/fail
+                    inline as you enter results.
+                    {crudeGrade && crudeSpecs.length === 0 && (
+                      <> · <span style={{ color: "var(--warn)" }}>No specs on file for this grade — run migration 048.</span></>
+                    )}
+                  </p>
+                </div>
               </div>
 
               {loadingDefs ? (
@@ -565,9 +676,31 @@ export default function RmQcPage() {
                       def={def}
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
+                      specBadge={crudeGrade ? buildCrudeSpecBadge(def.test_key) : null}
                       photoUploadProps={photoProps}
                     />
                   ))}
+                </div>
+              )}
+
+              {/* Compact overall result banner — per-parameter spec + pass/fail
+                  shows inline to the right of each field above. */}
+              {crudeGrade && crudeSpecs.length > 0 && crudeOverallStatus !== "none" && (
+                <div className="card" style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  borderLeft: `4px solid ${crudeOverallStatus === "pass" ? "var(--ok)" : "#c0392b"}`,
+                }}>
+                  <span style={{
+                    fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
+                    background: crudeOverallStatus === "pass" ? "var(--ok-soft)" : "#fde8e8",
+                    color: crudeOverallStatus === "pass" ? "var(--ok)" : "#c0392b",
+                  }}>
+                    {crudeOverallStatus === "pass" ? "OVERALL: PASS" : "OVERALL: FAIL"}
+                  </span>
+                  <span className="field-hint" style={{ margin: 0 }}>
+                    vs {CRUDE_GRADE_OPTIONS.find(g => g.code === crudeGrade)?.label ?? crudeGrade} spec ·{" "}
+                    {crudeEvaluatedRows.filter(r => r.status === "pass").length}/{crudeEvaluatedRows.length} parameters within spec
+                  </span>
                 </div>
               )}
 
