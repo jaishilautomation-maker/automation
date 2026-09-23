@@ -24,8 +24,9 @@ export type SheetSyncPayload =
 
 export interface NotifyEventArgs {
   eventType:    string;
-  subject:      string;
-  html:         string;
+  /** Omit subject+html for a sheet-only call (no email sent). */
+  subject?:     string;
+  html?:        string;
   factoryId?:   string;
   referenceId?: string;
   recipients?:  string[];

@@ -487,6 +487,43 @@ export default function PulveriserOperatorPage() {
             },
           },
         });
+
+        // One sheet row per hourly reading (sheet-only, no email) → the
+        // "Hourly Readings" tab of the Job Card sheet, tagged with job_number
+        // + party_code so each reading traces back to its parent card.
+        for (const r of rows) {
+          const diff = Number(r.stop_time) - Number(r.start_time);
+          const totalHours = diff > 0 ? diff / 100 : null;
+          const hasData =
+            r.start_time.trim() !== "" || r.stop_time.trim() !== "" ||
+            r.batch_no.trim() !== "" || r.bags.trim() !== "";
+          if (!hasData) continue;
+          void notifyEvent({
+            eventType: "pulveriser_hourly_reading",
+            factoryId: active.factory_id,
+            referenceId: active.id,
+            sheetData: {
+              type: "append",
+              target: "jobcard",
+              tab: "Hourly Readings",
+              values: [
+                active.job_number ?? active.id,
+                active.party_code ?? null,
+                r.reading_date || null,
+                r.machine || active.machine_number || null,
+                r.start_time || null,
+                r.stop_time || null,
+                totalHours,
+                r.planned_production.trim() === "" ? null : Number(r.planned_production),
+                r.batch_no || null,
+                r.bags.trim() === "" ? null : Number(r.bags),
+                r.low_production_reasons.length > 0 ? r.low_production_reasons.join(", ") : null,
+                profile?.full_name ?? null,
+                nowISO,
+              ],
+            },
+          });
+        }
       }
 
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");

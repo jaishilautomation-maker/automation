@@ -55,14 +55,23 @@ export async function POST(req: NextRequest) {
     sheetData?:   SheetSyncPayload;
   };
 
-  if (!eventType || !subject || !html) {
-    return NextResponse.json({ error: "eventType, subject, html required" }, { status: 400 });
+  // A sheet-only call (e.g. one row of a repeatable set) may omit subject/html.
+  // In that case we just do the sheet sync and skip the email. A normal call
+  // must supply eventType + subject + html.
+  const wantsEmail = Boolean(subject && html);
+  if (!eventType) {
+    return NextResponse.json({ error: "eventType required" }, { status: 400 });
+  }
+  if (!wantsEmail && !sheetData) {
+    return NextResponse.json({ error: "subject+html or sheetData required" }, { status: 400 });
   }
 
   // Run email and sheet sync concurrently — each is independently safe (never
   // throws). Await both so the Vercel lambda doesn't tear down mid-flight.
   await Promise.all([
-    sendEmail({ eventType, subject, html, factoryId, referenceId, recipients }),
+    wantsEmail
+      ? sendEmail({ eventType, subject: subject!, html: html!, factoryId, referenceId, recipients })
+      : Promise.resolve(),
     (async () => {
       if (!sheetData) return;
       if (sheetData.type === "job_card") {

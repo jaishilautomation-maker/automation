@@ -203,6 +203,11 @@ const SHEET_TABS: Record<SheetTarget, Record<string, string[]>> = {
   // -------------------------------------------------------------------------
   jobcard: {
     "Job Cards": JOB_CARD_HEADERS,
+    "Hourly Readings": [
+      "Job Number", "Party / Code", "Reading Date", "Machine",
+      "Start Reading", "Stop Reading", "Total Hours", "Planned Production",
+      "Batch No", "Bags", "Low Production Reason", "Recorded By", "Recorded At",
+    ],
   },
 
   // -------------------------------------------------------------------------
