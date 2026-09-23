@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
 
     await Promise.all([
       sendEmail({ eventType: `lab_qc_${report_type}_report`, subject, html, factoryId: factory_id, referenceId: ba.id }),
-      appendRow(report_type === "finish_goods" ? "Finish Goods Reports" : "Final Inspection Reports", [
+      appendRow("lab", report_type === "finish_goods" ? "Finish Goods Reports" : "Final Inspection Reports", [
         ba.id, batch?.batch_number ?? null, fmtDate(ba.analysis_date), pdfUrl, profile?.full_name ?? null, nowISO, factory_id,
       ]),
     ]);
