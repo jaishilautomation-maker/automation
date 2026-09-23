@@ -16,8 +16,12 @@
 //   }
 //
 // sheetData shapes:
-//   { type: "job_card",  row: JobCardSheetRow }
-//   { type: "append",    tab: string,  values: (string|number|boolean|null)[] }
+//   { type: "job_card",      row: JobCardSheetRow }
+//   { type: "append",        tab: string,  values: (string|number|boolean|null)[] }
+//   { type: "stores_append", tab: string,  values: (string|number|boolean|null)[] }
+//
+// "stores_append" writes to the SEPARATE Stores spreadsheet (STORES_SHEET_ID).
+// "append" writes to the main pulveriser spreadsheet (GOOGLE_SHEET_ID).
 //
 // Always returns 200 — failures are logged server-side; the client never
 // needs to retry. Email and sheet sync run independently — one failing does
@@ -31,10 +35,12 @@ import {
   appendRow,
   type JobCardSheetRow,
 } from "@/lib/notifications/sheets-sync";
+import { appendToStoresSheet, type StoresSheetTab } from "@/lib/notifications/stores-sheets";
 
 type SheetSyncPayload =
-  | { type: "job_card"; row: JobCardSheetRow }
-  | { type: "append";   tab: string; values: (string | number | boolean | null)[] };
+  | { type: "job_card";      row: JobCardSheetRow }
+  | { type: "append";        tab: string; values: (string | number | boolean | null)[] }
+  | { type: "stores_append"; tab: string; values: (string | number | boolean | null)[] };
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
@@ -70,6 +76,8 @@ export async function POST(req: NextRequest) {
         await syncJobCardRow(sheetData.row);
       } else if (sheetData.type === "append") {
         await appendRow(sheetData.tab, sheetData.values);
+      } else if (sheetData.type === "stores_append") {
+        await appendToStoresSheet(sheetData.tab as StoresSheetTab, sheetData.values);
       }
     })(),
   ]);

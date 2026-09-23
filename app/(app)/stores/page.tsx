@@ -26,22 +26,6 @@ import type {
 // Constants
 // ---------------------------------------------------------------------------
 
-const RM_PRODUCTS = [
- "CRUDE SULPHUR",
- "ELASTO 541 OIL",
- "P.SILICA",
- "CHEM GRIND OIL",
- "POWEROIL SAPPHIRE L3060",
- "POWEROIL CITRINE L4070",
- "GEAR OIL 320/PARTHAN",
- "MAGNESIUM CARBONATE IN KG",
- "POWER OIL CITRINE M 4150",
-] as const;
-type RmProduct = (typeof RM_PRODUCTS)[number];
-
-const STATUS_OPTIONS = ["GOOD", "LOW", "LESS", "OUT OF STOCK"] as const;
-type StockStatus = (typeof STATUS_OPTIONS)[number];
-
 const PLANT_OPTIONS = ["A20/1", "A20", "NSK", "SNP"] as const;
 
 const PRN_STATUS_LABEL: Record<PrnStatus, string> = {
@@ -65,7 +49,7 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
  packaging_material: "Packing Material (PM)",
 };
 
-type Tab = "oil" | "job_cards" | "rm" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "oil_consumption" | "approval" | "ledger" | "issue" | "prn" | "dispatch";
+type Tab = "job_cards" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "oil_consumption" | "approval" | "ledger" | "issue" | "prn" | "dispatch";
 
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
@@ -90,26 +74,24 @@ function nilText(s: string | null | undefined): string {
 // Main page
 // ---------------------------------------------------------------------------
 export default function StoresPage() {
- const [tab, setTab] = useState<Tab>("oil");
+ const [tab, setTab] = useState<Tab>("job_cards");
 
  const TABS: { id: Tab; label: string }[] = [
-  { id: "job_cards",    label: "Job Cards" },
-  { id: "oil",       label: "Oil Issue" },
-  { id: "rm",        label: "Raw Material" },
-  { id: "received",     label: "Received" },
-  { id: "supplied",     label: "Supplied" },
-  { id: "daily_prod",    label: "Daily Production" },
-  { id: "daily_dispatch",  label: "Daily Dispatch" },
+  { id: "job_cards",        label: "Job Cards" },
+  { id: "received",         label: "Received" },
+  { id: "supplied",         label: "Supplied" },
+  { id: "daily_prod",       label: "Daily Production" },
+  { id: "daily_dispatch",   label: "Daily Dispatch" },
   { id: "packing_material", label: "Packing Material" },
-  { id: "finished_goods",  label: "Finished Goods" },
-  { id: "ball_mill",       label: "Ball Mill" },
-  { id: "batch_wise",      label: "Batch Wise" },
-  { id: "oil_consumption", label: "Oil Consumption" },
-  { id: "approval",        label: "Approved / Rejected" },
-  { id: "ledger",          label: "Stock Ledger" },
-  { id: "issue",      label: "Issue Slip" },
-  { id: "prn",       label: "PRN" },
-  { id: "dispatch",     label: "Dispatch" },
+  { id: "finished_goods",   label: "Finished Goods" },
+  { id: "ball_mill",        label: "Ball Mill" },
+  { id: "batch_wise",       label: "Batch Wise" },
+  { id: "oil_consumption",  label: "Oil Consumption" },
+  { id: "approval",         label: "Approved / Rejected" },
+  { id: "ledger",           label: "Stock Ledger" },
+  { id: "issue",            label: "Issue Slip" },
+  { id: "prn",              label: "PRN" },
+  { id: "dispatch",         label: "Dispatch" },
  ];
 
  return (
@@ -135,11 +117,9 @@ export default function StoresPage() {
    ))}
    </div>
 
-   {tab === "job_cards"   && <JobCardsSection onGoToTab={setTab} />}
-   {tab === "oil"      && <OilIssueSection />}
-   {tab === "rm"       && <RawMaterialSection />}
-   {tab === "received"  && <ReceivedSection />}
-   {tab === "supplied"  && <SuppliedSection />}
+   {tab === "job_cards"        && <JobCardsSection onGoToTab={setTab} />}
+   {tab === "received"         && <ReceivedSection />}
+   {tab === "supplied"         && <SuppliedSection />}
    {tab === "daily_prod"   && <DailyProductionSection />}
    {tab === "daily_dispatch"  && <DailyDispatchSection />}
    {tab === "packing_material" && <PackingMaterialSection />}
@@ -169,13 +149,23 @@ export default function StoresPage() {
 // Status filter: Pending Stores (action needed) | All Recent
 // =============================================================================
 function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
+ const { user, profile } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
 
- const [cards, setCards]     = useState<PulveriserJobCard[]>([]);
- const [loading, setLoading]   = useState(true);
- const [filter, setFilter]    = useState<"pending" | "all">("pending");
- const [selected, setSelected]  = useState<PulveriserJobCard | null>(null);
+ // ── Card list state ───────────────────────────────────────────────────────
+ const [cards, setCards]   = useState<PulveriserJobCard[]>([]);
+ const [loading, setLoading] = useState(true);
+ const [filter, setFilter]  = useState<"pending" | "all">("pending");
+ const [selected, setSelected] = useState<PulveriserJobCard | null>(null);
+
+ // ── Oil issue state (merged from OilIssueSection) ─────────────────────────
+ const [oilIssued, setOilIssued]   = useState("");
+ const [storesNote, setStoresNote] = useState("");
+ const [submitting, setSubmitting] = useState(false);
+ const [rejectionHistory, setRejectionHistory] = useState<{
+  result: string; remark: string | null; reviewed_at: string;
+ }[]>([]);
 
  const loadCards = useCallback(async () => {
   setLoading(true);
@@ -184,9 +174,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
    .select("*")
    .order("created_at", { ascending: false })
    .limit(100);
-  if (filter === "pending") {
-   q = q.eq("status", "pending_stores");
-  }
+  if (filter === "pending") q = q.eq("status", "pending_stores");
   const { data, error } = await q;
   if (error) showToast("Could not load job cards: " + error.message, true);
   else setCards((data ?? []) as PulveriserJobCard[]);
@@ -195,12 +183,83 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
 
  useEffect(() => { loadCards(); }, [loadCards]);
 
+ // Open a card — load rejection history if any
+ const openCard = async (jc: PulveriserJobCard) => {
+  setSelected(jc);
+  setOilIssued(jc.oil_issued_kg?.toString() ?? "");
+  setStoresNote(jc.stores_incharge_note ?? "");
+  setRejectionHistory([]);
+  const { data: reviews } = await supabase
+   .from("pulveriser_job_card_reviews")
+   .select("result, remark, reviewed_at")
+   .eq("job_card_id", jc.id)
+   .order("reviewed_at", { ascending: false });
+  if (reviews?.length) {
+   setRejectionHistory(reviews as { result: string; remark: string | null; reviewed_at: string }[]);
+  }
+ };
+
+ const closeCard = () => {
+  setSelected(null);
+  setOilIssued("");
+  setStoresNote("");
+  setRejectionHistory([]);
+ };
+
+ // Issue oil — the core action
+ const handleIssue = async () => {
+  if (!selected || !user) return;
+  const n = Number(oilIssued);
+  if (!Number.isFinite(n) || n <= 0) {
+   showToast("Enter a valid oil quantity (greater than 0).", true); return;
+  }
+  setSubmitting(true);
+  try {
+   const { data, error } = await supabase
+    .from("pulveriser_job_cards")
+    .update({
+     oil_issued_kg:        n,
+     oil_issued_by:        user.id,
+     oil_issued_at:        new Date().toISOString(),
+     stores_incharge_note: storesNote.trim() || null,
+     status:               "pending",
+    })
+    .eq("id", selected.id)
+    .select("id");
+   if (error) { showToast("Save failed: " + error.message, true); return; }
+   if (!data?.length) {
+    showToast("Save blocked -- check factory access or card status.", true); return;
+   }
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildStoresEmail({
+    jobNumber:       selected.job_number,
+    materialCode:    selected.material_code,
+    oilRequiredKg:   selected.oil_required_kg,
+    oilIssuedKg:     n,
+    submittedByName: profile?.full_name ?? "Unknown",
+    submittedAt:     nowISO,
+   });
+   void notifyEvent({
+    eventType: "pulveriser_stores", subject, html,
+    factoryId: selected.factory_id, referenceId: selected.id,
+   });
+   const isRework = rejectionHistory.some(r => r.result === "not_ok");
+   showToast(isRework
+    ? "Rework oil re-issued -- operator will see the rejection context."
+    : "Oil issued -- operator can now run the batch.");
+   closeCard();
+   loadCards();
+  } catch (e: unknown) {
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+  } finally { setSubmitting(false); }
+ };
+
  const statusBadge = (status: string) => {
   const map: Record<string, { label: string; color: string; bg: string }> = {
-   pending_stores:  { label: "Pending Stores", color: "var(--warn)", bg: "var(--warn-soft)" },
-   pending:     { label: "Pending Operator", color: "var(--clay)", bg: "var(--clay-soft)" },
-   submitted_for_qc: { label: "In QC Review",  color: "#1a6b3c",   bg: "#e4efe3" },
-   finalized:    { label: "Finalized",    color: "var(--ok)",  bg: "var(--ok-soft)" },
+   pending_stores:   { label: "Pending Oil Issue",  color: "var(--warn)",     bg: "var(--warn-soft)" },
+   pending:          { label: "Pending Operator",   color: "var(--clay)",     bg: "var(--clay-soft)" },
+   submitted_for_qc: { label: "In QC Review",       color: "#1a6b3c",         bg: "#e4efe3" },
+   finalized:        { label: "Finalized",           color: "var(--ok)",       bg: "var(--ok-soft)" },
   };
   const s = map[status] ?? { label: status, color: "var(--ink-soft)", bg: "var(--line)" };
   return (
@@ -210,19 +269,22 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
    }}>
     {s.label}
    </span>
- );
+  );
  };
 
- // Detail view for a single card
+ // ── Detail / oil-issue view ───────────────────────────────────────────────
  if (selected) {
   const jc = selected;
+  const isReworkCard  = rejectionHistory.some(r => r.result === "not_ok");
+  const lastRejection = rejectionHistory.find(r => r.result === "not_ok");
+
   return (
    <>
-    <button className="back-link" type="button" onClick={() => setSelected(null)}>
+    <button className="back-link" type="button" onClick={closeCard}>
      Back to Job Cards
     </button>
 
-    {/* Status + action banner */}
+    {/* Status banner */}
     <div style={{
      padding: "12px 16px", borderRadius: 8, marginBottom: 14,
      background: jc.status === "pending_stores" ? "var(--warn-soft)" : "var(--clay-soft)",
@@ -232,32 +294,71 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
       <div style={{ fontWeight: 700, fontSize: 14 }}>
        Job {jc.job_number ?? jc.id.slice(0, 8)}
       </div>
-      <div style={{ fontSize: 12, marginTop: 2 }}>
-       {statusBadge(jc.status)}
-      </div>
+      <div style={{ fontSize: 12, marginTop: 2 }}>{statusBadge(jc.status)}</div>
      </div>
-     {jc.status === "pending_stores" && (
-      <button type="button" className="btn btn-primary"
-       style={{ width: "auto", padding: "8px 18px", marginTop: 0, fontSize: 13 }}
-       onClick={() => { setSelected(null); onGoToTab("oil"); }}>
-       Go to Oil Issue
-      </button>
-    )}
     </div>
 
-    {/* Production details -- read only, exactly as Production filled */}
+    {/* REWORK banner */}
+    {isReworkCard && (
+     <div style={{
+      padding: "12px 16px", borderRadius: 8, marginBottom: 14,
+      background: "var(--warn-soft)",
+      border: "2px solid color-mix(in srgb, var(--warn) 50%, transparent)",
+     }}>
+      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--warn)", marginBottom: 6 }}>
+       ! REWORK BATCH -- Previously Rejected by Lab
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6 }}>
+       This batch was sent back from Lab QC. Review the rejection reason before
+       re-issuing oil. The operator will see this context on their screen.
+      </div>
+      {lastRejection && (
+       <div style={{
+        padding: "8px 12px", borderRadius: 6, background: "#fff",
+        border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
+       }}>
+        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
+         Lab rejection ({new Date(lastRejection.reviewed_at).toLocaleString("en-IN")}):
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600,
+         color: lastRejection.remark ? "var(--warn)" : "var(--ink-soft)",
+         fontStyle: lastRejection.remark ? "normal" : "italic" }}>
+         {lastRejection.remark ?? "(No reason given by Lab)"}
+        </div>
+       </div>
+      )}
+      {rejectionHistory.length > 1 && (
+       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
+        Total review cycles: {rejectionHistory.length}
+        {" -- "}{rejectionHistory.filter(r => r.result === "not_ok").length} rejection(s),
+        {" "}{rejectionHistory.filter(r => r.result === "ok").length} approval(s)
+       </div>
+      )}
+     </div>
+    )}
+
+    {/* Production details */}
     <div className="card">
-     <h3>Production Details (filled by Production Incharge)</h3>
-     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
-      fontSize: 13, lineHeight: 1.8 }}>
+     <h3>Production Details</h3>
+     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+      gap: "6px 16px", fontSize: 13, lineHeight: 1.8 }}>
       <div><b>Machine:</b> {jc.machine_number ?? "N/A"}</div>
       <div><b>Job Number:</b> {jc.job_number ?? "N/A"}</div>
       <div><b>Date:</b> {fmtDate(jc.job_date)}</div>
       <div><b>Shift:</b> {jc.shift ?? "N/A"}</div>
-      <div><b>Batch No. (Material Code):</b> {jc.material_code ?? "N/A"}</div>
+      <div><b>Batch No.:</b> {jc.material_code ?? "N/A"}</div>
       <div><b>Party / CODE:</b> {jc.party_code ?? "N/A"}</div>
       <div><b>Planned Production:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</div>
-      <div><b>Oil Required (auto):</b> {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}</div>
+      <div>
+       <b>Oil Required:</b>{" "}
+       <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+        {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}
+       </span>
+      </div>
+      <div><b>Sulphur Supplier:</b> {jc.sulphur_supplier ?? "N/A"}</div>
+      <div><b>Sulphur Lot:</b> {jc.sulphur_lot_number ?? "N/A"}</div>
+      <div><b>Oil Supplier:</b> {jc.oil_supplier ?? "N/A"}</div>
+      <div><b>Oil Batch:</b> {jc.oil_batch_number ?? "N/A"}</div>
       {jc.production_at && (
        <div style={{ gridColumn: "1 / -1", paddingTop: 6, borderTop: "1px solid var(--line)" }}>
         <b>Sent by Production:</b>{" "}
@@ -267,101 +368,118 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
         })}
        </div>
       )}
-      <div>
-       <b>Oil Required (auto):</b>{" "}
-       <span style={{ fontWeight: 700, color: "var(--clay)" }}>
-        {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "N/A"}
-       </span>
-      </div>
      </div>
     </div>
 
-    {/* Sulphur details */}
-    <div className="card">
-     <h3>Sulphur Details</h3>
-     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
-      fontSize: 13, lineHeight: 1.8 }}>
-      <div><b>Supplier:</b> {jc.sulphur_supplier ?? "N/A"}</div>
-      <div><b>Lot Number:</b> {jc.sulphur_lot_number ?? "N/A"}</div>
-      <div><b>Empty Date:</b> {fmtDate(jc.sulphur_empty_date)}</div>
-     </div>
-    </div>
-
-    {/* Oil details */}
-    <div className="card">
-     <h3>Oil Details</h3>
-     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
-      fontSize: 13, lineHeight: 1.8 }}>
-      <div><b>Supplier:</b> {jc.oil_supplier ?? "N/A"}</div>
-      <div><b>Batch Number:</b> {jc.oil_batch_number ?? "N/A"}</div>
-      <div><b>Quantity:</b> {jc.oil_quantity != null ? jc.oil_quantity + " L" : "N/A"}</div>
-      <div>
-       <b>Oil Issued by Stores:</b>{" "}
-       <span style={{ fontWeight: 700,
-        color: jc.oil_issued_kg != null ? "var(--ok)" : "var(--warn)" }}>
-        {jc.oil_issued_kg != null ? jc.oil_issued_kg + " kg" : "Not yet issued"}
-       </span>
-      </div>
-     </div>
-    </div>
-
-    {/* Operator details (if filled) */}
+    {/* Operator details (if already filled) */}
     {jc.actual_production_mt != null && (
      <div className="card">
       <h3>Operator Details</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px",
-       fontSize: 13, lineHeight: 1.8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+       gap: "6px 16px", fontSize: 13, lineHeight: 1.8 }}>
        <div><b>Actual Production:</b> {jc.actual_production_mt} MT</div>
        <div><b>Expected Oil:</b> {jc.expected_oil_kg ?? "N/A"} kg</div>
        <div><b>Actual Oil Consumption:</b> {jc.actual_oil_consumption_kg ?? "N/A"} kg</div>
        <div><b>Oil Variance:</b> {jc.oil_variance_kg ?? "N/A"} kg</div>
       </div>
      </div>
-   )}
+    )}
 
-    {/* Quick actions for Stores */}
+    {/* ── Oil Issue form — shown for pending_stores cards ────────────────── */}
     {jc.status === "pending_stores" && (
      <div className="card">
-      <h3>Stores Actions</h3>
+      <h3 style={{ color: isReworkCard ? "var(--warn)" : undefined }}>
+       {isReworkCard ? "Re-Issue Oil (Rework Batch)" : "Issue Oil"}
+      </h3>
       <div className="field-hint" style={{ marginBottom: 12 }}>
-       Use these shortcuts to pre-fill other sections based on this job card.
+       Enter the oil quantity to issue to the operator.
+       {jc.oil_required_kg != null && (
+        <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+         {" "}Required: {jc.oil_required_kg} kg
+        </span>
+       )}
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-       <button type="button" className="btn btn-secondary"
-        style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
-        onClick={() => { setSelected(null); onGoToTab("oil"); }}>
-        Issue Oil
-       </button>
-       <button type="button" className="btn btn-secondary"
-        style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
-        onClick={() => { setSelected(null); onGoToTab("issue"); }}>
-        Create Issue Slip
-       </button>
-       <button type="button" className="btn btn-secondary"
-        style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
-        onClick={() => { setSelected(null); onGoToTab("rm"); }}>
-        Update Raw Material
-       </button>
+      <label>Oil Issued (kg) *</label>
+      <input type="number" min="0" step="0.001" placeholder="0"
+       value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
+      <label style={{ marginTop: 12 }}>Stores Incharge Note</label>
+      <input type="text"
+       placeholder={isReworkCard
+        ? "e.g. Re-checked sulphur lot, confirmed batch quality..."
+        : "Optional note for the operator..."}
+       value={storesNote} onChange={e => setStoresNote(e.target.value)} />
+      <div className="field-hint" style={{ marginTop: 4 }}>
+       {isReworkCard
+        ? "This note + the rejection reason will be shown to the operator."
+        : "This note will be visible to the operator."}
+      </div>
+      <button className="btn btn-primary" type="button"
+       disabled={submitting || !oilIssued.trim()}
+       onClick={handleIssue}
+       style={{ marginTop: 16, ...(isReworkCard ? { background: "var(--warn)" } : {}) }}>
+       {submitting ? "Saving..."
+        : isReworkCard ? "Re-Issue Oil for Rework Batch"
+        : "Issue Oil and Send to Operator"}
+      </button>
+     </div>
+    )}
+
+    {/* Already issued info (for non-pending_stores cards) */}
+    {jc.oil_issued_kg != null && jc.status !== "pending_stores" && (
+     <div className="card">
+      <h3>Oil Issued</h3>
+      <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+       <div>
+        <b>Issued:</b>{" "}
+        <span style={{ fontWeight: 700, color: "var(--ok)" }}>
+         {jc.oil_issued_kg} kg
+        </span>
+       </div>
+       {jc.oil_issued_at && (
+        <div>
+         <b>Issued At:</b>{" "}
+         {new Date(jc.oil_issued_at).toLocaleString("en-IN", {
+          day: "2-digit", month: "short", year: "numeric",
+          hour: "2-digit", minute: "2-digit",
+         })}
+        </div>
+       )}
       </div>
      </div>
-   )}
+    )}
+
+    {/* Shortcut actions */}
+    <div className="card">
+     <h3>Other Actions</h3>
+     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <button type="button" className="btn btn-secondary"
+       style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+       onClick={() => { closeCard(); onGoToTab("issue"); }}>
+       Create Issue Slip
+      </button>
+      <button type="button" className="btn btn-secondary"
+       style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+       onClick={() => { closeCard(); onGoToTab("received"); }}>
+       Received Entry Book
+      </button>
+     </div>
+    </div>
    </>
- );
+  );
  }
 
- // List view
+ // ── List view ─────────────────────────────────────────────────────────────
  const groups = groupByJobNumber(cards);
 
  return (
   <>
-   {/* Filter + refresh */}
    <div style={{ display: "flex", justifyContent: "space-between",
     alignItems: "center", marginBottom: 12 }}>
     <div className="chip-group" style={{ margin: 0 }}>
      <button type="button"
       className={"chip" + (filter === "pending" ? " selected" : "")}
       onClick={() => setFilter("pending")}>
-      Pending Stores
+      Pending Oil Issue
      </button>
      <button type="button"
       className={"chip" + (filter === "all" ? " selected" : "")}
@@ -376,27 +494,24 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
     </button>
    </div>
 
-   {/* Info banner */}
    {filter === "pending" && (
     <div style={{
      padding: "10px 14px", borderRadius: 8, marginBottom: 14,
-     background: "var(--warn-soft)", fontSize: 13, color: "var(--warn)",
-     fontWeight: 600,
+     background: "var(--warn-soft)", fontSize: 13,
+     color: "var(--warn)", fontWeight: 600,
     }}>
-     These job cards are waiting for you to issue oil before the operator can start the batch.
+     These job cards are waiting for oil to be issued before the operator can start the batch.
     </div>
-  )}
+   )}
 
-   {loading ? <div className="empty">Loading...</div>
+   {loading
+    ? <div className="empty">Loading...</div>
     : groups.length === 0
      ? <div className="empty">
-       {filter === "pending"
-        ? "No job cards waiting for oil issue."
-        : "No job cards found."}
+       {filter === "pending" ? "No job cards waiting for oil issue." : "No job cards found."}
       </div>
      : groups.map(group => (
       <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 16 }}>
-       {/* Job number header */}
        <div style={{
         fontSize: 12, fontWeight: 700, color: "var(--ink-soft)",
         margin: "4px 2px 6px", textTransform: "uppercase", letterSpacing: "0.5px",
@@ -406,10 +521,8 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
        </div>
 
        {group.entries.map((jc, i) => (
-        <div key={jc.id}
-         className="pending-item"
-         style={{ marginBottom: 8 }}
-         onClick={() => setSelected(jc)}>
+        <div key={jc.id} className="pending-item" style={{ marginBottom: 8 }}
+         onClick={() => openCard(jc)}>
          <div className="pi-top">
           <span style={{ fontWeight: 700 }}>
            Entry {i + 1} -- {jc.machine_number} -- {fmtDate(jc.job_date)} -- {jc.shift ?? "N/A"} Shift
@@ -434,247 +547,16 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
               {jc.oil_issued_kg} kg
              </span>
             </span>
-          )}
+           )}
            {jc.sulphur_supplier && (
             <span><b>Sulphur:</b> {jc.sulphur_supplier} / {jc.sulphur_lot_number ?? "N/A"}</span>
-          )}
+           )}
           </div>
-         </div>
-        </div>
-      ))}
-      </div>
-    ))
-   }
-  </>
-);
-}
-
-// =============================================================================
-// TAB 1 -- OIL ISSUE
-// =============================================================================
-function OilIssueSection() {
- const { user, profile } = useAuth();
- const { showToast } = useToast();
- const supabase = createClient();
-
- const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
- const [loading, setLoading]         = useState(true);
- const [active, setActive]           = useState<PulveriserJobCard | null>(null);
- const [oilIssued, setOilIssued]     = useState("");
- const [storesNote, setStoresNote]   = useState("");
- const [submitting, setSubmitting]   = useState(false);
- const [rejectionHistory, setRejectionHistory] = useState<{
-  result: string; remark: string | null; reviewed_at: string;
- }[]>([]);
-
- const loadPending = useCallback(async () => {
-  setLoading(true);
-  const { data, error } = await supabase
-   .from("pulveriser_job_cards").select("*")
-   .eq("status", "pending_stores")
-   .not("material_code", "is", null)
-   .order("created_at", { ascending: false });
-  if (error) showToast("Could not load: " + error.message, true);
-  else setPending((data ?? []) as PulveriserJobCard[]);
-  setLoading(false);
- }, [supabase, showToast]);
-
- useEffect(() => { loadPending(); }, [loadPending]);
-
- const openCard = async (jc: PulveriserJobCard) => {
-  setActive(jc);
-  setOilIssued(jc.oil_issued_kg?.toString() ?? "");
-  setStoresNote(jc.stores_incharge_note ?? "");
-  setRejectionHistory([]);
-  // Check if this card has prior rejections
-  const { data: reviews } = await supabase
-   .from("pulveriser_job_card_reviews")
-   .select("result, remark, reviewed_at")
-   .eq("job_card_id", jc.id)
-   .order("reviewed_at", { ascending: false });
-  if (reviews && reviews.length > 0) {
-   setRejectionHistory(reviews as { result: string; remark: string | null; reviewed_at: string }[]);
-  }
- };
-
- const handleIssue = async () => {
-  if (!active || !user) return;
-  const n = Number(oilIssued);
-  if (!Number.isFinite(n)) {
-   showToast("Enter a valid oil quantity.", true); return;
-  }
-  setSubmitting(true);
-  try {
-   const { data, error } = await supabase
-    .from("pulveriser_job_cards")
-    .update({
-     oil_issued_kg:        n,
-     oil_issued_by:        user.id,
-     oil_issued_at:        new Date().toISOString(),
-     stores_incharge_note: storesNote.trim() || null,
-     status:               "pending",
-    })
-    .eq("id", active.id).select("id");
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   if (!data?.length) {
-    showToast("Save blocked -- check factory access or card status.", true); return;
-   }
-   const nowISO = new Date().toISOString();
-   const { subject, html } = buildStoresEmail({
-    jobNumber: active.job_number,
-    materialCode: active.material_code,
-    oilRequiredKg: active.oil_required_kg,
-    oilIssuedKg: n,
-    submittedByName: profile?.full_name ?? "Unknown",
-    submittedAt: nowISO,
-   });
-   void notifyEvent({
-    eventType: "pulveriser_stores", subject, html,
-    factoryId: active.factory_id, referenceId: active.id,
-   });
-   const isRework = rejectionHistory.some(r => r.result === "not_ok");
-   showToast(isRework
-    ? "Rework oil re-issued -- operator will see the rejection context."
-    : "Oil issued -- operator can now run the batch.");
-   setActive(null); setOilIssued(""); setStoresNote(""); setRejectionHistory([]);
-   loadPending();
-  } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
-  } finally { setSubmitting(false); }
- };
-
- const isReworkCard    = rejectionHistory.some(r => r.result === "not_ok");
- const lastRejection   = rejectionHistory.find(r => r.result === "not_ok");
-
- if (active) {
-  return (
-   <>
-    <button className="back-link" type="button"
-     onClick={() => { setActive(null); setOilIssued(""); setStoresNote(""); setRejectionHistory([]); }}>
-     Back to list
-    </button>
-
-    {/* REWORK banner -- shown if this card was previously rejected by Lab */}
-    {isReworkCard && (
-     <div style={{
-      padding: "12px 16px", borderRadius: 8, marginBottom: 14,
-      background: "var(--warn-soft)",
-      border: "2px solid color-mix(in srgb, var(--warn) 50%, transparent)",
-     }}>
-      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--warn)",
-       marginBottom: 6 }}>
-       ! REWORK BATCH -- Previously Rejected by Lab
-      </div>
-      <div style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6 }}>
-       This batch was sent back from Lab QC. Review the rejection reason below
-       before re-issuing oil. The operator will see this context on their screen.
-      </div>
-      {lastRejection && (
-       <div style={{
-        padding: "8px 12px", borderRadius: 6,
-        background: "#fff", border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
-       }}>
-        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
-         Lab rejection ({new Date(lastRejection.reviewed_at).toLocaleString("en-IN")}):
-        </div>
-        <div style={{ fontSize: 13, fontWeight: 600,
-         color: lastRejection.remark ? "var(--warn)" : "var(--ink-soft)",
-         fontStyle: lastRejection.remark ? "normal" : "italic" }}>
-         {lastRejection.remark ?? "(No reason given by Lab)"}
-        </div>
-       </div>
-      )}
-      {rejectionHistory.length > 1 && (
-       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 6 }}>
-        Total review cycles: {rejectionHistory.length}
-        {" -- "}{rejectionHistory.filter(r => r.result === "not_ok").length} rejection(s),
-        {" "}{rejectionHistory.filter(r => r.result === "ok").length} approval(s)
-       </div>
-      )}
-     </div>
-    )}
-
-    <div className="readonly-block">
-     <b>{active.machine_number}</b> {fmtDate(active.job_date)} {active.shift ?? "N/A"} shift
-     <br />
-     <b>Batch:</b> {active.material_code} <b>Party/Code:</b> {active.party_code ?? "N/A"} Job: {active.job_number ?? "N/A"}
-     <br />
-     <b>Planned:</b> {active.planned_production_mt ?? "N/A"} MT{" "}
-     <b>Oil required:</b>{" "}
-     {active.oil_required_kg != null ? active.oil_required_kg + " kg" : "NA"}
-     {active.production_at && (
-      <>
-       <br />
-       <b>Sent by Production:</b>{" "}
-       {new Date(active.production_at).toLocaleString("en-IN", {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-       })}
-      </>
-     )}
-    </div>
-
-    <div className="card">
-     <h3>{isReworkCard ? "Re-Issue Oil (Rework)" : "Issue Oil"}</h3>
-     <label>Oil Issued (kg) *</label>
-     <input type="number" min="0" step="0.001" placeholder="0"
-      value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
-     <label style={{ marginTop: 12 }}>Stores Incharge Note</label>
-     <input type="text"
-      placeholder={isReworkCard
-       ? "e.g. Re-checked sulphur lot, confirmed batch quality..."
-       : "Optional note for the operator..."}
-      value={storesNote}
-      onChange={e => setStoresNote(e.target.value)} />
-     <div className="field-hint" style={{ marginTop: 4 }}>
-      {isReworkCard
-       ? "This note + the rejection reason will be shown to the operator."
-       : "This note will be visible to the operator."}
-     </div>
-    </div>
-
-    <button className="btn btn-primary" type="button"
-     disabled={submitting || !oilIssued.trim()}
-     onClick={handleIssue}
-     style={isReworkCard ? { background: "var(--warn)" } : undefined}>
-     {submitting ? "Saving..."
-      : isReworkCard ? "Re-Issue Oil for Rework Batch"
-      : "Issue Oil and Send to Operator"}
-    </button>
-   </>
-  );
- }
-
- return (
-  <div className="card">
-   <h3>Job Cards Awaiting Oil Issue</h3>
-   <div className="field-hint" style={{ marginBottom: 10 }}>
-    Production has created these cards. Issue the required oil to open them for the operator.
-   </div>
-   {loading
-    ? <div className="empty">Loading...</div>
-    : pending.length === 0
-     ? <div className="empty">No cards pending oil issue.</div>
-     : groupByJobNumber(pending).map(group => (
-      <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
-       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
-        Job: {group.jobNumber ?? "N/A"}
-        {group.entries.length > 1 ? " (" + group.entries.length + " entries)" : ""}
-       </div>
-       {group.entries.map((jc, i) => (
-        <div className="pending-item" key={jc.id}
-         onClick={() => openCard(jc)}>
-         <div className="pi-top">
-          <span>Entry {i + 1} {jc.machine_number} {fmtDate(jc.job_date)}</span>
-          <span>{jc.shift ?? "N/A"}</span>
-         </div>
-         <div className="pi-sub">
-          Batch: {jc.material_code} Party/Code: {jc.party_code ?? "N/A"}{" "}
-          Oil required: {jc.oil_required_kg != null ? jc.oil_required_kg + " kg" : "NA"}
          </div>
          {jc.production_at && (
           <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
-           Sent by Production: {new Date(jc.production_at).toLocaleString("en-IN", {
+           Sent by Production:{" "}
+           {new Date(jc.production_at).toLocaleString("en-IN", {
             day: "2-digit", month: "short", year: "numeric",
             hour: "2-digit", minute: "2-digit",
            })}
@@ -685,418 +567,8 @@ function OilIssueSection() {
       </div>
      ))
    }
-  </div>
- );
-}
-// =============================================================================
-// TAB 2 -- RAW MATERIAL
-// DPR RM-style register matching the Excel RM tab columns exactly.
-// =============================================================================
-interface RmEntry {
- date: string;
- product: RmProduct | "";
- opening_balance: string;
- qty_received: string;
- material_return: string;
- qty_issued_prodn: string;
- qty_issued_bal: string;
- dispatch_as_is: string;
- closing_balance: number | null;
- status: StockStatus | "";
- remarks: string;
- // Formula-computed fields (editable overrides; auto-filled from formulas)
- qty_issued_to_bal_mill: string;  // Formula 11 — Qty issued to Ball Mill
- net_balance: string;       // Formula 22 — Net balance after deduction
-}
-
-interface SavedRmRow {
- id: string;
- date: string;
- product: string;
- opening_balance: number;
- qty_received: number;
- material_return: number;
- qty_issued_prodn: number;
- qty_issued_bal: number;
- dispatch_as_is: number;
- closing_balance: number;
- status: string;
- remarks: string;
- qty_issued_to_bal_mill: number;
- net_balance: number;
-}
-
-function computeRmClosing(e: RmEntry): number | null {
- const ob = Number(e.opening_balance);
- const rcv = Number(e.qty_received);
- const ret = Number(e.material_return);
- const isp = Number(e.qty_issued_prodn);
- const isb = Number(e.qty_issued_bal);
- const dis = Number(e.dispatch_as_is);
- if ([ob, rcv, ret, isp, isb, dis].some(v => !Number.isFinite(v))) return null;
- return ob + rcv + ret - isp - isb - dis;
-}
-
-function blankRmEntry(): RmEntry {
- return {
-  date: today(), product: "",
-  opening_balance: "", qty_received: "", material_return: "",
-  qty_issued_prodn: "", qty_issued_bal: "", dispatch_as_is: "",
-  closing_balance: null, status: "", remarks: "",
-  qty_issued_to_bal_mill: "", net_balance: "",
- };
-}
-
-function RawMaterialSection() {
- const { user } = useAuth();
- const { showToast } = useToast();
- const supabase = createClient();
-
- const [entry, setEntry]     = useState<RmEntry>(blankRmEntry());
- const [submitting, setSubmitting] = useState(false);
- const [history, setHistory]   = useState<SavedRmRow[]>([]);
- const [histLoading, setHistLoading] = useState(true);
- const [filterProduct, setFilterProduct] = useState<RmProduct | "ALL">("ALL");
-
- const closing = computeRmClosing(entry);
-
- const setField = <K extends keyof RmEntry>(key: K, val: RmEntry[K]) => {
-  setEntry(prev => {
-   const next = { ...prev, [key]: val };
-   return { ...next, closing_balance: computeRmClosing(next) };
-  });
- };
-
- const loadHistory = useCallback(async () => {
-  setHistLoading(true);
-  const { data, error } = await supabase
-   .from("stores_stock_ledger")
-   .select("id, transaction_date, remark")
-   .eq("reference_type", "rm_entry")
-   .order("transaction_date", { ascending: false })
-   .order("created_at", { ascending: false })
-   .limit(200);
-  if (error) { showToast("Could not load history: " + error.message, true); setHistLoading(false); return; }
-  const rows: SavedRmRow[] = [];
-  for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
-   try {
-    const p = JSON.parse(row.remark ?? "{}") as Partial<SavedRmRow>;
-    rows.push({
-     id: row.id, date: row.transaction_date,
-     product: p.product ?? "",
-     opening_balance: p.opening_balance ?? 0,
-     qty_received:   p.qty_received   ?? 0,
-     material_return: p.material_return ?? 0,
-     qty_issued_prodn: p.qty_issued_prodn ?? 0,
-     qty_issued_bal:  p.qty_issued_bal  ?? 0,
-     dispatch_as_is:  p.dispatch_as_is  ?? 0,
-     closing_balance: p.closing_balance ?? 0,
-     status:      p.status      ?? "",
-     remarks:     p.remarks     ?? "",
-     qty_issued_to_bal_mill: p.qty_issued_to_bal_mill ?? 0,
-     net_balance:      p.net_balance      ?? 0,
-    });
-   } catch { /* skip */ }
-  }
-  setHistory(rows); setHistLoading(false);
- }, [supabase, showToast]);
-
- useEffect(() => { loadHistory(); }, [loadHistory]);
-
- const handleProductChange = (product: RmProduct | "") => {
-  const last = history.find(r => r.product === product);
-  setEntry(prev => ({
-   ...blankRmEntry(),
-   date: prev.date,
-   product,
-   opening_balance: last ? String(last.closing_balance) : "",
-  }));
- };
-
- const handleSave = async () => {
-  if (!entry.product) { showToast("Select a product.", true); return; }
-  if (closing == null) { showToast("Fill all numeric fields.", true); return; }
-  if (!user) return;
-  setSubmitting(true);
-  try {
-   const { data: itemData } = await supabase
-    .from("stores_stock_items").select("id, factory_id")
-    .eq("category", "raw_material")
-    .ilike("item_name", "%" + entry.product + "%")
-    .limit(1).maybeSingle();
-   const itemId = (itemData as { id: string; factory_id: string } | null)?.id;
-   const factoryId = (itemData as { id: string; factory_id: string } | null)?.factory_id;
-   if (!itemId || !factoryId) {
-    showToast("No item found for \"" + entry.product + "\". Add it in Stock Ledger first.", true);
-    setSubmitting(false); return;
-   }
-   const payload: SavedRmRow = {
-    id: "",
-    date: entry.date,
-    product: entry.product,
-    opening_balance: Number(entry.opening_balance) || 0,
-    qty_received:   Number(entry.qty_received)   || 0,
-    material_return: Number(entry.material_return) || 0,
-    qty_issued_prodn: Number(entry.qty_issued_prodn) || 0,
-    qty_issued_bal:  Number(entry.qty_issued_bal)  || 0,
-    dispatch_as_is:  Number(entry.dispatch_as_is)  || 0,
-    closing_balance: closing,
-    status: entry.status,
-    remarks: entry.remarks,
-    qty_issued_to_bal_mill: Number(entry.qty_issued_to_bal_mill) || 0,
-    net_balance:      Number(entry.net_balance)      || closing,
-   };
-   const { error } = await supabase.from("stores_stock_ledger").insert({
-    item_id: itemId,
-    factory_id: factoryId,
-    transaction_date: entry.date,
-    transaction_source: "manual",
-    qty_received: payload.qty_received + payload.material_return,
-    qty_issued:  payload.qty_issued_prodn + payload.qty_issued_bal,
-    dispatch_qty: payload.dispatch_as_is,
-    closing_balance: closing,
-    reference_type: "rm_entry",
-    remark: JSON.stringify(payload),
-    entered_by: user.id,
-   });
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   showToast("Saved -- " + entry.product + " closing balance: " + closing.toFixed(3));
-   setEntry(blankRmEntry());
-   loadHistory();
-  } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
-  } finally { setSubmitting(false); }
- };
-
- const filtered = filterProduct === "ALL" ? history : history.filter(r => r.product === filterProduct);
-
- return (
-  <>
-   <div className="card">
-    <h3>Raw Material Entry</h3>
-    <div className="row2">
-     <div>
-      <label>Date *</label>
-      <input type="date" value={entry.date}
-       onChange={e => setField("date", e.target.value)} />
-     </div>
-     <div>
-      <label>Name of Product *</label>
-      <select value={entry.product}
-       onChange={e => handleProductChange(e.target.value as RmProduct | "")}>
-       <option value="">-- Select product --</option>
-       {RM_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
-      </select>
-     </div>
-    </div>
-
-    <div className="row3">
-     <div>
-      <label>Opening Balance</label>
-      <input type="number" step="0.001" placeholder="0"
-       value={entry.opening_balance}
-       onChange={e => setField("opening_balance", e.target.value)} />
-     </div>
-     <div>
-      <label>Qty Received</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={entry.qty_received}
-       onChange={e => setField("qty_received", e.target.value)} />
-     </div>
-     <div>
-      <label>Material Return</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={entry.material_return}
-       onChange={e => setField("material_return", e.target.value)} />
-     </div>
-    </div>
-
-    <div className="row3">
-     <div>
-      <label>Qty Issued for Prodn</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={entry.qty_issued_prodn}
-       onChange={e => setField("qty_issued_prodn", e.target.value)} />
-     </div>
-     <div>
-      <label>Qty Issued to Balance</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={entry.qty_issued_bal}
-       onChange={e => setField("qty_issued_bal", e.target.value)} />
-     </div>
-     <div>
-      <label>Dispatch as it is</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={entry.dispatch_as_is}
-       onChange={e => setField("dispatch_as_is", e.target.value)} />
-     </div>
-    </div>
-
-    <div className="row3">
-     <div>
-      <label>Closing Balance</label>
-      <input type="text" disabled
-       value={closing != null ? closing.toFixed(3) : "N/A"}
-       style={{
-        fontWeight: 700,
-        color: closing != null && closing < 0 ? "var(--warn)" : "var(--ok)",
-       }} />
-     </div>
-     <div>
-      <label>Status</label>
-      <select value={entry.status}
-       onChange={e => setField("status", e.target.value as StockStatus | "")}>
-       <option value="">-- Select --</option>
-       {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
-     </div>
-     <div>
-      <label>Remarks</label>
-      <input type="text" placeholder="Optional note..."
-       value={entry.remarks}
-       onChange={e => setField("remarks", e.target.value)} />
-     </div>
-    </div>
-
-    {/* Formula-computed fields (from Excel formulas -- editable overrides) */}
-    <div style={{ marginTop: 10, padding: "10px 12px",
-     background: "var(--clay-soft)", borderRadius: 8 }}>
-     <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
-      textTransform: "uppercase", marginBottom: 8 }}>
-      Formula Fields (Excel cross-references)
-     </div>
-     <div className="row3">
-      <div>
-       <label style={{ fontSize: 11 }}>
-        Closing Balance (C3+D3+E3-F3-G3-H3)
-      </label>
-       <input type="text" disabled
-        value={closing != null ? closing.toFixed(3) : "N/A"}
-        style={{ fontWeight: 700,
-         color: closing != null && closing < 0 ? "var(--warn)" : "var(--ok)" }} />
-      </div>
-      <div>
-       <label style={{ fontSize: 11 }}>
-        Qty Issued to Ball Mill (G col)
-      </label>
-       <input type="number" step="0.001" placeholder="0"
-        value={entry.qty_issued_to_bal_mill}
-        onChange={e => setField("qty_issued_to_bal_mill", e.target.value)} />
-       <div className="field-hint">Ref: VLOOKUP DAILY PRODN col 22</div>
-      </div>
-      <div>
-       <label style={{ fontSize: 11 }}>
-        Net Balance (M col = I - N)
-      </label>
-       <input type="number" step="0.001" placeholder="0"
-        value={entry.net_balance}
-        onChange={e => setField("net_balance", e.target.value)} />
-       <div className="field-hint">Override: closing - fixed deduction</div>
-      </div>
-     </div>
-    </div>
-   </div>
-
-   <button className="btn btn-primary" type="button"
-    disabled={submitting || !entry.product || closing == null}
-    onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Entry"}
-   </button>
-
-   <div className="card" style={{ marginTop: 16 }}>
-    <div className="helper-row">
-     <h3 style={{ margin: 0 }}>Raw Material History</h3>
-     <select value={filterProduct}
-      onChange={e => setFilterProduct(e.target.value as RmProduct | "ALL")}
-      style={{ width: "auto", padding: "6px 10px", fontSize: 12 }}>
-      <option value="ALL">All Products</option>
-      {RM_PRODUCTS.map(p => <option key={p} value={p}>{p}</option>)}
-     </select>
-    </div>
-    {histLoading
-     ? <div className="empty">Loading...</div>
-     : filtered.length === 0
-      ? <div className="empty">No entries yet.</div>
-      : (
-       <div style={{ overflowX: "auto" }}>
-        <table className="dash" style={{ minWidth: 900 }}>
-         <thead>
-          <tr>
-           <th>Date</th>
-           <th>Product</th>
-           <th style={{ textAlign: "right" }}>O/Bal</th>
-           <th style={{ textAlign: "right" }}>Qty Recd</th>
-           <th style={{ textAlign: "right" }}>Mat Return</th>
-           <th style={{ textAlign: "right" }}>Issued Prodn</th>
-           <th style={{ textAlign: "right" }}>Issued Bal</th>
-           <th style={{ textAlign: "right" }}>Dispatch</th>
-           <th style={{ textAlign: "right" }}>C/Bal</th>
-           <th style={{ textAlign: "right" }}>Ball Mill</th>
-           <th style={{ textAlign: "right" }}>Net Bal</th>
-           <th>Status</th>
-           <th>Remarks</th>
-          </tr>
-         </thead>
-         <tbody>
-          {filtered.map(row => (
-           <tr key={row.id}>
-            <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
-            <td style={{ fontSize: 12, fontWeight: 600 }}>{row.product}</td>
-            <td style={{ textAlign: "right" }}>{fmt(row.opening_balance)}</td>
-            <td style={{ textAlign: "right", color: row.qty_received > 0 ? "var(--ok)" : undefined }}>
-             {row.qty_received > 0 ? "+" + fmt(row.qty_received) : "0"}
-            </td>
-            <td style={{ textAlign: "right", color: row.material_return > 0 ? "var(--ok)" : undefined }}>
-             {row.material_return > 0 ? "+" + fmt(row.material_return) : "0"}
-            </td>
-            <td style={{ textAlign: "right", color: row.qty_issued_prodn > 0 ? "var(--warn)" : undefined }}>
-             {row.qty_issued_prodn > 0 ? fmt(row.qty_issued_prodn) : "0"}
-            </td>
-            <td style={{ textAlign: "right", color: row.qty_issued_bal > 0 ? "var(--warn)" : undefined }}>
-             {row.qty_issued_bal > 0 ? fmt(row.qty_issued_bal) : "0"}
-            </td>
-            <td style={{ textAlign: "right", color: row.dispatch_as_is > 0 ? "var(--clay)" : undefined }}>
-             {row.dispatch_as_is > 0 ? fmt(row.dispatch_as_is) : "0"}
-            </td>
-            <td style={{ textAlign: "right", fontWeight: 700,
-             color: row.closing_balance < 0 ? "var(--warn)" : undefined }}>
-             {fmt(row.closing_balance)}
-            </td>
-            <td style={{ textAlign: "right" }}>
-             {row.qty_issued_to_bal_mill > 0 ? fmt(row.qty_issued_to_bal_mill) : "0"}
-            </td>
-            <td style={{ textAlign: "right", fontWeight: 700,
-             color: row.net_balance < 0 ? "var(--warn)" : undefined }}>
-             {fmt(row.net_balance)}
-            </td>
-            <td>
-             <span style={{
-              fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 6,
-              background: row.status === "GOOD" ? "var(--ok-soft)"
-               : row.status === "OUT OF STOCK" ? "var(--warn-soft)"
-               : row.status === "LESS" ? "#fff3cd"
-               : "var(--clay-soft)",
-              color: row.status === "GOOD" ? "var(--ok)"
-               : row.status === "OUT OF STOCK" ? "var(--warn)"
-               : row.status === "LESS" ? "#7d6608"
-               : "var(--clay)",
-             }}>
-              {row.status || "N/A"}
-             </span>
-            </td>
-            <td style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: 120 }}>
-             {nilText(row.remarks)}
-            </td>
-           </tr>
-         ))}
-         </tbody>
-        </table>
-       </div>
-     )
-    }
-   </div>
   </>
-);
+ );
 }
 
 // =============================================================================
@@ -1163,7 +635,7 @@ function CodeDropdown({
        (Blanks) -- Clear
       </div>
       {filtered.map(c => (
-       <div key={c} onClick={() => { onChange; setOpen(false); setSearch(""); }}
+       <div key={c} onClick={() => { onChange(c); setOpen(false); setSearch(""); }}
         style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
          background: value === c ? "var(--clay-soft)" : undefined,
          color: value === c ? "var(--clay)" : "var(--ink)" }}>
@@ -1256,62 +728,24 @@ function CodeFilterDropdown({
 // =============================================================================
 
 const RECEIVED_CODES = [
- "008/2026-27","Apollo bag","Ceat108 bag","Chem Grind Oil","Code R5299",
- "Crude Sulphur Shifting","DC no. 323","Document not Received","DS-10",
- "ELASTO 541 OIL","Export Pallet Loading","For Lab","For Repair",
- "Gear oil 320","Jumbo Bags Shifting","JKI bag","Jumbo Bags Loading",
- "Jumbo Bags Unloading","Lanxess bag","LR no. 27482","LR no. 61084",
- "LR no. 61086","LR No 357","LR No.","LR No. 1067","LR No. 120",
- "LR No. 121","LR No. 122","LR No. 123","LR No. 124","LR No. 125",
- "LR No. 126","LR No. 127","LR No. 128","LR No. 129","LR No. 137",
- "LR No. 139","LR No. 151","LR no. 153","LR no. 154","LR No. 227809",
- "LR No. 2739","LR No. 2741","LR No. 2742","LR No. 2743","LR No. 2744",
- "LR No. 27458","LR No. 27459","LR No. 27460","LR No. 27462","LR No. 27464",
- "LR No. 27467","LR No. 27470","LR No. 27478","LR No. 27479","LR No. 27484",
- "LR No. 27489","LR No. 27490","LR No. 27492","LR No. 27493","LR No. 27494",
- "LR No. 27495","LR No. 27498","LR No. 27499","LR No. 27500","LR No. 27801",
- "LR No. 27802","LR No. 27803","LR No. 27807","LR No. 27808","LR No. 2823",
- "LR No. 2824","LR No. 2825","LR No. 2826","LR No. 2832","LR No. 2835",
- "LR No. 2836","LR No. 2837","LR No. 2838","LR No. 2839","LR No. 2840",
- "LR No. 2841","LR No. 2842","LR No. 2843","LR No. 2848","LR No. 2849",
- "LR No. 2850","LR No. 2851","LR No. 2852","LR No. 2853","LR No. 2854",
- "LR No. 2855","LR No. 2856","LR No. 2863","LR No. 2864","LR No. 2865",
- "LR No. 2866","LR No. 2867","LR No. 2868","LR No. 2869","LR No. 2870",
- "LR No. 2871","LR No. 2872","LR No. 2873","LR No. 2874","LR No. 2875",
- "LR No. 2876","LR No. 2877","LR No. 2878","LR No. 2879","LR No. 2880",
- "LR No. 2884","LR No. 2885","LR No. 2886","LR No. 2887","LR No. 2888",
- "LR No. 2889","LR No. 2890","LR No. 2891","LR No. 2892","LR No. 2893",
- "LR No. 2894","LR No. 2895","LR No. 2896","LR No. 2897","LR No. 2898",
- "LR No. 2901","LR No. 2902","LR No. 2903","LR No. 2904","LR No. 2905",
- "LR No. 2912","LR No. 2913","LR No. 2914","LR No. 2915","LR No. 3473",
- "LR No. 3475","Lr No. 353","LR No. 354","LR No. 355","LR No. 359",
- "LR No. 361","Lr No. 363","Lr No. 366","LR No. 377","LR No. 378",
- "LR No. 381","Lr No. 385","LR No. 395","LR No. 398","LR No. 400",
- "LR No. 401","LR No. 4152176641","LR No. 60685","LR No. 60686",
- "LR No. 60690","LR No. 60703","LR No. 60754","LR No. 60783","LR No. 60784",
- "LR No. 60786","LR No. 60801","LR No. 60802","LR No. 60822","LR No. 60823",
- "LR No. 60846","LR No. 60847","LR No. 60868","LR No. 60869","LR No. 60893",
- "LR No. 60898","LR No. 60912","LR No. 60919","LR No. 60958","LR No. 60965",
- "LR No. 60982","LR No. 60984","LR No. 60996","LR No. 61009","LR No. 61057",
- "LR No. 61058","LR No. 61083","LR No. 61117","LR No. 61133","LR No. 61134",
- "LR No. 61185","LR No. 61277","LR No. 61286","LR No. 61288","LR No. 61289",
- "LR No. 61387","LR No. 61388","LR No. 61403","LR No. 61658","LR No. 61659",
- "LR No. 61667","LR No. 61668","LR No. 61669","LR No. 61671","LR No. 61680",
- "LR No. 61685","Lr No. 61734","LR no. 61735","LR no. 61740","LR No. 61743",
- "LR No. 61751","LR No. 61755","LR No. 61756","LR No. 61764","LR No. 61765",
- "LR No. 61766","LR No. 66060","LR No. 66076","LR no. 66084","LR No. 66089",
- "LR No. 66098","LR No. 66144","LR No. 66160","LR No. 66213","LR No. 66216",
- "LR No. 66222","LR No. 66227","LR No. 66229","LR No. 66258","LR No. 66269",
- "LR No. 66274","LR No. 66289","LR No. 66404","LR No. 66424","LR No. 66427",
- "LR No. 66434","LR No. 66453","LR No. 66489","LR No. 66492","LR No. NA",
- "LR No. ZULFO/26-27/0104","LR No. ZULFO/26-27/0105","LR No. ZULFO/26-27/0106",
- "LR No. ZULFO/26-27/0107","LR No. ZULFO/26-27/0109","LR No. ZULFO/26-27/0110",
- "LR No. ZULFO/26-27/0111","LR No. ZULFO/26-27/0112","LR No.1081",
- "LR No.26605","LR No.2881","LR No.2882","M2615 bag","Old bag",
- "Pallet Loading","Pallet Unloadin","Power Oil M4150","R5299 bag","Return",
- "Returned","Returned after repairing","Rubber bag","Sulhphur Shifting",
- "Sulphur loading","Sulphur Shifting","sulphur Unloading","Sulphur Unloading at B-11",
- "Sulphur Unloding","W10 bag","Westage Loading",
+ "Ceat108 bag",
+ "M2615 bag",
+ "Lanxess bag",
+ "R5299 bag",
+ "Apollo bag",
+ "W10 bag",
+ "Rubber bag",
+ "JKI bag",
+ "Jumbo bag",
+ "old bag",
+ "Export Bag",
+ "Wooden Pallet",
+ "Chem Grind Oil",
+ "Gear oil 320",
+ "Power Oil M4150",
+ "ELASTO 541 OIL",
+ "Magnesium Carbonate",
+ "Liquid Sulphur(Molten)",
 ] as const;
 
 interface ReceivedEntry {
@@ -1579,10 +1013,24 @@ function ReceivedSection() {
 // =============================================================================
 
 const SUPPLIED_CODES = [
- "Code 160108","Code 2615","Code Ceat 108","Code Crude","Code Export",
- "Code JKI","Code Lanxess","Code Lanxess 2% Oil","Code M2615","Code Old",
- "Code R5299","Code Rubber","Code SC","Code W10","DS-10",
- "For Apollo","For Repair","For Repairing","Replace",
+ "Ceat108 bag",
+ "M2615 bag",
+ "Lanxess bag",
+ "R5299 bag",
+ "Apollo bag",
+ "W10 bag",
+ "Rubber bag",
+ "JKI bag",
+ "Jumbo bag",
+ "old bag",
+ "Export Bag",
+ "Wooden Pallet",
+ "Chem Grind Oil",
+ "Gear oil 320",
+ "Power Oil M4150",
+ "ELASTO 541 OIL",
+ "Magnesium Carbonate",
+ "Liquid Sulphur(Molten)",
 ] as const;
 
 interface SuppliedEntry {
@@ -1927,12 +1375,28 @@ function DailyProductionSection() {
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedDailyProdRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
+ // Edit mode: holds the ledger row id being edited (null = new entry)
+ const [editId, setEditId]      = useState<string | null>(null);
 
  // Compute total MT live from current entry
  const totalMt = calcTotalMt(entry);
 
  const setField = (key: string, val: string) => {
   setEntry(prev => ({ ...prev, [key]: val }));
+ };
+
+ // Load a saved row into the form for editing
+ const startEdit = (row: SavedDailyProdRow) => {
+  const restored: DailyProdRow = { date: row.date };
+  DAILY_PROD_COLS.forEach(c => { restored[c.key] = row.values[c.key] > 0 ? String(row.values[c.key]) : ""; });
+  setEntry(restored);
+  setEditId(row.id);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
+
+ const cancelEdit = () => {
+  setEntry(blankDailyProdRow());
+  setEditId(null);
  };
 
  const loadHistory = useCallback(async () => {
@@ -2008,22 +1472,31 @@ function DailyProductionSection() {
     total_mt: totalMt,
    };
 
-   const { error } = await supabase.from("stores_stock_ledger").insert({
-    item_id:      itemData.id,
-    factory_id:     itemData.factory_id,
-    transaction_date:  entry.date,
-    transaction_source: "manual",
-    qty_received:    0,
-    qty_issued:     0,
-    dispatch_qty:    0,
-    closing_balance:  0,   // daily prod entry — not a stock movement
-    reference_type:   "daily_prod",
-    remark:       JSON.stringify(payload),
-    entered_by:     user.id,
-   });
-
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   showToast("Daily production saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+   if (editId) {
+    // UPDATE existing row
+    const { error } = await supabase.from("stores_stock_ledger")
+     .update({ transaction_date: entry.date, remark: JSON.stringify(payload) })
+     .eq("id", editId);
+    if (error) { showToast("Update failed: " + error.message, true); return; }
+    showToast("Updated -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+    setEditId(null);
+   } else {
+    const { error } = await supabase.from("stores_stock_ledger").insert({
+     item_id:      itemData.id,
+     factory_id:     itemData.factory_id,
+     transaction_date:  entry.date,
+     transaction_source: "manual",
+     qty_received:    0,
+     qty_issued:     0,
+     dispatch_qty:    0,
+     closing_balance:  0,
+     reference_type:   "daily_prod",
+     remark:       JSON.stringify(payload),
+     entered_by:     user.id,
+    });
+    if (error) { showToast("Save failed: " + error.message, true); return; }
+    showToast("Daily production saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+   }
    setEntry(blankDailyProdRow());
    loadHistory();
   } catch (e: unknown) {
@@ -2042,7 +1515,25 @@ function DailyProductionSection() {
   <>
    {/* ── Entry form ── */}
    <div className="card">
-    <h3>Daily Production Entry</h3>
+    <h3>{editId ? "Edit Daily Production Entry" : "Daily Production Entry"}</h3>
+
+    {/* Edit mode banner */}
+    {editId && (
+     <div style={{
+      background: "var(--warn-soft)", border: "1px solid var(--warn)",
+      borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+     }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
+       Editing existing entry — save to update, or cancel to discard.
+      </span>
+      <button type="button" className="btn btn-ghost"
+       style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
+       onClick={cancelEdit}>
+       Cancel Edit
+      </button>
+     </div>
+    )}
 
     <div style={{ marginBottom: 12 }}>
      <label>Date *</label>
@@ -2117,7 +1608,7 @@ function DailyProductionSection() {
 
    <button className="btn btn-primary" type="button"
     disabled={submitting} onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Daily Production"}
+    {submitting ? "Saving..." : editId ? "Update Entry" : "Save Daily Production"}
    </button>
 
    {/* ── History table ── */}
@@ -2143,12 +1634,13 @@ function DailyProductionSection() {
           ))}
            <th style={{ textAlign: "right", color: "var(--clay)" }}>
             TOTAL MT
-          </th>
+           </th>
+           <th></th>
           </tr>
          </thead>
          <tbody>
           {history.map(row => (
-           <tr key={row.id}>
+           <tr key={row.id} style={{ background: editId === row.id ? "var(--warn-soft)" : undefined }}>
             <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>
              {fmtDate(row.date)}
             </td>
@@ -2162,6 +1654,19 @@ function DailyProductionSection() {
             <td style={{ textAlign: "right", fontWeight: 700,
              color: "var(--clay)" }}>
              {row.total_mt.toFixed(3)}
+            </td>
+            <td>
+             <button type="button"
+              onClick={() => startEdit(row)}
+              style={{
+               padding: "3px 10px", fontSize: 11, fontWeight: 700,
+               border: "1px solid var(--clay)", borderRadius: 6,
+               background: editId === row.id ? "var(--warn)" : "var(--clay-soft)",
+               color: editId === row.id ? "#fff" : "var(--clay)",
+               cursor: "pointer", whiteSpace: "nowrap",
+              }}>
+              {editId === row.id ? "Editing" : "Edit"}
+             </button>
             </td>
            </tr>
          ))}
@@ -2597,8 +2102,16 @@ function PackingMaterialSection() {
  const [history, setHistory]    = useState<SavedPmRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
  const [filterProduct, setFilterProduct] = useState<PmProduct | "ALL">("ALL");
+ const [editId, setEditId]      = useState<string | null>(null);
 
  const clBal = computePmCl(entry);
+
+ // Qty Required auto-calc: based on last issued qty as a reference baseline
+ const lastIssued = entry.product
+  ? [...history]
+   .filter(r => r.product === entry.product)
+   .sort((a, b) => b.date.localeCompare(a.date))[0]?.qty_issued ?? null
+  : null;
 
  const setField = <K extends keyof PmEntry>(key: K, val: PmEntry[K]) => {
   setEntry(prev => {
@@ -2606,6 +2119,21 @@ function PackingMaterialSection() {
    return { ...next, cl_bal: computePmCl(next) };
   });
  };
+
+ // Load a saved row into the form for editing
+ const startEdit = (row: SavedPmRow) => {
+  setEntry({
+   date: row.date, product: row.product as PmProduct,
+   op_bal: String(row.op_bal), qty_received: String(row.qty_received),
+   by_transfer: String(row.by_transfer), qty_issued: String(row.qty_issued),
+   to_transfer: String(row.to_transfer), cl_bal: row.cl_bal,
+   status: row.status, remark: row.remark,
+  });
+  setEditId(row.id);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
+
+ const cancelEdit = () => { setEntry(blankPmEntry()); setEditId(null); };
 
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
@@ -2640,15 +2168,18 @@ function PackingMaterialSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- // Auto-fill op_bal from last closing balance for this product
+ // Auto-fill op_bal from most recent closing balance for this product (sorted by date)
  const handleProductChange = (product: PmProduct | "") => {
-  const last = history.find(r => r.product === product);
+  const latest = [...history]
+   .filter(r => r.product === product)
+   .sort((a, b) => b.date.localeCompare(a.date))[0];
   setEntry(prev => ({
    ...blankPmEntry(),
    date: prev.date,
    product,
-   op_bal: last ? String(last.cl_bal) : "",
+   op_bal: latest ? String(latest.cl_bal) : "",
   }));
+  setEditId(null);
  };
 
  const handleSave = async () => {
@@ -2690,22 +2221,33 @@ function PackingMaterialSection() {
     remark:    entry.remark,
    };
 
-   const { error } = await supabase.from("stores_stock_ledger").insert({
-    item_id:      anchor.id,
-    factory_id:     anchor.factory_id,
-    transaction_date:  entry.date,
-    transaction_source: "manual",
-    qty_received:    payload.qty_received + payload.by_transfer,
-    qty_issued:     payload.qty_issued + payload.to_transfer,
-    dispatch_qty:    0,
-    closing_balance:  clBal,
-    reference_type:   "pm_entry",
-    remark:       JSON.stringify(payload),
-    entered_by:     user.id,
-   });
+   const { error: saveErr } = editId
+    ? await supabase.from("stores_stock_ledger")
+      .update({
+       transaction_date: entry.date,
+       qty_received:   payload.qty_received + payload.by_transfer,
+       qty_issued:    payload.qty_issued + payload.to_transfer,
+       closing_balance: clBal,
+       remark:      JSON.stringify(payload),
+      })
+      .eq("id", editId)
+    : await supabase.from("stores_stock_ledger").insert({
+      item_id:      anchor.id,
+      factory_id:     anchor.factory_id,
+      transaction_date:  entry.date,
+      transaction_source: "manual",
+      qty_received:    payload.qty_received + payload.by_transfer,
+      qty_issued:     payload.qty_issued + payload.to_transfer,
+      dispatch_qty:    0,
+      closing_balance:  clBal,
+      reference_type:   "pm_entry",
+      remark:       JSON.stringify(payload),
+      entered_by:     user.id,
+     });
 
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   showToast("Saved -- " + entry.product + " Cl. Bal: " + clBal.toFixed(0));
+   if (saveErr) { showToast((editId ? "Update" : "Save") + " failed: " + saveErr.message, true); return; }
+   showToast((editId ? "Updated" : "Saved") + " -- " + entry.product + " Cl. Bal: " + clBal.toFixed(0));
+   setEditId(null);
    setEntry(blankPmEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -2719,7 +2261,25 @@ function PackingMaterialSection() {
  return (
   <>
    <div className="card">
-    <h3>Packing Material Entry</h3>
+    <h3>{editId ? "Edit Packing Material Entry" : "Packing Material Entry"}</h3>
+
+    {/* Edit mode banner */}
+    {editId && (
+     <div style={{
+      background: "var(--warn-soft)", border: "1px solid var(--warn)",
+      borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+     }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
+       Editing existing entry — save to update, or cancel to discard.
+      </span>
+      <button type="button" className="btn btn-ghost"
+       style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
+       onClick={cancelEdit}>
+       Cancel Edit
+      </button>
+     </div>
+    )}
 
     {/* Row 1: Date | Name of Product */}
     <div className="row2">
@@ -2751,6 +2311,11 @@ function PackingMaterialSection() {
       <input type="number" min="0" step="1" placeholder="0"
        value={entry.qty_received}
        onChange={e => setField("qty_received", e.target.value)} />
+      {lastIssued !== null && (
+       <div className="field-hint" style={{ marginTop: 4, color: "var(--clay)", fontWeight: 600 }}>
+        Qty Required (based on last issue): {lastIssued.toFixed(0)} bags
+       </div>
+      )}
      </div>
      <div>
       <label>By Transfer</label>
@@ -2807,7 +2372,7 @@ function PackingMaterialSection() {
    <button className="btn btn-primary" type="button"
     disabled={submitting || !entry.product || clBal == null}
     onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Packing Material Entry"}
+    {submitting ? "Saving..." : editId ? "Update Entry" : "Save Packing Material Entry"}
    </button>
 
    {/* History table */}
@@ -2841,11 +2406,12 @@ function PackingMaterialSection() {
            <th style={{ textAlign: "right" }}>Cl. Bal</th>
            <th>Status</th>
            <th>Remark</th>
+           <th></th>
           </tr>
          </thead>
          <tbody>
           {filtered.map(row => (
-           <tr key={row.id}>
+           <tr key={row.id} style={{ background: editId === row.id ? "var(--warn-soft)" : undefined }}>
             <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
             <td style={{ fontSize: 12, fontWeight: 600 }}>{row.product}</td>
             <td style={{ textAlign: "right" }}>{row.op_bal.toFixed(0)}</td>
@@ -2887,6 +2453,18 @@ function PackingMaterialSection() {
             </td>
             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
              {nilText(row.remark)}
+            </td>
+            <td>
+             <button type="button" onClick={() => startEdit(row)}
+              style={{
+               padding: "3px 10px", fontSize: 11, fontWeight: 700,
+               border: "1px solid var(--clay)", borderRadius: 6,
+               background: editId === row.id ? "var(--warn)" : "var(--clay-soft)",
+               color: editId === row.id ? "#fff" : "var(--clay)",
+               cursor: "pointer", whiteSpace: "nowrap",
+              }}>
+              {editId === row.id ? "Editing" : "Edit"}
+             </button>
             </td>
            </tr>
          ))}
@@ -3010,6 +2588,7 @@ function FinishedGoodsSection() {
  const [history, setHistory]    = useState<SavedFgRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
  const [filterProduct, setFilterProduct] = useState<FgProductName | "ALL">("ALL");
+ const [editId, setEditId]      = useState<string | null>(null);
 
  const selectedProd = FG_PRODUCTS.find(p => p.name === entry.product);
  const bagKg = selectedProd?.bagKg ?? 25;
@@ -3060,18 +2639,38 @@ function FinishedGoodsSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- // Auto-fill op_bal from last closing balance for this product
+ // Load a saved row back into the form for editing
+ const startEdit = (row: SavedFgRow) => {
+  setEntry({
+   date: row.date, product: row.product as FgProductName,
+   op_bal: String(row.op_bal), production: String(row.production),
+   repacking_by_tr: String(row.repacking_by_tr),
+   less_packing_stock: String(row.less_packing_stock),
+   transfer_to_tr: String(row.transfer_to_tr), dispatch: String(row.dispatch),
+   cl_bal: row.cl_bal, total_mt: row.total_mt, remark: row.remark,
+  });
+  setEditId(row.id);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
+
+ const cancelEdit = () => { setEntry(blankFgEntry()); setEditId(null); };
+
+ // Auto-fill op_bal from the most recent closing balance for this product (task 4)
  const handleProductChange = (product: FgProductName | "") => {
-  const last = history.find(r => r.product === product);
+  // Sort by date descending to always get the latest entry
+  const latest = [...history]
+   .filter(r => r.product === product)
+   .sort((a, b) => b.date.localeCompare(a.date))[0];
   const bk = FG_PRODUCTS.find(p => p.name === product)?.bagKg ?? 25;
-  const cl = last ? last.cl_bal : null;
+  const cl = latest ? latest.cl_bal : null;
   setEntry({
    ...blankFgEntry(),
    date: entry.date, product,
-   op_bal: last ? String(last.cl_bal) : "",
+   op_bal: latest ? String(latest.cl_bal) : "",
    cl_bal: cl,
    total_mt: cl != null ? (cl * bk) / 1000 : null,
   });
+  setEditId(null);
  };
 
  const handleSave = async () => {
@@ -3107,21 +2706,38 @@ function FinishedGoodsSection() {
     total_mt:      totalMt ?? 0,
     remark:       entry.remark,
    };
-   const { error } = await supabase.from("stores_stock_ledger").insert({
-    item_id:      anchor.id,
-    factory_id:     anchor.factory_id,
-    transaction_date:  entry.date,
-    transaction_source: "manual",
-    qty_received:    payload.production + payload.repacking_by_tr,
-    qty_issued:     payload.less_packing_stock + payload.transfer_to_tr,
-    dispatch_qty:    payload.dispatch,
-    closing_balance:  clBal,
-    reference_type:   "fg_entry",
-    remark:       JSON.stringify(payload),
-    entered_by:     user.id,
-   });
-   if (error) { showToast("Save failed: " + error.message, true); return; }
-   showToast("Saved -- " + entry.product + " C/Bal: " + clBal.toFixed(0) + " bags | " + (totalMt ?? 0).toFixed(3) + " MT");
+   if (editId) {
+    // UPDATE existing row in edit mode
+    const { error } = await supabase.from("stores_stock_ledger")
+     .update({
+      transaction_date: entry.date,
+      qty_received:   payload.production + payload.repacking_by_tr,
+      qty_issued:    payload.less_packing_stock + payload.transfer_to_tr,
+      dispatch_qty:   payload.dispatch,
+      closing_balance: clBal,
+      remark:      JSON.stringify(payload),
+     })
+     .eq("id", editId);
+    if (error) { showToast("Update failed: " + error.message, true); return; }
+    showToast("Updated -- " + entry.product + " C/Bal: " + clBal.toFixed(0) + " bags | " + (totalMt ?? 0).toFixed(3) + " MT");
+    setEditId(null);
+   } else {
+    const { error } = await supabase.from("stores_stock_ledger").insert({
+     item_id:      anchor.id,
+     factory_id:     anchor.factory_id,
+     transaction_date:  entry.date,
+     transaction_source: "manual",
+     qty_received:    payload.production + payload.repacking_by_tr,
+     qty_issued:     payload.less_packing_stock + payload.transfer_to_tr,
+     dispatch_qty:    payload.dispatch,
+     closing_balance:  clBal,
+     reference_type:   "fg_entry",
+     remark:       JSON.stringify(payload),
+     entered_by:     user.id,
+    });
+    if (error) { showToast("Save failed: " + error.message, true); return; }
+    showToast("Saved -- " + entry.product + " C/Bal: " + clBal.toFixed(0) + " bags | " + (totalMt ?? 0).toFixed(3) + " MT");
+   }
    setEntry(blankFgEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -3144,7 +2760,25 @@ function FinishedGoodsSection() {
  return (
   <>
    <div className="card">
-    <h3>Finished Goods Entry (Sulphur Powder)</h3>
+    <h3>{editId ? "Edit Finished Goods Entry" : "Finished Goods Entry (Sulphur Powder)"}</h3>
+
+    {/* Edit mode banner */}
+    {editId && (
+     <div style={{
+      background: "var(--warn-soft)", border: "1px solid var(--warn)",
+      borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+     }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
+       Editing existing entry — save to update, or cancel to discard.
+      </span>
+      <button type="button" className="btn btn-ghost"
+       style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
+       onClick={cancelEdit}>
+       Cancel Edit
+      </button>
+     </div>
+    )}
 
     {/* Row 1: Date | Product */}
     <div className="row2">
@@ -3247,7 +2881,7 @@ function FinishedGoodsSection() {
    <button className="btn btn-primary" type="button"
     disabled={submitting || !entry.product || clBal == null}
     onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Finished Goods Entry"}
+    {submitting ? "Saving..." : editId ? "Update Entry" : "Save Finished Goods Entry"}
    </button>
 
    {/* History table */}
@@ -3282,11 +2916,12 @@ function FinishedGoodsSection() {
            <th style={{ textAlign: "right" }}>C/BAL Bags</th>
            <th style={{ textAlign: "right", color: "var(--clay)" }}>TOTAL MT</th>
            <th>Remark</th>
+           <th></th>
           </tr>
          </thead>
          <tbody>
           {filtered.map(row => (
-           <tr key={row.id}>
+           <tr key={row.id} style={{ background: editId === row.id ? "var(--warn-soft)" : undefined }}>
             <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
             <td style={{ fontSize: 12, fontWeight: 600, maxWidth: 160, whiteSpace: "normal" }}>
              {row.product}
@@ -3323,6 +2958,18 @@ function FinishedGoodsSection() {
             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
              {nilText(row.remark)}
             </td>
+            <td>
+             <button type="button" onClick={() => startEdit(row)}
+              style={{
+               padding: "3px 10px", fontSize: 11, fontWeight: 700,
+               border: "1px solid var(--clay)", borderRadius: 6,
+               background: editId === row.id ? "var(--warn)" : "var(--clay-soft)",
+               color: editId === row.id ? "#fff" : "var(--clay)",
+               cursor: "pointer", whiteSpace: "nowrap",
+              }}>
+              {editId === row.id ? "Editing" : "Edit"}
+             </button>
+            </td>
            </tr>
          ))}
           {/* TOTAL row */}
@@ -3339,6 +2986,7 @@ function FinishedGoodsSection() {
             <td style={{ textAlign: "right", fontWeight: 700 }}>{totals.cl_bal.toFixed(0)}</td>
             <td style={{ textAlign: "right", fontWeight: 700,
              color: "var(--clay)", fontSize: 14 }}>{totals.total_mt.toFixed(3)}</td>
+            <td></td>
             <td></td>
            </tr>
          )}
