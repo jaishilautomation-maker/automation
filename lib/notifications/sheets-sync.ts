@@ -88,6 +88,17 @@ export interface JobCardSheetRow {
   actual_oil_consumption_kg?:     number | null;
   oil_variance_kg?:               number | null;
   oil_extra_leftover_balance_kg?: number | null;
+  classifier_vfd?:                string | null;
+  blower_inlet_valve?:            string | null;
+  blower_outlet_valve?:           string | null;
+  finished_goods_bag?:            string | null;
+  packing_size?:                  string | null;
+  qc_incharge_note?:              string | null;
+  stores_incharge_note?:          string | null;
+  work_details?:                  string | null;
+  checkpoint_machine_cleaning?:   string | null;
+  checkpoint_roller_check?:       string | null;
+  checkpoint_mesh_cloth_check?:   string | null;
   operator_by?:                   string | null;
   operator_submitted_at?:         string | null;
   // Lab stage
@@ -122,6 +133,17 @@ const JOB_CARD_COLUMNS: (keyof JobCardSheetRow)[] = [
   "actual_oil_consumption_kg",
   "oil_variance_kg",
   "oil_extra_leftover_balance_kg",
+  "classifier_vfd",
+  "blower_inlet_valve",
+  "blower_outlet_valve",
+  "finished_goods_bag",
+  "packing_size",
+  "qc_incharge_note",
+  "stores_incharge_note",
+  "work_details",
+  "checkpoint_machine_cleaning",
+  "checkpoint_roller_check",
+  "checkpoint_mesh_cloth_check",
   "operator_by",
   "operator_submitted_at",
   "lab_result",
@@ -154,6 +176,17 @@ export const JOB_CARD_HEADERS: string[] = [
   "Actual Oil Consumed (kg)",
   "Oil Variance (kg)",
   "Oil Extra / Leftover Balance (kg)",
+  "Classifier VFD",
+  "Blower Inlet Valve",
+  "Blower Outlet Valve",
+  "Finished Goods Bag",
+  "Packing Size",
+  "QC Incharge Note",
+  "Stores Incharge Note",
+  "Work Details",
+  "Machine Cleaning Check",
+  "Roller Check",
+  "Mesh Cloth Check",
   "Operator By",
   "Operator Submitted At",
   "Lab Result",
