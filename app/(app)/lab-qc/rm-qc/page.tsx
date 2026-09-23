@@ -85,6 +85,9 @@ export default function RmQcPage() {
   const [batchId, setBatchId]         = useState("");
   const [batches, setBatches]         = useState<BatchOption[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  // A-20/1 Crude Sulphur: invoice number as direct text input (find-or-create batch)
+  const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
+  const [resolvingInvoice, setResolvingInvoice]     = useState(false);
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [values, setValues]           = useState<Record<string, string>>({});
@@ -321,6 +324,51 @@ export default function RmQcPage() {
   }, [testDefs]);
 
   // ---------------------------------------------------------------------------
+  // Crude Sulphur: resolve the typed invoice number to a batch (find-or-create)
+  // on blur, so the shared batchId-based submit flow keeps working with a
+  // direct text input instead of a dropdown of existing receipts.
+  // ---------------------------------------------------------------------------
+  const resolveCrudeInvoice = useCallback(async () => {
+    const inv = crudeInvoiceNumber.trim();
+    if (!inv || !activeFactory || !user || !materialId) { setBatchId(""); return; }
+    setResolvingInvoice(true);
+    try {
+      const { data: existing } = await supabase
+        .from("batches")
+        .select("id")
+        .eq("factory_id", activeFactory.id)
+        .eq("batch_number", inv)
+        .maybeSingle();
+
+      if (existing) { setBatchId(existing.id); return; }
+
+      const { data: nb, error } = await supabase
+        .from("batches")
+        .insert({
+          batch_number:    inv,
+          factory_id:      activeFactory.id,
+          material_id:     materialId,
+          product_id:      null,
+          batch_type:      "rm",
+          production_date: new Date().toISOString().slice(0, 10),
+          quantity:        null,
+          unit:            null,
+          source_batch_id: null,
+          created_by:      user.id,
+        })
+        .select("id")
+        .single();
+
+      if (error || !nb) { showToast("Could not register invoice: " + (error?.message ?? "unknown"), true); return; }
+      setBatchId(nb.id);
+    } catch {
+      showToast("Network error resolving invoice.", true);
+    } finally {
+      setResolvingInvoice(false);
+    }
+  }, [crudeInvoiceNumber, activeFactory, user, materialId, supabase, showToast]);
+
+  // ---------------------------------------------------------------------------
   // Submit (non-Sulphur Powder materials)
   // ---------------------------------------------------------------------------
   const handleSubmit = async () => {
@@ -537,22 +585,22 @@ export default function RmQcPage() {
         <>
           <div className="card">
             <label>Invoice Number *</label>
-            {loadingBatches ? <div className="field-hint">Loading…</div>
-              : batches.length === 0 ? (
-                <div className="field-hint" style={{ color: "var(--warn)" }}>
-                  No receipts found.{" "}
-                  <Link href="/lab-qc/rm-receipt" style={{ color: "var(--clay)" }}>Create a receipt first →</Link>
-                </div>
-              ) : (
-                <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-                  <option value="">— Select invoice —</option>
-                  {batches.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.batch_number} · {b.production_date}
-                    </option>
-                  ))}
-                </select>
-              )}
+            <input
+              type="text"
+              placeholder="Enter invoice number"
+              value={crudeInvoiceNumber}
+              onChange={e => { setCrudeInvoiceNumber(e.target.value); setBatchId(""); }}
+              onBlur={resolveCrudeInvoice}
+            />
+            {resolvingInvoice && <div className="field-hint">Linking invoice…</div>}
+            {!resolvingInvoice && crudeInvoiceNumber.trim() && batchId && (
+              <div className="field-hint" style={{ color: "var(--ok)" }}>
+                ✓ Invoice linked — enter test details below.
+              </div>
+            )}
+            {!resolvingInvoice && crudeInvoiceNumber.trim() && !batchId && (
+              <div className="field-hint">Tab out of the field to link this invoice.</div>
+            )}
           </div>
 
           {batchId && (
