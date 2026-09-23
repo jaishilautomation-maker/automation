@@ -7,12 +7,16 @@
 -- coa_customer_specs table so no new plumbing is needed.
 --
 -- HOW IT PLUGS IN:
---   The RM QC page loads specs via
---       SELECT ... FROM coa_customer_specs WHERE party_code = <selected grade>
---   exactly like Batch Analysis loads by customer party_code. We register two
---   synthetic "grade" party codes so a Grade selector (A / B) drives the lookup:
---       SULPHUR_A_GRADE  → IS-6655 A Grade limits
---       SULPHUR_B_GRADE  → IS-6655 B Grade limits
+--   The chemist does NOT pick a grade. The RM QC page auto-loads the A-grade
+--   limits (party_code = 'SULPHUR_A_GRADE') to show each parameter's spec +
+--   pass/fail inline, then DETERMINES the grade from the entered values:
+--       purity >= 98 AND all A limits met            → A
+--       purity 90–97.99, or purity >= 98 but a limit exceeded → B
+--       purity < 90                                  → Reject
+--   We register two synthetic "grade" party codes:
+--       SULPHUR_A_GRADE  → IS-6655 A Grade limits  (used by the page)
+--       SULPHUR_B_GRADE  → IS-6655 B Grade limits  (reference only; the page
+--                           derives B from the A-grade check, does not load it)
 --
 --   parameter MUST match an ACTIVE Crude Sulphur (material SULPHUR_CRUDE, phase
 --   'none') qc_test_definitions test_key so the field badge lines up:

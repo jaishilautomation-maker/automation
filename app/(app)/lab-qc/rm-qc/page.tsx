@@ -62,12 +62,17 @@ interface SpecRow {
 
 type RiskStatus = "pass" | "fail" | "none";
 
-// Synthetic grade "party" codes seeded in migration 048 that carry the
-// IS-6655 A/B incoming spec limits for Crude Sulphur.
-const CRUDE_GRADE_OPTIONS: { code: string; label: string }[] = [
-  { code: "SULPHUR_A_GRADE", label: "A Grade" },
-  { code: "SULPHUR_B_GRADE", label: "B Grade" },
-];
+type CrudeGrade = "A" | "B" | "Reject" | null;
+
+// Synthetic "party" code seeded in migration 048 carrying the IS-6655 A-Grade
+// incoming spec limits for Crude Sulphur. The chemist does NOT pick a grade —
+// values are entered and the grade is auto-determined from them against these
+// A-grade limits (see determineCrudeGrade below).
+const CRUDE_A_GRADE_CODE = "SULPHUR_A_GRADE";
+
+// IS-6655 purity bands (% solubility in CS2) used to auto-grade a batch.
+const CRUDE_PURITY_A_MIN = 98.0;   // >= 98 and within A limits → A
+const CRUDE_PURITY_B_MIN = 90.0;   // >= 90 (but not A) → B; < 90 → Reject
 
 const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
 
@@ -100,8 +105,8 @@ export default function RmQcPage() {
   // A-20/1 Crude Sulphur: invoice number as direct text input (find-or-create batch)
   const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
   const [resolvingInvoice, setResolvingInvoice]     = useState(false);
-  // Crude Sulphur grade selector + loaded specs (drives inline pass/fail badge)
-  const [crudeGrade, setCrudeGrade] = useState("");
+  // Crude Sulphur A-grade specs — auto-loaded (no grade selector). Drives the
+  // inline per-parameter spec + pass/fail badge and the auto-determined grade.
   const [crudeSpecs, setCrudeSpecs] = useState<SpecRow[]>([]);
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(false);
@@ -213,19 +218,20 @@ export default function RmQcPage() {
   }, [materialId, isSulphurPowder, supabase]);
 
   // ---------------------------------------------------------------------------
-  // Crude Sulphur: load specs for the selected grade (drives live pass/fail).
-  // Uses the same coa_customer_specs table as Batch Analysis, keyed by the
-  // synthetic grade party codes seeded in migration 048.
+  // Crude Sulphur: auto-load the IS-6655 A-grade specs (no grade selector).
+  // The chemist enters values and the grade is determined from them; these
+  // A-grade limits drive both the inline per-parameter badge and the grade calc.
+  // Uses the same coa_customer_specs table as Batch Analysis.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!crudeGrade) { setCrudeSpecs([]); return; }
+    if (!isA20_1 || qcRmType !== "crude_sulphur") { setCrudeSpecs([]); return; }
     supabase
       .from("coa_customer_specs")
       .select("parameter, parameter_label, unit, min_value, max_value, target_value, needs_verification")
-      .eq("party_code", crudeGrade)
+      .eq("party_code", CRUDE_A_GRADE_CODE)
       .eq("is_active", true)
       .then(({ data }) => setCrudeSpecs((data ?? []) as SpecRow[]));
-  }, [crudeGrade, supabase]);
+  }, [qcRmType, supabase]);
 
   // ---------------------------------------------------------------------------
   // Sulphur Powder: search qc_imports by batch number
@@ -403,13 +409,29 @@ export default function RmQcPage() {
     );
   }, [crudeSpecFor, crudeStatusFor, values, crudeSpecText]);
 
-  // Overall pass/fail across crude parameters that have a spec + a value
+  // Per-parameter A-grade pass/fail across crude parameters that have a spec + value
   const crudeEvaluatedRows = crudeSpecs
     .map(s => ({ status: crudeStatusFor(s.parameter, values[s.parameter] ?? "") }))
     .filter(r => r.status !== "none");
   const crudeAnyFail = crudeEvaluatedRows.some(r => r.status === "fail");
-  const crudeOverallStatus: RiskStatus =
-    crudeEvaluatedRows.length === 0 ? "none" : crudeAnyFail ? "fail" : "pass";
+  const crudeAllWithinA =
+    crudeEvaluatedRows.length > 0 && !crudeAnyFail;
+
+  // --------------------------------------------------------------------------
+  // Auto-determine grade from ENTERED values (IS-6655) — no upfront selection.
+  //   A      → purity ≥ 98 AND every A-grade limit met (acidity/ash/heat-loss)
+  //   B      → purity in 90–97.99, OR purity ≥ 98 but an A limit exceeded
+  //   Reject → purity < 90
+  //   null   → purity not yet entered (nothing to grade)
+  // --------------------------------------------------------------------------
+  const crudeGrade: CrudeGrade = (() => {
+    const purityRaw = values["purity_percent"] ?? "";
+    const purity = parseFloat(purityRaw);
+    if (purityRaw === "" || isNaN(purity)) return null;
+    if (purity < CRUDE_PURITY_B_MIN) return "Reject";
+    if (purity >= CRUDE_PURITY_A_MIN && crudeAllWithinA) return "A";
+    return "B";
+  })();
 
   // ---------------------------------------------------------------------------
   // Crude Sulphur: resolve the typed invoice number to a batch (find-or-create)
@@ -647,22 +669,12 @@ export default function RmQcPage() {
                       onChange={e => setChemistName(e.target.value)} />
                   </div>
                 </div>
-                <div style={{ marginTop: 12 }}>
-                  <label>Grade (for spec check)</label>
-                  <select value={crudeGrade} onChange={e => setCrudeGrade(e.target.value)}>
-                    <option value="">— Select grade —</option>
-                    {CRUDE_GRADE_OPTIONS.map(g => (
-                      <option key={g.code} value={g.code}>{g.label}</option>
-                    ))}
-                  </select>
-                  <p className="field-hint" style={{ marginTop: 6 }}>
-                    Pick a grade to show each parameter&apos;s IS-6655 spec and pass/fail
-                    inline as you enter results.
-                    {crudeGrade && crudeSpecs.length === 0 && (
-                      <> · <span style={{ color: "var(--warn)" }}>No specs on file for this grade — run migration 048.</span></>
-                    )}
+                {crudeSpecs.length === 0 && (
+                  <p className="field-hint" style={{ marginTop: 6, color: "var(--warn)" }}>
+                    No IS-6655 specs on file — run migration 048 to enable the
+                    inline spec check and auto-grade.
                   </p>
-                </div>
+                )}
               </div>
 
               {loadingDefs ? (
@@ -670,39 +682,48 @@ export default function RmQcPage() {
               ) : (
                 <div className="card">
                   <h3>Test Results — Crude Sulphur</h3>
+                  <p className="field-hint" style={{ marginBottom: 12 }}>
+                    Enter the values below. Each parameter shows its IS-6655 A-grade
+                    spec and pass/fail, and the grade is determined automatically.
+                  </p>
                   {testDefs.map(def => (
                     <QcFieldRenderer
                       key={def.id}
                       def={def}
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
-                      specBadge={crudeGrade ? buildCrudeSpecBadge(def.test_key) : null}
+                      specBadge={crudeSpecs.length > 0 ? buildCrudeSpecBadge(def.test_key) : null}
                       photoUploadProps={photoProps}
                     />
                   ))}
                 </div>
               )}
 
-              {/* Compact overall result banner — per-parameter spec + pass/fail
-                  shows inline to the right of each field above. */}
-              {crudeGrade && crudeSpecs.length > 0 && crudeOverallStatus !== "none" && (
-                <div className="card" style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  borderLeft: `4px solid ${crudeOverallStatus === "pass" ? "var(--ok)" : "#c0392b"}`,
-                }}>
-                  <span style={{
-                    fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
-                    background: crudeOverallStatus === "pass" ? "var(--ok-soft)" : "#fde8e8",
-                    color: crudeOverallStatus === "pass" ? "var(--ok)" : "#c0392b",
+              {/* Auto-determined grade banner (IS-6655). Grade is computed from
+                  the entered values — the chemist does not pick it. */}
+              {crudeSpecs.length > 0 && crudeGrade && (() => {
+                const isReject = crudeGrade === "Reject";
+                const isA = crudeGrade === "A";
+                const accent = isReject ? "#c0392b" : isA ? "var(--ok)" : "var(--warn)";
+                const bg = isReject ? "#fde8e8" : isA ? "var(--ok-soft)" : "#fff4e0";
+                return (
+                  <div className="card" style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    borderLeft: `4px solid ${accent}`,
                   }}>
-                    {crudeOverallStatus === "pass" ? "OVERALL: PASS" : "OVERALL: FAIL"}
-                  </span>
-                  <span className="field-hint" style={{ margin: 0 }}>
-                    vs {CRUDE_GRADE_OPTIONS.find(g => g.code === crudeGrade)?.label ?? crudeGrade} spec ·{" "}
-                    {crudeEvaluatedRows.filter(r => r.status === "pass").length}/{crudeEvaluatedRows.length} parameters within spec
-                  </span>
-                </div>
-              )}
+                    <span style={{
+                      fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
+                      background: bg, color: accent,
+                    }}>
+                      {isReject ? "GRADE: REJECT" : `GRADE: ${crudeGrade}`}
+                    </span>
+                    <span className="field-hint" style={{ margin: 0 }}>
+                      Auto-determined from entered values (IS-6655) ·{" "}
+                      {crudeEvaluatedRows.filter(r => r.status === "pass").length}/{crudeEvaluatedRows.length} parameters within A-grade spec
+                    </span>
+                  </div>
+                );
+              })()}
 
               <div className="card">
                 <h3>Remarks</h3>
