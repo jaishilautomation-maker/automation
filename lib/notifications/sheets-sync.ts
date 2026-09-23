@@ -55,9 +55,16 @@ const TARGET_ENV_VAR: Record<SheetTarget, string> = {
 // Job Card row type + column order
 // ---------------------------------------------------------------------------
 
-/** Full job-card row - all fields optional except job_number (the upsert key). */
+/**
+ * Full job-card row. The upsert key is job_number + party_code combined,
+ * because one Job Number can hold multiple entries (1-3 different
+ * Party/Codes), each its own pulveriser_job_cards row that moves through the
+ * stages independently. Keying on job_number alone would make those entries
+ * overwrite each other in the sheet.
+ */
 export interface JobCardSheetRow {
   job_number:                     string;
+  party_code?:                    string | null;
   machine_number?:                string | null;
   material_code?:                 string | null;
   status?:                        string | null;
@@ -93,6 +100,7 @@ export interface JobCardSheetRow {
 /** Column order in the Job Cards tab - must match JOB_CARD_HEADERS below. */
 const JOB_CARD_COLUMNS: (keyof JobCardSheetRow)[] = [
   "job_number",
+  "party_code",
   "machine_number",
   "material_code",
   "status",
@@ -124,6 +132,7 @@ const JOB_CARD_COLUMNS: (keyof JobCardSheetRow)[] = [
 
 export const JOB_CARD_HEADERS: string[] = [
   "Job Number",
+  "Party / Code",
   "Machine Number",
   "Material / Batch Code",
   "Status",
@@ -382,25 +391,34 @@ function getSheetId(target: SheetTarget): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Read the key column (column A = job_number) from the Job Cards tab.
- * Returns the 1-based sheet row index for each non-empty data row.
+ * Read the key columns (A = job_number, B = party_code) from the Job Cards
+ * tab. Returns the 1-based sheet row index for each data row that has a
+ * job_number, along with its party_code (may be empty).
+ *
+ * The upsert key is the (job_number, party_code) pair, so multiple entries
+ * under one Job Number - each a distinct Party/Code - get their own row.
  */
-async function readJobCardKeyColumn(
+async function readJobCardKeyColumns(
   sheets: ReturnType<typeof google.sheets>,
   sheetId: string,
-): Promise<Array<{ rowIndex: number; jobNumber: string }>> {
+): Promise<Array<{ rowIndex: number; jobNumber: string; partyCode: string }>> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range:         "Job Cards!A:A",
+    range:         "Job Cards!A:B",
   });
   const rows = res.data.values ?? [];
-  const result: Array<{ rowIndex: number; jobNumber: string }> = [];
+  const result: Array<{ rowIndex: number; jobNumber: string; partyCode: string }> = [];
 
   // Row 0 is the header - skip it. Data starts at array index 1 / sheet row 2.
   for (let i = 1; i < rows.length; i++) {
-    const cell = rows[i]?.[0];
-    if (typeof cell === "string" && cell.trim()) {
-      result.push({ rowIndex: i + 1, jobNumber: cell.trim() });
+    const jobCell = rows[i]?.[0];
+    if (typeof jobCell === "string" && jobCell.trim()) {
+      const partyCell = rows[i]?.[1];
+      result.push({
+        rowIndex:  i + 1,
+        jobNumber: jobCell.trim(),
+        partyCode: typeof partyCell === "string" ? partyCell.trim() : "",
+      });
     }
   }
   return result;
@@ -449,7 +467,9 @@ function colLetter(index: number): string {
 /**
  * Upsert a job card row in the "Job Cards" tab of the jobcard spreadsheet.
  *
- * - Finds the row where column A === job_number.
+ * The match key is (job_number, party_code) - so a job with 3 different
+ * Party/Codes shows as 3 rows, each updated in place across its own stages.
+ *
  * - Found     -> merges (non-null incoming fields win) and updates in place.
  * - Not found -> appends a new row (first write, from the Production stage).
  *
@@ -461,8 +481,11 @@ export async function syncJobCardRow(data: JobCardSheetRow): Promise<void> {
     const sheetId  = getSheetId("jobcard");
     const incoming = jobCardToValues(data);
 
-    const keyRows = await readJobCardKeyColumn(sheets, sheetId);
-    const found   = keyRows.find(r => r.jobNumber === data.job_number);
+    const incomingParty = (data.party_code ?? "").trim();
+    const keyRows = await readJobCardKeyColumns(sheets, sheetId);
+    const found   = keyRows.find(
+      r => r.jobNumber === data.job_number && r.partyCode === incomingParty
+    );
 
     if (found) {
       const lastCol = colLetter(JOB_CARD_COLUMNS.length - 1);
@@ -482,7 +505,7 @@ export async function syncJobCardRow(data: JobCardSheetRow): Promise<void> {
         requestBody:      { values: [merged] },
       });
 
-      console.info(`[sheets-sync] updated Job Cards row ${found.rowIndex} for ${data.job_number}`);
+      console.info(`[sheets-sync] updated Job Cards row ${found.rowIndex} for ${data.job_number} / ${incomingParty || "(no party)"}`);
     } else {
       await sheets.spreadsheets.values.append({
         spreadsheetId:    sheetId,
@@ -492,7 +515,7 @@ export async function syncJobCardRow(data: JobCardSheetRow): Promise<void> {
         requestBody:      { values: [incoming] },
       });
 
-      console.info(`[sheets-sync] appended new Job Cards row for ${data.job_number}`);
+      console.info(`[sheets-sync] appended new Job Cards row for ${data.job_number} / ${incomingParty || "(no party)"}`);
     }
   } catch (err) {
     console.error(

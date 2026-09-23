@@ -99,6 +99,7 @@ export default function PulveriserStoresPage() {
           type: "job_card",
           row: {
             job_number:    active.job_number ?? active.id,
+            party_code:    active.party_code ?? null,
             status:        "pending",
             oil_issued_kg: Number(oilIssued),
             stores_by:     profile?.full_name ?? null,

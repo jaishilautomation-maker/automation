@@ -464,6 +464,7 @@ export default function PulveriserOperatorPage() {
             type: "job_card",
             row: {
               job_number:                   active.job_number ?? active.id,
+              party_code:                   active.party_code ?? null,
               status:                       "submitted_for_qc",
               actual_production_mt:         updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
               expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
