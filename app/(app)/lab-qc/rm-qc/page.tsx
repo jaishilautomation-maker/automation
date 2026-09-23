@@ -26,13 +26,6 @@ import type { Material, QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 
-interface RmQcHistoryRow {
-  id: string;
-  test_date: string;
-  submitted_at: string;
-  appearance: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -482,65 +475,6 @@ export default function RmQcPage() {
     uploaderRefs,
   } : undefined;
 
-  // ---------------------------------------------------------------------------
-  // Generate Incoming Report (Doc JSCI/QC/03) — reads two EXISTING rm_qc
-  // records from the database (Sample 1 / Sample 2), no new data entry.
-  // Only shown for A-20/1 Crude Sulphur, once at least 2 rm_qc rows exist.
-  // ---------------------------------------------------------------------------
-  const [rmQcHistory, setRmQcHistory]       = useState<RmQcHistoryRow[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [reportSample1, setReportSample1]   = useState("");
-  const [reportSample2, setReportSample2]   = useState("");
-  const [reportSupplier, setReportSupplier] = useState("");
-  const [reportQuantity, setReportQuantity] = useState("");
-  const [generatingReport, setGeneratingReport] = useState(false);
-
-  useEffect(() => {
-    if (!isA20_1 || qcRmType !== "crude_sulphur" || !materialId || !activeFactory) {
-      setRmQcHistory([]); return;
-    }
-    setLoadingHistory(true);
-    supabase
-      .from("rm_qc")
-      .select("id, test_date, submitted_at, appearance")
-      .eq("material_id", materialId)
-      .eq("factory_id", activeFactory.id)
-      .order("submitted_at", { ascending: false })
-      .limit(20)
-      .then(({ data }) => {
-        setRmQcHistory((data ?? []) as RmQcHistoryRow[]);
-        setLoadingHistory(false);
-      });
-  }, [isA20_1, qcRmType, materialId, activeFactory, supabase, batchId]);
-
-  const handleGenerateIncomingReport = async () => {
-    if (!activeFactory) { showToast("Session error — refresh.", true); return; }
-    if (!reportSample1 || !reportSample2) { showToast("Select both Sample 1 and Sample 2.", true); return; }
-    if (reportSample1 === reportSample2) { showToast("Sample 1 and Sample 2 must be different records.", true); return; }
-
-    setGeneratingReport(true);
-    try {
-      const res = await fetch("/api/lab-qc/generate-rm-qc-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rm_qc_id_1:   reportSample1,
-          rm_qc_id_2:   reportSample2,
-          factory_id:   activeFactory.id,
-          supplier_name: reportSupplier.trim() || undefined,
-          quantity:      reportQuantity.trim() || undefined,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) { showToast("Report failed: " + (json?.error ?? "unknown"), true); return; }
-      showToast(`Report generated — Grade ${json.grade ?? "—"} ✓`);
-      if (json.pdf_url) window.open(json.pdf_url, "_blank");
-    } catch {
-      showToast("Network error generating report.", true);
-    } finally {
-      setGeneratingReport(false);
-    }
-  };
 
   // ---------------------------------------------------------------------------
   // Render
@@ -649,74 +583,6 @@ export default function RmQcPage() {
               </button>
             </>
           )}
-
-          {/* ── Generate Incoming Report (Doc JSCI/QC/03) ──
-               Reads two already-saved rm_qc records; no new data entry. ── */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <h3>Test Report of Crude Sulphur Incoming</h3>
-            <div className="field-hint" style={{ marginBottom: 12 }}>
-              Generate the printed incoming-inspection report from two saved QC
-              records. Grade is auto-computed from the average purity/acidity/ash.
-            </div>
-
-            {loadingHistory ? (
-              <div className="field-hint">Loading QC history…</div>
-            ) : rmQcHistory.length < 2 ? (
-              <div className="field-hint" style={{ color: "var(--warn)" }}>
-                Need at least 2 saved QC records for this material to generate a report.
-              </div>
-            ) : (
-              <>
-                <div className="row2">
-                  <div>
-                    <label>Sample 1 *</label>
-                    <select value={reportSample1} onChange={e => setReportSample1(e.target.value)}>
-                      <option value="">— Select record —</option>
-                      {rmQcHistory.map(r => (
-                        <option key={r.id} value={r.id}>
-                          {new Date(r.submitted_at).toLocaleDateString("en-IN")} · {r.appearance ?? "—"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label>Sample 2 *</label>
-                    <select value={reportSample2} onChange={e => setReportSample2(e.target.value)}>
-                      <option value="">— Select record —</option>
-                      {rmQcHistory.map(r => (
-                        <option key={r.id} value={r.id}>
-                          {new Date(r.submitted_at).toLocaleDateString("en-IN")} · {r.appearance ?? "—"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="row2" style={{ marginTop: 10 }}>
-                  <div>
-                    <label>Supplier Name (optional override)</label>
-                    <input type="text" placeholder="e.g. Seteo Trading FZE"
-                      value={reportSupplier} onChange={e => setReportSupplier(e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Quantity (optional override)</label>
-                    <input type="text" placeholder="e.g. 514.892 MT"
-                      value={reportQuantity} onChange={e => setReportQuantity(e.target.value)} />
-                  </div>
-                </div>
-
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  disabled={generatingReport}
-                  style={{ marginTop: 12 }}
-                  onClick={handleGenerateIncomingReport}
-                >
-                  {generatingReport ? "Generating…" : "Generate Report"}
-                </button>
-              </>
-            )}
-          </div>
         </>
       )}
 

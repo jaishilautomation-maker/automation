@@ -656,13 +656,7 @@ export default function BatchAnalysisPage() {
               : "Save Analysis"}
           </button>
 
-          {existingAnalysis && (
-            <p className="field-hint" style={{ marginTop: 12 }}>
-              To download reports for this batch, use the{" "}
-              <Link href="/lab-qc/reports" style={{ color: "var(--clay)" }}>Report Generation</Link>{" "}
-              tab.
-            </p>
-          )}
+
         </>
       )}
     </>

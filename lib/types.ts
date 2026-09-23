@@ -1199,12 +1199,17 @@ export interface PurchaseRequisition {
 // COA (Certificate of Analysis) — new in migration 014
 // =============================================================================
 
-/** coa_customer_specs — per-customer spec limits for COA generation. */
+/**
+ * coa_customer_specs — per-customer/party spec limits.
+ * Used by the Batch Analysis live spec pass/fail check. (The COA PDF generator
+ * that originally consumed these was removed; the specs table + this type
+ * remain for the spec-check feature.)
+ */
 export interface CoaCustomerSpec {
   id: string;
   customer_name: string;
   parameter: string;           // matches test_key in qc_test_definitions
-  parameter_label: string;     // human label for the COA table column
+  parameter_label: string;     // human label
   unit: string | null;
   min_value: number | null;
   max_value: number | null;
@@ -1212,45 +1217,6 @@ export interface CoaCustomerSpec {
   is_active: boolean;
   created_at: string;
   created_by: string | null;
-}
-
-/** coa_documents — one row per generated Certificate of Analysis PDF. */
-export interface CoaDocument {
-  id: string;
-  product_qc_id: string;
-  factory_id: string;
-  customer_name: string;
-  customer_address: string | null;
-  test_report_no: number;
-  lot_no: string | null;
-  batch_no: string | null;
-  qty: string | null;
-  invoice_no: string | null;
-  vehicle_no: string | null;
-  mfg_date: string | null;     // ISO date
-  pdf_url: string | null;
-  pdf_storage_path: string | null;
-  generated_at: string;
-  generated_by: string;
-  email_sent_at: string | null;
-  sheet_synced_at: string | null;
-}
-
-/**
- * Inputs needed when generating a COA from a finalized product_qc record.
- * Collected via the "Generate COA" modal on the Product QC page.
- */
-export interface CoaGenerateRequest {
-  product_qc_id: string;
-  factory_id: string;
-  customer_name: string;
-  customer_address?: string;
-  lot_no?: string;
-  batch_no?: string;
-  qty?: string;
-  invoice_no?: string;
-  vehicle_no?: string;
-  mfg_date?: string;  // ISO date
 }
 
 // =============================================================================

@@ -24,7 +24,7 @@ import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
-import type { Product, QcTestDefinition, ProductQc, QcPhase, CoaCustomerSpec } from "@/lib/types";
+import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductQcEmail } from "@/lib/notifications/lab-qc-emails";
 
@@ -76,21 +76,6 @@ export default function ProductQcPage() {
   const [remarks, setRemarks]           = useState("");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
-
-  // ── COA generation state (report generated FROM already-saved QC data) ──
-  const [coaModalOpen, setCoaModalOpen]   = useState(false);
-  const [coaGenerating, setCoaGenerating] = useState(false);
-  const [coaCustomers, setCoaCustomers]   = useState<string[]>([]);
-  const [coaForm, setCoaForm] = useState({
-    customer_name: "",
-    customer_address: "",
-    lot_no: "",
-    batch_no: "",
-    qty: "",
-    invoice_no: "",
-    vehicle_no: "",
-    mfg_date: new Date().toISOString().slice(0, 10),
-  });
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
@@ -263,80 +248,6 @@ export default function ProductQcPage() {
     },
     [testDefs]
   );
-
-  // -------------------------------------------------------------------------
-  // COA: load distinct customer names for the modal dropdown
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    supabase
-      .from("coa_customer_specs")
-      .select("customer_name")
-      .eq("is_active", true)
-      .then(({ data }) => {
-        const names = Array.from(
-          new Set(((data ?? []) as Pick<CoaCustomerSpec, "customer_name">[]).map(r => r.customer_name))
-        ).sort();
-        setCoaCustomers(names);
-      });
-  }, [supabase]);
-
-  // -------------------------------------------------------------------------
-  // COA: open the modal — prefill dispatch fields from the loaded QC record
-  // -------------------------------------------------------------------------
-  const openCoaModal = () => {
-    if (!existingRecord) return;
-    const batchNo = batches.find(b => b.id === existingRecord.batch_id)?.batch_number ?? "";
-    const lotNo   = batches.find(b => b.id === existingRecord.batch_id)?.lot_number ?? "";
-    setCoaForm(prev => ({
-      ...prev,
-      batch_no: isA20 ? directBatchNumber : batchNo,
-      lot_no:   isA20 ? directLotNumber   : (lotNo ?? ""),
-      mfg_date: existingRecord.test_date ?? new Date().toISOString().slice(0, 10),
-    }));
-    setCoaModalOpen(true);
-  };
-
-  // -------------------------------------------------------------------------
-  // COA: generate — POST to /api/lab-qc/generate-coa (reads test_results from
-  // the already-saved product_qc row; no data is entered here beyond
-  // customer/dispatch metadata not already on the QC record).
-  // -------------------------------------------------------------------------
-  const handleGenerateCoa = async () => {
-    if (!activeFactory || !existingRecord) { showToast("Session error — refresh.", true); return; }
-    if (!coaForm.customer_name.trim())     { showToast("Select a customer.", true); return; }
-
-    setCoaGenerating(true);
-    try {
-      const res = await fetch("/api/lab-qc/generate-coa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          product_qc_id:    existingRecord.id,
-          factory_id:       activeFactory.id,
-          customer_name:    coaForm.customer_name.trim(),
-          customer_address: coaForm.customer_address.trim() || undefined,
-          lot_no:           coaForm.lot_no.trim() || undefined,
-          batch_no:         coaForm.batch_no.trim() || undefined,
-          qty:              coaForm.qty.trim() || undefined,
-          invoice_no:       coaForm.invoice_no.trim() || undefined,
-          vehicle_no:       coaForm.vehicle_no.trim() || undefined,
-          mfg_date:         coaForm.mfg_date || undefined,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        showToast("COA failed: " + (json?.error ?? "unknown"), true);
-        return;
-      }
-      showToast(`COA ${json.report_label ?? ""} generated ✓`);
-      setCoaModalOpen(false);
-      if (json.pdf_url) window.open(json.pdf_url, "_blank");
-    } catch {
-      showToast("Network error generating COA.", true);
-    } finally {
-      setCoaGenerating(false);
-    }
-  };
 
   // -------------------------------------------------------------------------
   // Submit
@@ -807,142 +718,7 @@ export default function ProductQcPage() {
               ? "Update QC Record"
               : "Save QC Record"}
           </button>
-
-          {/* ── Generate COA report (reads already-saved QC data — no re-entry) ── */}
-          {existingRecord && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <h3>Certificate of Analysis</h3>
-              <div className="field-hint" style={{ marginBottom: 12 }}>
-                Generate a customer-facing COA PDF from this finalized QC record.
-                Actual results are pulled from the saved test data above and
-                compared against the selected customer&rsquo;s spec limits.
-              </div>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                onClick={openCoaModal}
-              >
-                Generate COA
-              </button>
-            </div>
-          )}
         </>
-      )}
-
-      {/* ── COA modal ── */}
-      {coaModalOpen && existingRecord && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed", inset: 0, zIndex: 1000,
-            background: "rgba(0,0,0,0.45)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 16,
-          }}
-          onClick={() => !coaGenerating && setCoaModalOpen(false)}
-        >
-          <div
-            className="card"
-            style={{ maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto", margin: 0 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>Generate Certificate of Analysis</h3>
-            <div className="field-hint" style={{ marginBottom: 12 }}>
-              {selectedProduct?.name}{isPhaseAware ? ` · Phase ${phase}` : ""}
-            </div>
-
-            <label>Customer *</label>
-            {coaCustomers.length > 0 ? (
-              <select
-                value={coaForm.customer_name}
-                onChange={e => setCoaForm(f => ({ ...f, customer_name: e.target.value }))}
-              >
-                <option value="">— Select customer —</option>
-                {coaCustomers.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            ) : (
-              <input
-                type="text"
-                placeholder="Customer name"
-                value={coaForm.customer_name}
-                onChange={e => setCoaForm(f => ({ ...f, customer_name: e.target.value }))}
-              />
-            )}
-            <div className="field-hint" style={{ marginTop: 4 }}>
-              Customer specs must exist in coa_customer_specs, otherwise generation is blocked.
-            </div>
-
-            <label style={{ marginTop: 12 }}>Customer Address</label>
-            <textarea
-              rows={2}
-              placeholder="Delivery / billing address"
-              value={coaForm.customer_address}
-              onChange={e => setCoaForm(f => ({ ...f, customer_address: e.target.value }))}
-            />
-
-            <div className="row2" style={{ marginTop: 12 }}>
-              <div>
-                <label>Batch No</label>
-                <input type="text" value={coaForm.batch_no}
-                  onChange={e => setCoaForm(f => ({ ...f, batch_no: e.target.value }))} />
-              </div>
-              <div>
-                <label>Lot No</label>
-                <input type="text" value={coaForm.lot_no}
-                  onChange={e => setCoaForm(f => ({ ...f, lot_no: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="row2" style={{ marginTop: 8 }}>
-              <div>
-                <label>Quantity</label>
-                <input type="text" placeholder="e.g. 25 MT"
-                  value={coaForm.qty}
-                  onChange={e => setCoaForm(f => ({ ...f, qty: e.target.value }))} />
-              </div>
-              <div>
-                <label>Mfg Date</label>
-                <input type="date" value={coaForm.mfg_date}
-                  onChange={e => setCoaForm(f => ({ ...f, mfg_date: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="row2" style={{ marginTop: 8 }}>
-              <div>
-                <label>Invoice No</label>
-                <input type="text" value={coaForm.invoice_no}
-                  onChange={e => setCoaForm(f => ({ ...f, invoice_no: e.target.value }))} />
-              </div>
-              <div>
-                <label>Vehicle No</label>
-                <input type="text" value={coaForm.vehicle_no}
-                  onChange={e => setCoaForm(f => ({ ...f, vehicle_no: e.target.value }))} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-              <button
-                className="btn btn-primary"
-                type="button"
-                disabled={coaGenerating}
-                onClick={handleGenerateCoa}
-                style={{ flex: 1 }}
-              >
-                {coaGenerating ? "Generating…" : "Generate & Send"}
-              </button>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={coaGenerating}
-                onClick={() => setCoaModalOpen(false)}
-                style={{ flex: "0 0 auto", width: "auto" }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </>
   );
