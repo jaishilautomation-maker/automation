@@ -121,6 +121,7 @@ export default function PulveriserLabPage() {
           type: "job_card",
           row: {
             job_number:  active.job_number ?? active.id,
+            party_code:  active.party_code ?? null,
             status:      result === "ok" ? "finalized" : "pending_stores",
             lab_result:  result,
             lab_remark:  remark.trim() || null,

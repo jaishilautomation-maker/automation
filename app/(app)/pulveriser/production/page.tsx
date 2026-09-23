@@ -230,6 +230,7 @@ export default function PulveriserProductionPage() {
             type: "job_card",
             row: {
               job_number:            jobNumber.trim() || `row-${data[i]?.id}`,
+              party_code:            e.partyCode || null,
               machine_number:        machine,
               material_code:         e.batchNumber.trim(),
               status:                "pending_stores",

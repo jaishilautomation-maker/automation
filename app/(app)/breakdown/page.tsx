@@ -162,6 +162,7 @@ export default function BreakdownPage() {
         factoryId:  activeFactory?.id,
         sheetData: {
           type:   "append",
+          target: "production",
           tab:    "Breakdown Register",
           values: [
             null,                               // ID — not available client-side pre-insert

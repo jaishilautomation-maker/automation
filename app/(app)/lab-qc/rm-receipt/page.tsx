@@ -171,6 +171,7 @@ export default function RmReceiptPage() {
         referenceId: batch.id,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "RM Receipt",
           values: [
             batch.id,
@@ -265,6 +266,7 @@ export default function RmReceiptPage() {
         referenceId: batch.id,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "RM Receipt",
           values: [
             batch.id,

@@ -464,17 +464,66 @@ export default function PulveriserOperatorPage() {
             type: "job_card",
             row: {
               job_number:                   active.job_number ?? active.id,
+              party_code:                   active.party_code ?? null,
               status:                       "submitted_for_qc",
               actual_production_mt:         updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
               expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
               actual_oil_consumption_kg:    updatedCard?.actual_oil_consumption_kg ?? null,
               oil_variance_kg:              updatedCard?.oil_variance_kg ?? null,
               oil_extra_leftover_balance_kg: updatedCard?.oil_extra_leftover_balance_kg ?? null,
+              classifier_vfd:               classifierVfd.trim() || null,
+              blower_inlet_valve:           blowerIn.trim() || null,
+              blower_outlet_valve:          blowerOut.trim() || null,
+              finished_goods_bag:           fgBag.trim() || null,
+              packing_size:                 packingSize.trim() || null,
+              qc_incharge_note:             qcNote.trim() || null,
+              stores_incharge_note:         storesNote.trim() || null,
+              work_details:                 workDetails.trim() || null,
+              checkpoint_machine_cleaning:  chkClean ? "Yes" : "No",
+              checkpoint_roller_check:      chkRoller ? "Yes" : "No",
+              checkpoint_mesh_cloth_check:  chkMesh ? "Yes" : "No",
               operator_by:                  profile?.full_name ?? null,
               operator_submitted_at:        nowISO,
             },
           },
         });
+
+        // One sheet row per hourly reading (sheet-only, no email) → the
+        // "Hourly Readings" tab of the Job Card sheet, tagged with job_number
+        // + party_code so each reading traces back to its parent card.
+        for (const r of rows) {
+          const diff = Number(r.stop_time) - Number(r.start_time);
+          const totalHours = diff > 0 ? diff / 100 : null;
+          const hasData =
+            r.start_time.trim() !== "" || r.stop_time.trim() !== "" ||
+            r.batch_no.trim() !== "" || r.bags.trim() !== "";
+          if (!hasData) continue;
+          void notifyEvent({
+            eventType: "pulveriser_hourly_reading",
+            factoryId: active.factory_id,
+            referenceId: active.id,
+            sheetData: {
+              type: "append",
+              target: "jobcard",
+              tab: "Hourly Readings",
+              values: [
+                active.job_number ?? active.id,
+                active.party_code ?? null,
+                r.reading_date || null,
+                r.machine || active.machine_number || null,
+                r.start_time || null,
+                r.stop_time || null,
+                totalHours,
+                r.planned_production.trim() === "" ? null : Number(r.planned_production),
+                r.batch_no || null,
+                r.bags.trim() === "" ? null : Number(r.bags),
+                r.low_production_reasons.length > 0 ? r.low_production_reasons.join(", ") : null,
+                profile?.full_name ?? null,
+                nowISO,
+              ],
+            },
+          });
+        }
       }
 
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");

@@ -14,6 +14,21 @@ import { useToast } from "@/lib/toast-context";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildStoresEmail } from "@/lib/notifications/pulveriser-emails";
+import {
+ buildRawMaterialEmail,
+ buildReceivedEmail,
+ buildSuppliedEmail,
+ buildDailyProductionEmail,
+ buildDailyDispatchEmail,
+ buildPackingMaterialEmail,
+ buildFinishedGoodsEmail,
+ buildBallMillEmail,
+ buildBatchWiseEmail,
+ buildOilConsumptionEmail,
+ buildIssueSlipEmail,
+ buildPrnEmail,
+ buildDispatchEmail,
+} from "@/lib/notifications/stores-emails";
 import type {
  StoresStockItem,
  StoresStockLedger,
@@ -553,15 +568,6 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
            )}
           </div>
          </div>
-         {jc.production_at && (
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
-           Sent by Production:{" "}
-           {new Date(jc.production_at).toLocaleString("en-IN", {
-            day: "2-digit", month: "short", year: "numeric",
-            hour: "2-digit", minute: "2-digit",
-           })}
-          </div>
-         )}
         </div>
        ))}
       </div>
@@ -852,6 +858,31 @@ function ReceivedSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildReceivedEmail({
+    date: entry.date, particular: payload.particular || null,
+    transport: payload.transport || null, materials: payload.materials || null,
+    vehicleNo: payload.vehicle_no || null, oWt: payload.o_wt || null,
+    fWt: payload.f_wt || null, bagsLoose: payload.bags_loose || null,
+    invChlNo: payload.inv_chl_no || null, code: payload.code || null,
+    poNo: payload.po_no || null, remarks: payload.remarks || null,
+    submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_received", subject, html, factoryId: itemData.factory_id,
+    sheetData: {
+     type: "append", target: "stores", tab: "Received",
+     values: [
+      entry.date, payload.particular || null, payload.transport || null,
+      payload.materials || null, payload.vehicle_no || null, payload.o_wt || null,
+      payload.f_wt || null, payload.bags_loose || null, payload.inv_chl_no || null,
+      payload.code || null, payload.po_no || null, payload.remarks || null,
+      "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
    setEntry(blankReceivedEntry()); loadHistory();
   } catch (e: unknown) {
@@ -1136,6 +1167,31 @@ function SuppliedSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildSuppliedEmail({
+    date: entry.date, particular: payload.particular || null,
+    transport: payload.transport || null, materials: payload.materials || null,
+    vehicleNo: payload.vehicle_no || null, oWt: payload.o_wt || null,
+    fWt: payload.f_wt || null, bagsLoose: payload.bags_loose || null,
+    invChlNo: payload.inv_chl_no || null, code: payload.code || null,
+    poNo: payload.po_no || null, remarks: payload.remarks || null,
+    submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_supplied", subject, html, factoryId: itemData.factory_id,
+    sheetData: {
+     type: "append", target: "stores", tab: "Supplied",
+     values: [
+      entry.date, payload.particular || null, payload.transport || null,
+      payload.materials || null, payload.vehicle_no || null, payload.o_wt || null,
+      payload.f_wt || null, payload.bags_loose || null, payload.inv_chl_no || null,
+      payload.code || null, payload.po_no || null, payload.remarks || null,
+      "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast("Supplied entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
    setEntry(blankSuppliedEntry()); loadHistory();
   } catch (e: unknown) {
@@ -1850,6 +1906,23 @@ function DailyDispatchSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildDailyDispatchEmail({
+    date: entry.date, totalMt, submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_daily_dispatch", subject, html, factoryId: itemData.factory_id,
+    sheetData: {
+     type: "append", target: "stores", tab: "Daily Dispatch",
+     values: [
+      entry.date,
+      ...DAILY_DISPATCH_COLS.map(c => numVals[c.key]),
+      totalMt, "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast("Daily dispatch saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
    setEntry(blankDispatchRow()); loadHistory();
   } catch (e: unknown) {
@@ -3178,6 +3251,35 @@ function BallMillSection() {
     entered_by:     user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildBallMillEmail({
+    date: payload.date, sumProdBags: sumProd, sumDispatchBags: sumDispatch,
+    balanceBags: newBalance, submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_ball_mill", subject, html, factoryId: anchor.factory_id,
+    sheetData: {
+     type: "append", target: "stores", tab: "Ball Mill",
+     // One summary row per save -- if multiple prod/dispatch rows were
+     // entered in this submit, only the first of each is shown here; the
+     // full per-row detail lives in Supabase (stores_stock_ledger.remark).
+     values: [
+      computedRows[0]?.date ?? payload.date,
+      computedRows[0]?.shift ?? null,
+      computedRows[0]?.party ?? null,
+      computedRows[0]?.batch_no ?? null,
+      computedRows[0]?.qty_mfg ?? null,
+      computedRows[0]?.kg ?? null,
+      computedRows[0]?.total_mt ?? null,
+      dispatchRows[0]?.dispatch_date ?? null,
+      dispatchRows[0]?.location ?? null,
+      dispatchRows[0]?.dispatch_bags ?? null,
+      newBalance, "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast("Ball Mill entry saved -- Balance: " + newBalance + " bags");
    setProdRows([blankProdRow()]);
    setDispatchRows([blankBmDispatchRow()]);
@@ -3708,6 +3810,26 @@ function BatchWiseSection() {
     entered_by:     user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildBatchWiseEmail({
+    batchNo: entry.batch_no, code: entry.code, mfgDate: entry.mfg_date || null,
+    qtyBags: derived.qtyBags ?? 0, qtyMt: derived.qtyMt ?? 0,
+    remainingBags: derived.remainingBags ?? 0, remainingMt: derived.remainingMt ?? 0,
+    submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_batch_wise", subject, html, factoryId: anchor.factory_id,
+    sheetData: {
+     type: "append", target: "stores", tab: "Batch Wise",
+     values: [
+      entry.batch_no, derived.qtyBags ?? 0, entry.code, entry.mfg_date || null,
+      derived.qtyMt ?? 0, derived.remainingBags ?? 0, derived.remainingMt ?? 0,
+      JSON.stringify(entry.dispatches), "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast("Batch saved -- " + entry.batch_no + " Remaining: " + (derived.remainingBags ?? 0) + " bags / " + (derived.remainingMt ?? 0).toFixed(3) + " MT");
    setEntry(blankBatchEntry()); loadHistory();
   } catch (e: unknown) {
@@ -4133,6 +4255,24 @@ function OilConsumptionSection() {
         entered_by:         user.id,
       });
       if (error) { showToast("Save failed: " + error.message, true); return; }
+
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildOilConsumptionEmail({
+        date: entry.date, oilType: entry.oil_type,
+        tankQty: tankQty, takenFromTank: taken, addToTank: addToTank,
+        totalConsumption, submittedByName: "Stores", submittedAt: nowISO,
+      });
+      void notifyEvent({
+        eventType: "stores_oil_consumption", subject, html, factoryId: anchor.factory_id,
+        sheetData: {
+          type: "append", target: "stores", tab: "Oil Consumption",
+          values: [
+            entry.date, entry.oil_type, tankQty, taken, addToTank, tankPlusDrum,
+            JSON.stringify(drumValues), totalConsumption, "Stores", nowISO,
+          ],
+        },
+      });
+
       showToast("Oil consumption saved -- " + entry.date + " Total: " + totalConsumption);
       setEntry(blankOilEntry(entry.drums.length));
       loadHistory();
@@ -4944,6 +5084,28 @@ function IssueSlipSection() {
    });
 
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildIssueSlipEmail({
+    slipNo: payload.slip_no || null, plant: payload.plant || null, date: payload.date,
+    materialDescription: payload.material_description, unit: payload.unit,
+    qtyRequired: payload.qty_required, qtyIssued: payload.qty_issued,
+    usedFor: payload.used_for || null, remaining: newBal,
+    remark: payload.remark || null, submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_issue_slip", subject, html, factoryId: selectedItem?.factory_id ?? undefined,
+    sheetData: {
+     type: "append", target: "stores", tab: "Issue Slip",
+     values: [
+      payload.slip_no || null, payload.plant || null, payload.date,
+      payload.material_description, payload.unit, payload.qty_required,
+      payload.qty_issued, payload.used_for || null, newBal,
+      payload.remark || null, "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast(
     "Issued -- " + payload.material_description +
     " " + qtyIssuedNum + " " + payload.unit +
@@ -5254,6 +5416,32 @@ function PrnSection() {
         entered_by:         user.id,
       });
       if (error) { showToast("Save failed: " + error.message, true); return; }
+
+      const nowISO = new Date().toISOString();
+      const { subject, html } = buildPrnEmail({
+        prnDate: entry.prn_date, itemDescription: entry.item_description,
+        bifurcation: entry.bifurcation || null, requirements: entry.requirements || null,
+        qty: entry.qty || null, currentStock: entry.current_stock || null,
+        plant: entry.plant || null, supplierName: entry.supplier_name || null,
+        poNo: entry.po_no || null, poDate: entry.po_date || null,
+        poQty: entry.po_qty || null, nosKgs: entry.nos_kgs || null,
+        invoiceNo: entry.invoice_no || null, remark: entry.remark || null,
+        submittedByName: "Stores", submittedAt: nowISO,
+      });
+      void notifyEvent({
+        eventType: "stores_prn", subject, html, factoryId: anchor.factory_id,
+        sheetData: {
+          type: "append", target: "stores", tab: "PRN",
+          values: [
+            entry.prn_date, entry.item_description, entry.bifurcation || null,
+            entry.requirements || null, entry.qty || null, entry.current_stock || null,
+            entry.plant || null, entry.supplier_name || null, entry.po_no || null,
+            entry.po_date || null, entry.po_qty || null, entry.nos_kgs || null,
+            entry.invoice_no || null, entry.remark || null, "Stores", nowISO,
+          ],
+        },
+      });
+
       showToast("PRN saved -- " + entry.item_description);
       setEntry(blankPrnEntry()); loadHistory();
     } catch (e: unknown) {
@@ -5570,6 +5758,26 @@ function DispatchSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   const nowISO = new Date().toISOString();
+   const { subject, html } = buildDispatchEmail({
+    transactionDate: dispatchDate, itemName: selectedItem?.item_name ?? "Item",
+    bags: bagsNum, kgPerBag: kgNum, dispatchQtyKg: totalKg, closingBalance: newBal,
+    vehicleNo: vehicleNo.trim() || null, partyName: partyName.trim() || null,
+    remark: remark.trim() || null, submittedByName: "Stores", submittedAt: nowISO,
+   });
+   void notifyEvent({
+    eventType: "stores_dispatch", subject, html, factoryId: selectedItem?.factory_id ?? undefined,
+    sheetData: {
+     type: "append", target: "stores", tab: "Dispatch",
+     values: [
+      dispatchDate, selectedItem?.item_name ?? "Item", bagsNum, kgNum, totalKg,
+      newBal, vehicleNo.trim() || null, partyName.trim() || null,
+      remark.trim() || null, "Stores", nowISO,
+     ],
+    },
+   });
+
    showToast(
     "Dispatch recorded -- " + (selectedItem?.item_name ?? "") +
     " " + bagsNum + " bags (" + totalKg + " kg). Balance: " + newBal.toFixed(2) + " kg"

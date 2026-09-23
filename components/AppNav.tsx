@@ -53,6 +53,7 @@ export default function AppNav() {
     links = [
       { href: "/lab-qc",              label: "Activities" },
       { href: "/lab-qc/records",      label: "My records" },
+      { href: "/lab-qc/reports",      label: "Report Generation" },
       { href: "/lab-qc/search",       label: "Search" },
       { href: "/dashboard",           label: "Dashboard" },
     ];
@@ -60,6 +61,7 @@ export default function AppNav() {
       links = [
         { href: "/lab-qc",              label: "Activities" },
         { href: "/lab-qc/records",      label: "Records" },
+        { href: "/lab-qc/reports",      label: "Report Generation" },
         { href: "/lab-qc/search",       label: "Search" },
         { href: "/dashboard",           label: "Dashboard" },
       ];

@@ -15,17 +15,18 @@
 //   });
 // =============================================================================
 
-import type { JobCardSheetRow } from "@/lib/notifications/sheets-sync";
+import type { JobCardSheetRow, SheetTarget } from "@/lib/notifications/sheets-sync";
 
 /** Payload sent to /api/notify for the Google Sheets sync side-channel. */
 export type SheetSyncPayload =
   | { type: "job_card"; row: JobCardSheetRow }
-  | { type: "append";   tab: string; values: (string | number | boolean | null)[] };
+  | { type: "append"; target: SheetTarget; tab: string; values: (string | number | boolean | null)[] };
 
 export interface NotifyEventArgs {
   eventType:    string;
-  subject:      string;
-  html:         string;
+  /** Omit subject+html for a sheet-only call (no email sent). */
+  subject?:     string;
+  html?:        string;
   factoryId?:   string;
   referenceId?: string;
   recipients?:  string[];

@@ -51,11 +51,6 @@ export default function BatchAnalysisPage() {
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
-  // ── Report generation (reads the saved analysis above, no re-entry) ──────
-  const [generatingFG, setGeneratingFG] = useState(false);
-  const [fiModalOpen, setFiModalOpen]   = useState(false);
-  const [generatingFI, setGeneratingFI] = useState(false);
-  const [fiExtra, setFiExtra] = useState({ srNo: "", jobNo: "", shift: "Day" });
 
   // -------------------------------------------------------------------------
   // Load test definitions (phase = 'B' for batch analysis)
@@ -279,6 +274,7 @@ export default function BatchAnalysisPage() {
           referenceId: existingAnalysis.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Batch Analysis",
             values: [
               existingAnalysis.id,
@@ -350,6 +346,7 @@ export default function BatchAnalysisPage() {
           referenceId: newRow.id,
           sheetData: {
             type: "append",
+            target: "lab",
             tab: "Batch Analysis",
             values: [
               newRow.id,
@@ -374,63 +371,6 @@ export default function BatchAnalysisPage() {
       showToast("Network error — try again.", true);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  // -------------------------------------------------------------------------
-  // Generate Finish Goods Testing report (Doc 2) — no new data entry.
-  // -------------------------------------------------------------------------
-  const handleGenerateFinishGoods = async () => {
-    if (!activeFactory || !existingAnalysis) { showToast("Save the analysis first.", true); return; }
-    setGeneratingFG(true);
-    try {
-      const res = await fetch("/api/lab-qc/generate-batch-analysis-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          batch_analysis_id: existingAnalysis.id,
-          factory_id: activeFactory.id,
-          report_type: "finish_goods",
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) { showToast("Report failed: " + (json?.error ?? "unknown"), true); return; }
-      showToast("Finish Goods report generated ✓");
-      if (json.pdf_url) window.open(json.pdf_url, "_blank");
-    } catch {
-      showToast("Network error generating report.", true);
-    } finally {
-      setGeneratingFG(false);
-    }
-  };
-
-  // -------------------------------------------------------------------------
-  // Generate Final Inspection Record report (Doc 3, JSCI/QC/16) — no new
-  // data entry beyond srNo/jobNo/shift, which have no home in batch_analysis.
-  // -------------------------------------------------------------------------
-  const handleGenerateFinalInspection = async () => {
-    if (!activeFactory || !existingAnalysis) { showToast("Save the analysis first.", true); return; }
-    setGeneratingFI(true);
-    try {
-      const res = await fetch("/api/lab-qc/generate-batch-analysis-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          batch_analysis_id: existingAnalysis.id,
-          factory_id: activeFactory.id,
-          report_type: "final_inspection",
-          extra: fiExtra,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) { showToast("Report failed: " + (json?.error ?? "unknown"), true); return; }
-      showToast("Final Inspection report generated ✓");
-      setFiModalOpen(false);
-      if (json.pdf_url) window.open(json.pdf_url, "_blank");
-    } catch {
-      showToast("Network error generating report.", true);
-    } finally {
-      setGeneratingFI(false);
     }
   };
 
@@ -557,98 +497,14 @@ export default function BatchAnalysisPage() {
               : "Save Analysis"}
           </button>
 
-          {/* ── Generate reports (read the saved analysis above, no re-entry) ── */}
           {existingAnalysis && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <h3>Generate Reports</h3>
-              <div className="field-hint" style={{ marginBottom: 12 }}>
-                Reports are built from the saved analysis above — no data is
-                re-entered.
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  disabled={generatingFG}
-                  onClick={handleGenerateFinishGoods}
-                  style={{ flex: "0 0 auto", width: "auto" }}
-                >
-                  {generatingFG ? "Generating…" : "Finish Goods Testing Report"}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  onClick={() => setFiModalOpen(true)}
-                  style={{ flex: "0 0 auto", width: "auto" }}
-                >
-                  Final Inspection Record (JSCI/QC/16)
-                </button>
-              </div>
-            </div>
+            <p className="field-hint" style={{ marginTop: 12 }}>
+              To download reports for this batch, use the{" "}
+              <Link href="/lab-qc/reports" style={{ color: "var(--clay)" }}>Report Generation</Link>{" "}
+              tab.
+            </p>
           )}
         </>
-      )}
-
-      {/* ── Final Inspection Record modal (srNo / jobNo / shift) ── */}
-      {fiModalOpen && existingAnalysis && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed", inset: 0, zIndex: 1000,
-            background: "rgba(0,0,0,0.45)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 16,
-          }}
-          onClick={() => !generatingFI && setFiModalOpen(false)}
-        >
-          <div
-            className="card"
-            style={{ maxWidth: 440, width: "100%", margin: 0 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>Final Inspection Record Details</h3>
-            <div className="field-hint" style={{ marginBottom: 12 }}>
-              These fields aren&rsquo;t captured on the batch analysis form —
-              enter them for this report.
-            </div>
-
-            <label>Sr No</label>
-            <input type="text" placeholder="e.g. 393"
-              value={fiExtra.srNo} onChange={e => setFiExtra(f => ({ ...f, srNo: e.target.value }))} />
-
-            <label style={{ marginTop: 10 }}>Job No</label>
-            <input type="text" placeholder="e.g. P-324"
-              value={fiExtra.jobNo} onChange={e => setFiExtra(f => ({ ...f, jobNo: e.target.value }))} />
-
-            <label style={{ marginTop: 10 }}>Shift</label>
-            <select value={fiExtra.shift} onChange={e => setFiExtra(f => ({ ...f, shift: e.target.value }))}>
-              <option value="Day">Day</option>
-              <option value="Night">Night</option>
-            </select>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-              <button
-                className="btn btn-primary"
-                type="button"
-                disabled={generatingFI}
-                onClick={handleGenerateFinalInspection}
-                style={{ flex: 1 }}
-              >
-                {generatingFI ? "Generating…" : "Generate Report"}
-              </button>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={generatingFI}
-                onClick={() => setFiModalOpen(false)}
-                style={{ flex: "0 0 auto", width: "auto" }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </>
   );

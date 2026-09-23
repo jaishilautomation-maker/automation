@@ -301,7 +301,7 @@ export async function POST(req: NextRequest) {
     // Await both so the serverless function doesn't tear down mid-flight.
     await Promise.all([
       sendEmail({ eventType: "lab_qc_coa", subject, html, factoryId: factory_id, referenceId: coaRow.id }),
-      appendRow("COA Documents", [
+      appendRow("lab", "COA Documents", [
         coaRow.id,
         reportNoLabel,
         customer_name,

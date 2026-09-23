@@ -151,6 +151,7 @@ export default function PostProductionPage() {
         factoryId: activeFactory.id,
         sheetData: {
           type: "append",
+          target: "lab",
           tab: "Post Production",
           values: [
             null,  // ID — not available client-side before insert
