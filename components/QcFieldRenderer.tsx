@@ -37,14 +37,32 @@ interface Props {
   value: string;
   onChange: (key: string, val: string) => void;
   photoUploadProps?: PhotoUploadProps;
+  /**
+   * Optional inline indicator rendered to the RIGHT of this field
+   * (e.g. the customer spec limit + pass/fail for this parameter).
+   * When present, the field + badge are laid out side by side.
+   */
+  specBadge?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function QcFieldRenderer({ def, value, onChange, photoUploadProps }: Props) {
+export default function QcFieldRenderer({ def, value, onChange, photoUploadProps, specBadge }: Props) {
   const localRef = useRef<PhotoUploaderHandle | null>(null);
+
+  // When a spec badge is supplied, wrap the field so the input column takes the
+  // available width and the badge sits to its right.
+  const withBadge = (fieldEl: React.ReactNode) => {
+    if (!specBadge) return fieldEl;
+    return (
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>{fieldEl}</div>
+        <div style={{ flex: "0 0 auto", minWidth: 150, paddingBottom: 2 }}>{specBadge}</div>
+      </div>
+    );
+  };
 
   const labelEl = (
     <label>
@@ -104,7 +122,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
 
   // ── Boolean ───────────────────────────────────────────────────────────────
   if (def.input_type === "boolean") {
-    return (
+    return withBadge(
       <div>
         {labelEl}
         <select value={value} onChange={e => onChange(def.test_key, e.target.value)}>
@@ -118,7 +136,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
 
   // ── Select ────────────────────────────────────────────────────────────────
   if (def.input_type === "select" && def.options) {
-    return (
+    return withBadge(
       <div>
         {labelEl}
         <select value={value} onChange={e => onChange(def.test_key, e.target.value)}>
@@ -133,7 +151,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
 
   // ── Date ──────────────────────────────────────────────────────────────────
   if (def.input_type === "date") {
-    return (
+    return withBadge(
       <div>
         {labelEl}
         <input
@@ -147,7 +165,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
 
   // ── Text ──────────────────────────────────────────────────────────────────
   if (def.input_type === "text") {
-    return (
+    return withBadge(
       <div>
         {labelEl}
         <input
@@ -161,7 +179,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
   }
 
   // ── Number (default, includes calculated) ─────────────────────────────────
-  return (
+  return withBadge(
     <div>
       {labelEl}
       <input

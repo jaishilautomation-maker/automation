@@ -153,6 +153,38 @@ export default function BatchAnalysisPage() {
     [specFor]
   );
 
+  // Human-readable spec limit text (e.g. "min 98", "max 0.02", "113–121")
+  const specText = useCallback((s: SpecRow): string => {
+    const parts: string[] = [];
+    if (s.min_value != null) parts.push(`min ${s.min_value}`);
+    if (s.max_value != null) parts.push(`max ${s.max_value}`);
+    const base = parts.join(" · ") || "—";
+    return s.target_value != null ? `${base} (target ${s.target_value})` : base;
+  }, []);
+
+  // Inline badge rendered to the right of a field: spec limit + pass/fail.
+  // Returns null when the parameter has no spec for the selected party.
+  const buildSpecBadge = useCallback((paramKey: string): React.ReactNode => {
+    const spec = specFor(paramKey);
+    if (!spec) return null;
+    const raw = values[paramKey] ?? "";
+    const st = statusFor(paramKey, raw);
+    const color = st === "pass" ? "var(--ok)" : st === "fail" ? "#c0392b" : "var(--ink-soft)";
+    const label = st === "pass" ? "✓ Pass" : st === "fail" ? "✗ Fail" : "—";
+    return (
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+        <div style={{ color: "var(--ink-soft)" }}>
+          Spec: <strong>{specText(spec)}</strong>
+          {spec.needs_verification && (
+            <span title="Spec needs verification against the physical sheet"
+              style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>
+          )}
+        </div>
+        <div style={{ color, fontWeight: 700 }}>{label}</div>
+      </div>
+    );
+  }, [specFor, statusFor, values, specText]);
+
   // Overall pass/fail across all parameters that have a spec + a value
   const evaluatedRows = specs
     .map(s => ({ spec: s, raw: values[s.parameter] ?? "", status: statusFor(s.parameter, values[s.parameter] ?? "") }))
@@ -549,6 +581,7 @@ export default function BatchAnalysisPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  specBadge={partyCode ? buildSpecBadge(def.test_key) : null}
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,
@@ -563,62 +596,23 @@ export default function BatchAnalysisPage() {
             </div>
           )}
 
-          {/* Live spec pass/fail vs selected party's coa_customer_specs */}
-          {partyCode && specs.length > 0 && (
-            <div className="card">
-              <h3>
-                Spec Check — {partyCode}
-                {overallStatus !== "none" && (
-                  <span style={{
-                    marginLeft: 10, fontSize: 13, padding: "2px 10px", borderRadius: 12,
-                    background: overallStatus === "pass" ? "var(--ok-soft)" : "#fde8e8",
-                    color: overallStatus === "pass" ? "var(--ok)" : "#c0392b",
-                  }}>
-                    {overallStatus === "pass" ? "PASS" : "FAIL"}
-                  </span>
-                )}
-              </h3>
-              <div className="field-hint" style={{ marginBottom: 10 }}>
-                Live comparison of your entered values against this party&rsquo;s spec limits.
-              </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", color: "var(--ink-soft)" }}>
-                    <th style={{ padding: "4px 8px" }}>Parameter</th>
-                    <th style={{ padding: "4px 8px" }}>Value</th>
-                    <th style={{ padding: "4px 8px" }}>Spec</th>
-                    <th style={{ padding: "4px 8px" }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {specs.map(s => {
-                    const raw = values[s.parameter] ?? "";
-                    const st = statusFor(s.parameter, raw);
-                    const specText =
-                      (s.min_value != null ? `min ${s.min_value}` : "") +
-                      (s.min_value != null && s.max_value != null ? " · " : "") +
-                      (s.max_value != null ? `max ${s.max_value}` : "") +
-                      (s.target_value != null ? ` (target ${s.target_value})` : "");
-                    const color = st === "pass" ? "var(--ok)" : st === "fail" ? "#c0392b" : "var(--ink-soft)";
-                    return (
-                      <tr key={s.parameter} style={{ borderTop: "1px solid var(--line)" }}>
-                        <td style={{ padding: "4px 8px" }}>
-                          {s.parameter_label}{s.unit ? ` (${s.unit})` : ""}
-                          {s.needs_verification && (
-                            <span title="Spec value needs verification against the physical sheet"
-                              style={{ marginLeft: 6, color: "var(--warn)", fontSize: 11 }}>⚠ unverified</span>
-                          )}
-                        </td>
-                        <td style={{ padding: "4px 8px", fontWeight: 600 }}>{raw || "—"}</td>
-                        <td style={{ padding: "4px 8px", color: "var(--ink-soft)" }}>{specText || "—"}</td>
-                        <td style={{ padding: "4px 8px", color, fontWeight: 700 }}>
-                          {st === "pass" ? "✓ Pass" : st === "fail" ? "✗ Fail" : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {/* Compact overall result banner — per-parameter spec + pass/fail
+              now shows inline to the right of each field above. */}
+          {partyCode && specs.length > 0 && overallStatus !== "none" && (
+            <div className="card" style={{
+              display: "flex", alignItems: "center", gap: 12,
+              borderLeft: `4px solid ${overallStatus === "pass" ? "var(--ok)" : "#c0392b"}`,
+            }}>
+              <span style={{
+                fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
+                background: overallStatus === "pass" ? "var(--ok-soft)" : "#fde8e8",
+                color: overallStatus === "pass" ? "var(--ok)" : "#c0392b",
+              }}>
+                {overallStatus === "pass" ? "OVERALL: PASS" : "OVERALL: FAIL"}
+              </span>
+              <span className="field-hint" style={{ margin: 0 }}>
+                vs {partyCode} spec · {evaluatedRows.filter(r => r.status === "pass").length}/{evaluatedRows.length} parameters within spec
+              </span>
             </div>
           )}
 
