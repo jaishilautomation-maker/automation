@@ -74,6 +74,33 @@ const CRUDE_A_GRADE_CODE = "SULPHUR_A_GRADE";
 const CRUDE_PURITY_A_MIN = 98.0;   // >= 98 and within A limits → A
 const CRUDE_PURITY_B_MIN = 90.0;   // >= 90 (but not A) → B; < 90 → Reject
 
+// Oil incoming spec sheet: Appearance "Clear & Bright", Density 0.850–0.880,
+// Viscosity "Report" (recorded, no limit).
+const OIL_DENSITY_MIN = 0.850;
+const OIL_DENSITY_MAX = 0.880;
+
+// Small inline spec + pass/fail badge (mirrors the crude sulphur badge layout).
+function SpecBadge({ specText, status, needsVerification }: {
+  specText: string;
+  status: RiskStatus;
+  needsVerification?: boolean;
+}) {
+  const color = status === "pass" ? "var(--ok)" : status === "fail" ? "#c0392b" : "var(--ink-soft)";
+  const label = status === "pass" ? "✓ Pass" : status === "fail" ? "✗ Fail" : "—";
+  return (
+    <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+      <div style={{ color: "var(--ink-soft)" }}>
+        Spec: <strong>{specText}</strong>
+        {needsVerification && (
+          <span title="Spec needs verification against the physical sheet"
+            style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>
+        )}
+      </div>
+      <div style={{ color, fontWeight: 700 }}>{label}</div>
+    </div>
+  );
+}
+
 const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
 
 // A-20/1 QC type
@@ -127,6 +154,25 @@ export default function RmQcPage() {
   const oilDensity = (parseFloat(oilMass) && parseFloat(oilVolume))
     ? (parseFloat(oilMass) / parseFloat(oilVolume)).toFixed(4)
     : "";
+
+  // Oil QC spec check (fixed spec sheet — Appearance "Clear & Bright",
+  // Density 0.850–0.880, Viscosity is "Report" so no pass/fail).
+  const oilAppearanceStatus: RiskStatus = (() => {
+    const t = oilAppearance.trim().toLowerCase();
+    if (!t) return "none";
+    const normalized = t.replace(/\band\b/g, "&").replace(/\s+/g, " ");
+    return normalized.includes("clear") && normalized.includes("bright")
+      ? "pass" : "fail";
+  })();
+  const oilDensityStatus: RiskStatus = (() => {
+    if (!oilDensity) return "none";
+    const v = parseFloat(oilDensity);
+    if (isNaN(v)) return "none";
+    return v >= OIL_DENSITY_MIN && v <= OIL_DENSITY_MAX ? "pass" : "fail";
+  })();
+  const oilEvaluated: RiskStatus[] = [oilAppearanceStatus, oilDensityStatus].filter(s => s !== "none");
+  const oilOverallStatus: RiskStatus =
+    oilEvaluated.length === 0 ? "none" : oilEvaluated.some(s => s === "fail") ? "fail" : "pass";
 
   // Sulphur Powder cross-factory state (A-20 only)
   const [spBatchSearch, setSpBatchSearch]       = useState("");
@@ -759,10 +805,21 @@ export default function RmQcPage() {
             value={oilBatchNumber} onChange={e => setOilBatchNumber(e.target.value)} />
 
           <h3 style={{ marginTop: 16 }}>Test Results</h3>
+          <p className="field-hint" style={{ marginBottom: 12 }}>
+            Each parameter shows its spec and pass/fail. Viscosity is recorded
+            for report only (no limit).
+          </p>
 
-          <label>Appearance</label>
-          <input type="text" placeholder="Clear & Bright"
-            value={oilAppearance} onChange={e => setOilAppearance(e.target.value)} />
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+              <label>Appearance</label>
+              <input type="text" placeholder="Clear & Bright"
+                value={oilAppearance} onChange={e => setOilAppearance(e.target.value)} />
+            </div>
+            <div style={{ flex: "0 0 auto", minWidth: 150, paddingBottom: 2 }}>
+              <SpecBadge specText="Clear &amp; Bright" status={oilAppearanceStatus} />
+            </div>
+          </div>
 
           <label style={{ marginTop: 12 }}>Density</label>
           <div className="row2">
@@ -777,16 +834,50 @@ export default function RmQcPage() {
                 value={oilVolume} onChange={e => setOilVolume(e.target.value)} />
             </div>
           </div>
-          <div style={{ marginTop: 4 }}>
-            <label>Density = M/V (g/mL)</label>
-            <input type="text" readOnly value={oilDensity}
-              style={{ background: "var(--ok-soft)", fontWeight: 600 }}
-              placeholder="Auto-calculated" />
+          <div style={{ marginTop: 4, display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+              <label>Density = M/V (g/mL)</label>
+              <input type="text" readOnly value={oilDensity}
+                style={{ background: "var(--ok-soft)", fontWeight: 600 }}
+                placeholder="Auto-calculated" />
+            </div>
+            <div style={{ flex: "0 0 auto", minWidth: 150, paddingBottom: 2 }}>
+              <SpecBadge specText={`${OIL_DENSITY_MIN.toFixed(3)}–${OIL_DENSITY_MAX.toFixed(3)}`} status={oilDensityStatus} />
+            </div>
           </div>
 
-          <label style={{ marginTop: 12 }}>Viscosity</label>
-          <input type="number" step="any" placeholder="Viscosity value"
-            value={oilViscosity} onChange={e => setOilViscosity(e.target.value)} />
+          <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+              <label>Viscosity</label>
+              <input type="number" step="any" placeholder="Viscosity value"
+                value={oilViscosity} onChange={e => setOilViscosity(e.target.value)} />
+            </div>
+            <div style={{ flex: "0 0 auto", minWidth: 150, paddingBottom: 2 }}>
+              <div style={{ fontSize: 12, lineHeight: 1.4, color: "var(--ink-soft)" }}>
+                Spec: <strong>Report</strong>
+                <div>—</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Overall oil pass/fail banner */}
+          {oilOverallStatus !== "none" && (
+            <div className="card" style={{
+              marginTop: 16, display: "flex", alignItems: "center", gap: 12,
+              borderLeft: `4px solid ${oilOverallStatus === "pass" ? "var(--ok)" : "#c0392b"}`,
+            }}>
+              <span style={{
+                fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
+                background: oilOverallStatus === "pass" ? "var(--ok-soft)" : "#fde8e8",
+                color: oilOverallStatus === "pass" ? "var(--ok)" : "#c0392b",
+              }}>
+                {oilOverallStatus === "pass" ? "OVERALL: PASS" : "OVERALL: FAIL"}
+              </span>
+              <span className="field-hint" style={{ margin: 0 }}>
+                {oilEvaluated.filter(s => s === "pass").length}/{oilEvaluated.length} parameters within spec
+              </span>
+            </div>
+          )}
 
           <button className="btn btn-primary" type="button"
             disabled={oilSubmitting}
@@ -826,6 +917,10 @@ export default function RmQcPage() {
                 if (oilVolume) testResults["volume_ml"] = parseFloat(oilVolume);
                 if (oilDensity) testResults["density_g_ml"] = parseFloat(oilDensity);
                 if (oilViscosity) testResults["viscosity"] = parseFloat(oilViscosity);
+                // Persist the spec pass/fail result so it flows to email + sheet.
+                const oilResult = oilOverallStatus === "pass" ? "PASS"
+                  : oilOverallStatus === "fail" ? "FAIL" : "";
+                if (oilResult) testResults["spec_result"] = oilResult;
 
                 const { data: oilRow, error } = await supabase.from("rm_qc").insert({
                   batch_id: bId,
@@ -857,6 +952,7 @@ export default function RmQcPage() {
                   materialName:    "Oil",
                   batchNumber:     oilBatchNumber.trim(),
                   testDate:        oilNowISO.slice(0, 10),
+                  grade:           oilResult || null,   // PASS / FAIL vs oil spec
                   testResults,
                   remarks:         null,
                   submittedByName: profile?.full_name ?? "—",
@@ -877,8 +973,8 @@ export default function RmQcPage() {
                       "Oil",
                       oilBatchNumber.trim(),
                       oilNowISO.slice(0, 10),
-                      null,  // chemist — not collected for oil QC
-                      "",    // grade — crude sulphur only
+                      null,      // chemist — not collected for oil QC
+                      oilResult, // grade column carries the oil PASS/FAIL verdict
                       JSON.stringify(testResults),
                       null,  // remarks — not collected for oil QC
                       profile?.full_name ?? null,
