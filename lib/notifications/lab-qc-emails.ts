@@ -139,6 +139,8 @@ export interface RmQcEmailArgs {
   batchNumber?:   string | null;
   testDate:       string | null | undefined;
   chemistName?:   string | null;
+  /** Auto-determined IS-6655 grade (Crude Sulphur only): "A" | "B" | "Reject". */
+  grade?:         string | null;
   testResults:    Record<string, unknown> | null | undefined;
   remarks:        string | null | undefined;
   submittedByName: string;
@@ -158,6 +160,7 @@ export function buildRmQcEmail(d: RmQcEmailArgs): { subject: string; html: strin
       ["Batch",        d.batchNumber  || "—"],
       ["Test Date",    fmtDate(d.testDate)],
       ["Chemist",      d.chemistName  || "—"],
+      ...(d.grade ? [["Grade (auto)", d.grade] as [string, string]] : []),
       ["Remarks",      d.remarks      || "—"],
       ["Saved By",     d.submittedByName],
       ["Saved At",     fmtTs(d.submittedAt)],

@@ -313,7 +313,7 @@ const SHEET_TABS: Record<SheetTarget, Record<string, string[]>> = {
       "Submitted By", "Submitted At", "Factory ID",
     ],
     "RM QC": [
-      "ID", "Material Name", "Batch Number", "Test Date", "Chemist",
+      "ID", "Material Name", "Batch Number", "Test Date", "Chemist", "Grade",
       "Test Results (JSON)", "Remarks", "Submitted By", "Submitted At", "Factory ID",
     ],
     "Hourly Reading": [

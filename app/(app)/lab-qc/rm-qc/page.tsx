@@ -502,6 +502,13 @@ export default function RmQcPage() {
         }
       });
 
+      // Crude Sulphur: persist the auto-determined IS-6655 grade alongside the
+      // raw values so it flows to the DB, email, and sheet.
+      const isCrudeSulphur = isA20_1 && qcRmType === "crude_sulphur";
+      if (isCrudeSulphur && crudeGrade) {
+        testResults["incoming_grade"] = crudeGrade;
+      }
+
       const { data: newRow, error } = await supabase.from("rm_qc").insert({
         batch_id:      batchId,
         factory_id:    activeFactory.id,
@@ -541,6 +548,7 @@ export default function RmQcPage() {
         batchNumber:     selectedBatch?.batch_number,
         testDate:        testDate,
         chemistName:     chemistName.trim() || null,
+        grade:           isCrudeSulphur ? crudeGrade : null,
         testResults,
         remarks:         remarks.trim() || null,
         submittedByName: profile?.full_name ?? "—",
@@ -562,6 +570,7 @@ export default function RmQcPage() {
             selectedBatch?.batch_number ?? null,
             testDate,
             chemistName.trim() || null,
+            isCrudeSulphur ? (crudeGrade ?? "") : "",
             JSON.stringify(testResults),
             remarks.trim() || null,
             profile?.full_name ?? null,
@@ -869,6 +878,7 @@ export default function RmQcPage() {
                       oilBatchNumber.trim(),
                       oilNowISO.slice(0, 10),
                       null,  // chemist — not collected for oil QC
+                      "",    // grade — crude sulphur only
                       JSON.stringify(testResults),
                       null,  // remarks — not collected for oil QC
                       profile?.full_name ?? null,
