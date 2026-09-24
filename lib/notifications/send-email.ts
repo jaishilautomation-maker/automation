@@ -44,6 +44,12 @@ import { createClient } from "@supabase/supabase-js";
 // Fixed recipient for all A-20/1 workflow notifications.
 export const AUTOMATION_EMAIL = "automation@jaishilsulphur.com";
 
+// Lab / QC mailbox. Every lab/chemist submission (eventType prefixed
+// "lab_qc_") is also delivered here, in the same format, in addition to the
+// AUTOMATION_EMAIL recipient.
+export const LAB_QC_EMAIL = "qcdombivli@jaishilsulphur.com";
+const LAB_QC_EVENT_PREFIX = "lab_qc_";
+
 // The Workspace mailbox the service account impersonates as the sender.
 // Must match the account authorised in Workspace Admin → Domain-wide Delegation.
 // Client ID 111764033913967609618 is delegated for this address.
@@ -176,7 +182,14 @@ export interface SendEmailArgs {
  * Safe to `void` / fire-and-forget — never throws.
  */
 export async function sendEmail(args: SendEmailArgs): Promise<void> {
-  const recipients = args.recipients ?? [AUTOMATION_EMAIL];
+  const baseRecipients = args.recipients ?? [AUTOMATION_EMAIL];
+  // Lab/chemist submissions are additionally CC'd to the Lab QC mailbox, in the
+  // same format. Applied here (server-side, by eventType) so it covers every
+  // lab-qc page without each caller having to opt in. Deduplicated in case the
+  // caller already listed it.
+  const recipients = args.eventType?.startsWith(LAB_QC_EVENT_PREFIX)
+    ? Array.from(new Set([...baseRecipients, LAB_QC_EMAIL]))
+    : baseRecipients;
   let success   = false;
   let errorMsg: string | null = null;
 
