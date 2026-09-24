@@ -139,7 +139,10 @@ export default function RmQcPage() {
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [values, setValues]           = useState<Record<string, string>>({});
   const [testDate, setTestDate]       = useState(new Date().toISOString().slice(0, 10));
-  const [chemistName, setChemistName] = useState("");
+  // Chemist name is taken from the logged-in user (profile.full_name) — no
+  // manual entry. Used only for email/sheet display; chemist_id = user.id
+  // remains the authoritative identity on the record.
+  const chemistName = profile?.full_name ?? "";
   const [remarks, setRemarks]         = useState("");
   const [submitting, setSubmitting]   = useState(false);
 
@@ -531,7 +534,6 @@ export default function RmQcPage() {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
     if (!materialId) { showToast("Select a material.", true); return; }
     if (!batchId)    { showToast("Select a batch.", true); return; }
-    if (!chemistName.trim()) { showToast("Enter chemist name.", true); return; }
 
     setSubmitting(true);
     try {
@@ -629,7 +631,7 @@ export default function RmQcPage() {
       showToast("QC results saved ✓");
       setBatchId("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
-      setChemistName(""); setRemarks("");
+      setRemarks("");
     } catch {
       showToast("Network error — try again.", true);
     } finally {
@@ -719,9 +721,10 @@ export default function RmQcPage() {
                     <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
                   </div>
                   <div>
-                    <label>Chemist Name *</label>
-                    <input type="text" placeholder="Name" value={chemistName}
-                      onChange={e => setChemistName(e.target.value)} />
+                    <label>Chemist</label>
+                    <input type="text" readOnly value={chemistName || "—"}
+                      style={{ background: "var(--ok-soft)", fontWeight: 600 }} />
+                    <p className="field-hint" style={{ marginTop: 4 }}>From your login</p>
                   </div>
                 </div>
                 {crudeSpecs.length === 0 && (
@@ -1162,9 +1165,10 @@ export default function RmQcPage() {
                     <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
                   </div>
                   <div>
-                    <label>Chemist Name *</label>
-                    <input type="text" placeholder="Name" value={chemistName}
-                      onChange={e => setChemistName(e.target.value)} />
+                    <label>Chemist</label>
+                    <input type="text" readOnly value={chemistName || "—"}
+                      style={{ background: "var(--ok-soft)", fontWeight: 600 }} />
+                    <p className="field-hint" style={{ marginTop: 4 }}>From your login</p>
                   </div>
                 </div>
               </div>
