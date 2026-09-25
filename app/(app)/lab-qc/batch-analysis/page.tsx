@@ -23,6 +23,7 @@ import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRend
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
+import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface PartyOption {
@@ -360,6 +361,9 @@ export default function BatchAnalysisPage() {
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
+        // Fire-and-forget: generate + email the in-process inspection report.
+        void notifyReport({ source: "batch_analysis", recordId: existingAnalysis.id });
+
         void notifyQcFinalized({
           sourceTable:   "batch_analysis",
           sourceRecordId: existingAnalysis.id,
@@ -434,6 +438,9 @@ export default function BatchAnalysisPage() {
         // successful save (existingAnalysis was never populated post-insert).
         setExistingAnalysis(newRow as BatchAnalysis);
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        // Fire-and-forget: generate + email the in-process inspection report.
+        void notifyReport({ source: "batch_analysis", recordId: newRow.id });
+
         void notifyQcFinalized({
           sourceTable:   "batch_analysis",
           sourceRecordId: newRow.id,

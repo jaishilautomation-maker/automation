@@ -1,0 +1,21 @@
+{
+  "template": "sulphur-powder_coa.xlsx",
+  "fields": {
+    "test_report_no": "coa.test_report_no",
+    "customer_name": "coa.customer_name",
+    "customer_address": "coa.customer_address",
+    "batch_no": "coa.batch_no",
+    "lot_no": "coa.lot_no",
+    "qty": "coa.qty",
+    "invoice_no": "coa.invoice_no",
+    "vehicle_no": "coa.vehicle_no",
+    "mfg_date": "coa.mfg_date",
+    "generated_at": "coa.generated_at",
+    "purity_actual": "product_qc.test_results.purity_cs2",
+    "acidity_actual": "product_qc.test_results.acidity_h2so4",
+    "ash_actual": "product_qc.test_results.ash_content",
+    "hl70_actual": "product_qc.test_results.heat_loss_70",
+    "mesh200_actual": "product_qc.test_results.mesh_75u_200mesh",
+    "appearance": "product_qc.appearance"
+  }
+}

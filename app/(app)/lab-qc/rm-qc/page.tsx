@@ -24,6 +24,7 @@ import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRend
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material, QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
+import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 
 // ---------------------------------------------------------------------------
@@ -577,6 +578,9 @@ export default function RmQcPage() {
         .filter(Boolean).map(ref => ref!.flush(newRow.id));
       await Promise.all(flushPromises);
 
+      // Fire-and-forget: generate + email the filled incoming-inspection report.
+      void notifyReport({ source: "rm_qc", recordId: newRow.id });
+
       void notifyQcFinalized({
         sourceTable:   "rm_qc",
         sourceRecordId: newRow.id,
@@ -938,6 +942,9 @@ export default function RmQcPage() {
                 }).select("id").single();
 
                 if (error || !oilRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+                // Fire-and-forget: generate + email the incoming-inspection report.
+                void notifyReport({ source: "rm_qc", recordId: oilRow.id });
+
                 void notifyQcFinalized({
                   sourceTable:   "rm_qc",
                   sourceRecordId: oilRow.id,

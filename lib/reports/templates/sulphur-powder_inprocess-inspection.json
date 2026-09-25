@@ -1,0 +1,26 @@
+{
+  "template": "sulphur-powder_inprocess-inspection.xlsx",
+  "fields": {
+    "batch_no": "batch_analysis.batch_no",
+    "lot_no": "batch_analysis.lot_no",
+    "analysis_date": "batch_analysis.analysis_date",
+    "chemist_name": "batch_analysis.chemist_name",
+    "remarks": "batch_analysis.remarks",
+
+    "colour_appearance": "batch_analysis.test_results.colour_appearance",
+    "purity_percent": "batch_analysis.test_results.purity_percent",
+    "acidity_percent": "batch_analysis.test_results.acidity_percent",
+    "ash_percent": "batch_analysis.test_results.ash_percent",
+    "moisture_percent": "batch_analysis.test_results.moisture_percent",
+    "oil_percent": "batch_analysis.test_results.oil_percent",
+    "heat_loss_percent": "batch_analysis.test_results.heat_loss_percent",
+    "mesh100_pct": "batch_analysis.test_results.mesh100_pct",
+    "mesh200_pct": "batch_analysis.test_results.mesh200_pct",
+    "mesh325_pct": "batch_analysis.test_results.mesh325_pct",
+    "sg_value": "batch_analysis.test_results.sg_value",
+    "bd_value": "batch_analysis.test_results.bd_value",
+    "melting_point": "batch_analysis.test_results.melting_point",
+    "insolubility_toluene": "batch_analysis.test_results.insolubility_toluene",
+    "total_sulphur_percent": "batch_analysis.test_results.total_sulphur_percent"
+  }
+}

@@ -26,6 +26,7 @@ import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRend
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
+import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildProductQcEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface BatchOption {
@@ -373,6 +374,12 @@ export default function ProductQcPage() {
           });
         }
 
+        // Fire-and-forget: generate + email the filled final-inspection report.
+        // Product QC / final inspection is an A-20 workflow only — A-20/1 (crude
+        // sulphur → powder line) has no final-inspection report. Gate on A-20 so
+        // this shared code never emits a product_qc report on the A-20/1 build.
+        if (isA20) void notifyReport({ source: "product_qc", recordId: existingRecord.id });
+
         // Fire-and-forget email (UPDATE path)
         const pqcUpdISO = new Date().toISOString();
         const { subject: pqcUpdSubj, html: pqcUpdHtml } = buildProductQcEmail({
@@ -453,6 +460,10 @@ export default function ProductQcPage() {
             extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
           });
         }
+
+        // Fire-and-forget: generate + email the filled final-inspection report.
+        // A-20 only (see UPDATE-path note above) — never emitted on A-20/1.
+        if (isA20) void notifyReport({ source: "product_qc", recordId: newRow.id });
 
         // Fire-and-forget email (INSERT path)
         const pqcInsISO = new Date().toISOString();

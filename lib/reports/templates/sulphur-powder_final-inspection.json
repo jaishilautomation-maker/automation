@@ -1,0 +1,19 @@
+{
+  "template": "sulphur-powder_final-inspection.xlsx",
+  "fields": {
+    "batch_no": "product_qc.batch_no",
+    "job_no": "product_qc.job_no",
+    "product_name": "product_qc.product_name",
+    "test_date": "product_qc.test_date",
+    "chemist_name": "product_qc.chemist_name",
+    "appearance": "product_qc.appearance",
+    "overall_result": "product_qc.overall_result",
+    "purity_actual": "product_qc.test_results.purity_cs2",
+    "acidity_actual": "product_qc.test_results.acidity_h2so4",
+    "ash_actual": "product_qc.test_results.ash_content",
+    "hl70_actual": "product_qc.test_results.heat_loss_70",
+    "mesh_a": "product_qc.test_results.mesh_150u_100mesh",
+    "mesh_b": "product_qc.test_results.mesh_75u_200mesh",
+    "remarks": "product_qc.remarks"
+  }
+}

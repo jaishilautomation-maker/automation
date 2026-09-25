@@ -1,0 +1,29 @@
+{
+  "template": "crude-sulphur_incoming-inspection.xlsx",
+  "fields": {
+    "batch_no": "rm_qc.batch_no",
+    "lot_no": "rm_qc.lot_no",
+    "material_name": "rm_qc.material_name",
+    "test_date": "rm_qc.test_date",
+    "chemist_name": "rm_qc.chemist_name",
+    "remarks": "rm_qc.remarks",
+
+    "appearance": "rm_qc.test_results.appearance",
+    "purity_percent": "rm_qc.test_results.purity_percent",
+    "acidity_percent": "rm_qc.test_results.acidity_percent",
+    "ash_percent": "rm_qc.test_results.ash_percent",
+    "moisture_percent": "rm_qc.test_results.moisture_percent",
+    "incoming_grade": "rm_qc.test_results.incoming_grade",
+
+    "purity_m1": "rm_qc.test_results.purity_m1",
+    "purity_m": "rm_qc.test_results.purity_m",
+    "acidity_v1": "rm_qc.test_results.acidity_v1",
+    "acidity_v2": "rm_qc.test_results.acidity_v2",
+    "acidity_n": "rm_qc.test_results.acidity_n",
+    "acidity_m": "rm_qc.test_results.acidity_m",
+    "ash_m": "rm_qc.test_results.ash_m",
+    "ash_m1": "rm_qc.test_results.ash_m1",
+    "moisture_m_before": "rm_qc.test_results.moisture_m_before",
+    "moisture_m1_after": "rm_qc.test_results.moisture_m1_after"
+  }
+}

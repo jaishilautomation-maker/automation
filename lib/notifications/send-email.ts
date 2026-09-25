@@ -115,34 +115,91 @@ function buildRawMessage(args: {
   subject:  string;
   html:     string;
   textFallback: string;
+  attachments?: EmailAttachment[];
 }): string {
   // Encode subject as RFC 2047 UTF-8 quoted-printable so non-ASCII survives.
   const encodedSubject = `=?UTF-8?B?${Buffer.from(args.subject).toString("base64")}?=`;
 
-  const boundary = `boundary_${Date.now().toString(36)}`;
+  const altBoundary = `alt_${Date.now().toString(36)}`;
+
+  // The body itself is always a multipart/alternative (plain + html).
+  const altParts = [
+    `--${altBoundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    args.textFallback,
+    "",
+    `--${altBoundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    args.html,
+    "",
+    `--${altBoundary}--`,
+  ];
+
+  const attachments = args.attachments ?? [];
+
+  // No attachments → the classic multipart/alternative message (unchanged
+  // wire format, so existing emails look exactly as before).
+  if (attachments.length === 0) {
+    const raw = [
+      `From: JSCI Automation <${args.from}>`,
+      `To: ${args.to}`,
+      `Subject: ${encodedSubject}`,
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+      "",
+      ...altParts,
+    ].join("\r\n");
+
+    return toBase64Url(raw);
+  }
+
+  // With attachments → wrap the alternative body as the first part of a
+  // multipart/mixed, followed by one base64 part per attachment.
+  const mixedBoundary = `mixed_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+  const attachmentParts: string[] = [];
+  for (const att of attachments) {
+    // Base64 content, wrapped at 76 chars per RFC 2045.
+    const b64 = att.content.toString("base64").replace(/(.{76})/g, "$1\r\n");
+    attachmentParts.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${att.contentType}; name="${att.filename}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${att.filename}"`,
+      "",
+      b64,
+      ""
+    );
+  }
 
   const raw = [
     `From: JSCI Automation <${args.from}>`,
     `To: ${args.to}`,
     `Subject: ${encodedSubject}`,
     "MIME-Version: 1.0",
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
     "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: quoted-printable",
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
     "",
-    args.textFallback,
+    ...altParts,
     "",
-    `--${boundary}`,
-    "Content-Type: text/html; charset=UTF-8",
-    "Content-Transfer-Encoding: quoted-printable",
-    "",
-    args.html,
-    "",
-    `--${boundary}--`,
+    ...attachmentParts,
+    `--${mixedBoundary}--`,
   ].join("\r\n");
 
+  return toBase64Url(raw);
+}
+
+// Gmail API requires base64url (not standard base64):
+//   + → -    / → _    trailing = stripped
+function toBase64Url(raw: string): string {
   return Buffer.from(raw)
     .toString("base64")
     .replace(/\+/g, "-")
@@ -164,6 +221,22 @@ function getAdminClient() {
 // ---------------------------------------------------------------------------
 // Public interface — identical to the previous Nodemailer version.
 // ---------------------------------------------------------------------------
+/**
+ * A binary attachment carried in-memory. `content` is the raw file bytes
+ * (e.g. the Buffer returned by exceljs `workbook.xlsx.writeBuffer()`); nothing
+ * is ever read from or written to disk.
+ */
+export interface EmailAttachment {
+  filename:    string;
+  /** MIME type, e.g. the .xlsx type for a populated report workbook. */
+  contentType: string;
+  content:     Buffer;
+}
+
+/** Standard MIME type for a modern .xlsx workbook. */
+export const XLSX_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
 export interface SendEmailArgs {
   /** Identifies the workflow that fired this email (stored in notification_log). */
   eventType:    string;
@@ -175,6 +248,8 @@ export interface SendEmailArgs {
   /** Optional foreign key stored in the log for traceability. */
   factoryId?:   string;
   referenceId?: string;
+  /** Optional in-memory file attachments (e.g. a populated .xlsx report). */
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -209,6 +284,7 @@ export async function sendEmail(args: SendEmailArgs): Promise<void> {
         subject:      args.subject,
         html:         args.html,
         textFallback,
+        attachments:  args.attachments,
       });
 
       await gmail.users.messages.send({
