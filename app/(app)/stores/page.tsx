@@ -1346,58 +1346,100 @@ function SuppliedSection() {
 );
 }
 // =============================================================================
+// =============================================================================
 // TAB 5 -- DAILY PRODUCTION
 //
-// Mirrors the DAILY PRODN tab in the DPR Excel exactly.
-// Columns (matching the Excel left-to-right):
-//  Date | CEAT 108/EXPORT | M2615 | PLAIN-2615 | APOLLO 160108 | LANXESS |
-//  CEAT R5299 | PLAIN/WE-10/S.A.EXPORT/Plain Lanxess | JKI-108 |
-//  OLD BAGS (SHAKTI) | RUBBER MAKER 50 KG | Sulphur Powder (Gain Formulation) |
-//  JUMBO BAG | Export Plan Bag W/O 25 Kg | TOTAL MT
+// NEW FLOW (batch-number driven):
+//  1. Store Incharge enters a Batch Number.
+//  2. System looks up finalized pulveriser_job_cards where material_code or
+//     job_number matches the batch number (status = 'finalized').
+//  3. All production details are fetched automatically and shown read-only:
+//     product (party_code), machine, shift, job date, planned MT, actual MT,
+//     oil issued, sulphur supplier/lot, hourly readings (bags per batch).
+//  4. Store can only enter: record date + stores note/remark.
+//  5. Save stores a structured record in stores_stock_ledger
+//     (reference_type = 'daily_prod') so history is preserved.
+//  6. Edit mode lets Stores correct the date and remark only.
+//     All production data re-fetched from the job card on edit.
 //
-// TOTAL MT formula (from the Excel cell P179):
-//  = (B+C+D+E+F+G+H+N)*25/1000 [25 kg bags]
-//  + (I+J+K+L)*50/1000      [50 kg bags]
-//  + M*250/1000         [250 kg jumbo bags]
-//
-// Each entry is one row per date. Saved to stores_stock_ledger with
-// reference_type = 'daily_prod' and all fields packed as JSON in remark.
+// Legacy rows (saved before this change with manual bag counts) are shown in
+// the history table with a "Legacy" tag and their original DAILY_PROD_COLS
+// values displayed; they are not editable in the new form.
 // =============================================================================
 
-// Column definitions — drives both the form and the table header
+// ── Legacy DAILY_PROD_COLS kept ONLY for reading old history rows ─────────
 interface DailyProdCol {
  key: string;
- label: string;    // full label for form
- shortLabel: string;  // abbreviated for table header
- bagKg: number;    // kg per bag (25, 50, or 250)
+ label: string;
+ shortLabel: string;
+ bagKg: number;
  colGroup: "25kg" | "50kg" | "250kg";
 }
-
 const DAILY_PROD_COLS: DailyProdCol[] = [
- { key: "ceat_108_export",   label: "CEAT 108 / EXPORT",            shortLabel: "CEAT 108",  bagKg: 25, colGroup: "25kg" },
- { key: "m2615",        label: "M2615",                  shortLabel: "M2615",    bagKg: 25, colGroup: "25kg" },
- { key: "plain_2615",     label: "PLAIN-2615",                shortLabel: "PLAIN-2615", bagKg: 25, colGroup: "25kg" },
- { key: "apollo_160108",    label: "APOLLO 160108",              shortLabel: "APOLLO",   bagKg: 25, colGroup: "25kg" },
- { key: "lanxess",       label: "LANXESS",                 shortLabel: "LANXESS",   bagKg: 25, colGroup: "25kg" },
- { key: "ceat_r5299",     label: "CEAT R5299",                shortLabel: "CEAT R5299", bagKg: 25, colGroup: "25kg" },
- { key: "plain_we10_sa",    label: "PLAIN / WE-10 / S.A. EXPORT / Plain Lanxess", shortLabel: "PLAIN/WE-10", bagKg: 25, colGroup: "25kg" },
- { key: "jki_108",       label: "JKI-108",                 shortLabel: "JKI-108",   bagKg: 50, colGroup: "50kg" },
- { key: "old_bags_shakti",   label: "OLD BAGS (SHAKTI)",            shortLabel: "OLD BAGS",  bagKg: 50, colGroup: "50kg" },
- { key: "rubber_maker_50kg",  label: "RUBBER MAKER 50 KG",            shortLabel: "RUBBER 50",  bagKg: 50, colGroup: "50kg" },
- { key: "sulphur_gain",    label: "Sulphur Powder (Gain Formulation)",     shortLabel: "SUL GAIN",  bagKg: 50, colGroup: "50kg" },
- { key: "jumbo_bag",      label: "JUMBO BAG (500 KG)",            shortLabel: "JUMBO",    bagKg: 250, colGroup: "250kg" },
- { key: "export_plan_25kg",  label: "Export Plan Bag W/O 25 Kg",        shortLabel: "EXP PLAN",  bagKg: 25, colGroup: "25kg" },
+ { key: "ceat_108_export",  label: "CEAT 108 / EXPORT",                        shortLabel: "CEAT 108",  bagKg: 25,  colGroup: "25kg"  },
+ { key: "m2615",            label: "M2615",                                     shortLabel: "M2615",     bagKg: 25,  colGroup: "25kg"  },
+ { key: "plain_2615",       label: "PLAIN-2615",                                shortLabel: "PLAIN-2615",bagKg: 25,  colGroup: "25kg"  },
+ { key: "apollo_160108",    label: "APOLLO 160108",                             shortLabel: "APOLLO",    bagKg: 25,  colGroup: "25kg"  },
+ { key: "lanxess",          label: "LANXESS",                                   shortLabel: "LANXESS",   bagKg: 25,  colGroup: "25kg"  },
+ { key: "ceat_r5299",       label: "CEAT R5299",                                shortLabel: "CEAT R5299",bagKg: 25,  colGroup: "25kg"  },
+ { key: "plain_we10_sa",    label: "PLAIN / WE-10 / S.A. EXPORT / Plain Lanxess",shortLabel: "PLAIN/WE-10",bagKg: 25,colGroup: "25kg"},
+ { key: "jki_108",          label: "JKI-108",                                   shortLabel: "JKI-108",   bagKg: 50,  colGroup: "50kg"  },
+ { key: "old_bags_shakti",  label: "OLD BAGS (SHAKTI)",                         shortLabel: "OLD BAGS",  bagKg: 50,  colGroup: "50kg"  },
+ { key: "rubber_maker_50kg",label: "RUBBER MAKER 50 KG",                        shortLabel: "RUBBER 50", bagKg: 50,  colGroup: "50kg"  },
+ { key: "sulphur_gain",     label: "Sulphur Powder (Gain Formulation)",         shortLabel: "SUL GAIN",  bagKg: 50,  colGroup: "50kg"  },
+ { key: "jumbo_bag",        label: "JUMBO BAG (500 KG)",                        shortLabel: "JUMBO",     bagKg: 250, colGroup: "250kg" },
+ { key: "export_plan_25kg", label: "Export Plan Bag W/O 25 Kg",                 shortLabel: "EXP PLAN",  bagKg: 25,  colGroup: "25kg"  },
 ];
 
-// Keys that use 25 kg bags (B,C,D,E,F,G,H,N in the Excel)
-const BAGS_25KG = ["ceat_108_export","m2615","plain_2615","apollo_160108","lanxess","ceat_r5299","plain_we10_sa","export_plan_25kg"];
-// Keys that use 50 kg bags (I,J,K,L)
-const BAGS_50KG = ["jki_108","old_bags_shakti","rubber_maker_50kg","sulphur_gain"];
-// Keys that use 250 kg bags 
-const BAGS_250KG = ["jumbo_bag"];
+// ── New types for batch-driven entries ────────────────────────────────────
 
-type DailyProdRow = Record<string, string> & { date: string };
+/** Production data auto-fetched from a finalized job card + hourly readings */
+interface FetchedBatchData {
+ job_card_id: string;
+ job_number: string | null;
+ machine_number: string | null;
+ shift: string | null;
+ job_date: string | null;
+ product: string | null;          // party_code (e.g. "Ceat 108")
+ planned_mt: number | null;
+ actual_mt: number | null;
+ oil_issued_kg: number | null;
+ sulphur_supplier: string | null;
+ sulphur_lot: string | null;
+ // From hourly readings
+ total_bags: number;               // sum of bags across all readings
+ readings: {
+  batch_no: string | null;
+  bags: number | null;
+  reading_date: string | null;
+  start_time: string | null;
+  stop_time: string | null;
+  total_hours: number | null;
+ }[];
+}
 
+/** Saved ledger row — v2 (batch-driven). Stored as JSON in remark. */
+interface SavedDailyProdRowV2 {
+ id: string;
+ version: 2;
+ batch_no: string;
+ record_date: string;
+ job_card_id: string;
+ job_number: string | null;
+ product: string | null;
+ machine_number: string | null;
+ shift: string | null;
+ job_date: string | null;
+ planned_mt: number | null;
+ actual_mt: number | null;
+ oil_issued_kg: number | null;
+ sulphur_supplier: string | null;
+ sulphur_lot: string | null;
+ total_bags: number;
+ store_remark: string;
+}
+
+/** Legacy v1 row (manual bag counts) */
 interface SavedDailyProdRow {
  id: string;
  date: string;
@@ -1405,56 +1447,106 @@ interface SavedDailyProdRow {
  total_mt: number;
 }
 
-/** Excel formula: (B+C+D+E+F+G+H+N)*25/1000 + (I+J+K+L)*50/1000 + M*250/1000 */
-function calcTotalMt(vals: Record<string, string>): number {
- const n = (k: string) => Number(vals[k]) || 0;
-
- const sum25 = BAGS_25KG.reduce((s, k) => s + n(k), 0);
- const sum50 = BAGS_50KG.reduce((s, k) => s + n(k), 0);
- const sum250 = BAGS_250KG.reduce((s, k) => s + n(k), 0);
-
- return (sum25 * 25) / 1000 + (sum50 * 50) / 1000 + (sum250 * 250) / 1000;
-}
-
-function blankDailyProdRow(): DailyProdRow {
- const row: DailyProdRow = { date: today() };
- DAILY_PROD_COLS.forEach(c => { row[c.key] = ""; });
- return row;
-}
+/** Union — what we show in history */
+type DailyProdHistoryRow =
+ | (SavedDailyProdRowV2 & { legacy: false })
+ | (SavedDailyProdRow   & { legacy: true  });
 
 function DailyProductionSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
 
- const [entry, setEntry]      = useState<DailyProdRow>(blankDailyProdRow());
+ // ── Batch number input ──────────────────────────────────────────────────
+ const [batchNo, setBatchNo]     = useState("");
+ const [fetching, setFetching]   = useState(false);
+ const [fetchError, setFetchError] = useState<string | null>(null);
+ const [fetched, setFetched]     = useState<FetchedBatchData | null>(null);
+
+ // ── Store-editable fields ───────────────────────────────────────────────
+ const [recordDate, setRecordDate]   = useState(today());
+ const [storeRemark, setStoreRemark] = useState("");
+
+ // ── Save / edit state ───────────────────────────────────────────────────
  const [submitting, setSubmitting] = useState(false);
- const [history, setHistory]    = useState<SavedDailyProdRow[]>([]);
+ const [editId, setEditId]         = useState<string | null>(null);
+
+ // ── History ─────────────────────────────────────────────────────────────
+ const [history, setHistory]       = useState<DailyProdHistoryRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
- // Edit mode: holds the ledger row id being edited (null = new entry)
- const [editId, setEditId]      = useState<string | null>(null);
 
- // Compute total MT live from current entry
- const totalMt = calcTotalMt(entry);
+ // ── Fetch job card by batch number ─────────────────────────────────────
+ const fetchBatch = async (bn: string) => {
+  const trimmed = bn.trim();
+  if (!trimmed) return;
+  setFetching(true);
+  setFetchError(null);
+  setFetched(null);
 
- const setField = (key: string, val: string) => {
-  setEntry(prev => ({ ...prev, [key]: val }));
+  try {
+   // Search finalized job cards: material_code or job_number matches the batch no
+   const { data: cards, error: cardErr } = await supabase
+    .from("pulveriser_job_cards")
+    .select("*")
+    .eq("status", "finalized")
+    .or(`material_code.ilike.%${trimmed}%,job_number.eq.${trimmed}`)
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+   if (cardErr) { setFetchError("Search failed: " + cardErr.message); return; }
+   if (!cards || cards.length === 0) {
+    setFetchError("No finalized Job Card found for batch number \"" + trimmed + "\". QC must finalize the card first.");
+    return;
+   }
+
+   // Use the most recent match
+   const card = cards[0] as import("@/lib/types").PulveriserJobCard;
+
+   // Fetch hourly readings for this card
+   const { data: readings } = await supabase
+    .from("pulveriser_hourly_readings")
+    .select("batch_no, bags, reading_date, start_time, stop_time, total_hours")
+    .eq("job_card_id", card.id)
+    .order("reading_date", { ascending: true });
+
+   const rList = (readings ?? []) as {
+    batch_no: string | null; bags: number | null; reading_date: string | null;
+    start_time: string | null; stop_time: string | null; total_hours: number | null;
+   }[];
+
+   const totalBags = rList.reduce((s, r) => s + (r.bags ?? 0), 0);
+
+   setFetched({
+    job_card_id:      card.id,
+    job_number:       card.job_number,
+    machine_number:   card.machine_number,
+    shift:            card.shift,
+    job_date:         card.job_date,
+    product:          card.party_code ?? card.material_code,
+    planned_mt:       card.planned_production_mt,
+    actual_mt:        card.actual_production_mt,
+    oil_issued_kg:    card.oil_issued_kg,
+    sulphur_supplier: card.sulphur_supplier,
+    sulphur_lot:      card.sulphur_lot_number,
+    total_bags:       totalBags,
+    readings:         rList,
+   });
+  } catch (e: unknown) {
+   setFetchError("Error: " + (e instanceof Error ? e.message : String(e)));
+  } finally {
+   setFetching(false);
+  }
  };
 
- // Load a saved row into the form for editing
- const startEdit = (row: SavedDailyProdRow) => {
-  const restored: DailyProdRow = { date: row.date };
-  DAILY_PROD_COLS.forEach(c => { restored[c.key] = row.values[c.key] > 0 ? String(row.values[c.key]) : ""; });
-  setEntry(restored);
-  setEditId(row.id);
-  window.scrollTo({ top: 0, behavior: "smooth" });
- };
-
- const cancelEdit = () => {
-  setEntry(blankDailyProdRow());
+ const clearFetch = () => {
+  setBatchNo("");
+  setFetched(null);
+  setFetchError(null);
+  setStoreRemark("");
   setEditId(null);
  };
 
+ // ── Load history ────────────────────────────────────────────────────────
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
   const { data, error } = await supabase
@@ -1463,24 +1555,46 @@ function DailyProductionSection() {
    .eq("reference_type", "daily_prod")
    .order("transaction_date", { ascending: false })
    .order("created_at", { ascending: false })
-   .limit(90); // ~3 months of daily entries
+   .limit(120);
 
-  if (error) {
-   showToast("Could not load history: " + error.message, true);
-   setHistLoading(false);
-   return;
-  }
+  if (error) { showToast("Could not load history: " + error.message, true); setHistLoading(false); return; }
 
-  const rows: SavedDailyProdRow[] = [];
+  const rows: DailyProdHistoryRow[] = [];
   for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
    try {
-    const p = JSON.parse(row.remark ?? "{}") as { values?: Record<string, number>; total_mt?: number };
-    rows.push({
-     id: row.id,
-     date: row.transaction_date,
-     values: p.values ?? {},
-     total_mt: p.total_mt ?? 0,
-    });
+    const p = JSON.parse(row.remark ?? "{}") as Record<string, unknown>;
+    if (p.version === 2) {
+     // New batch-driven row
+     rows.push({
+      legacy: false,
+      id:               row.id,
+      version:          2,
+      batch_no:         String(p.batch_no ?? ""),
+      record_date:      String(p.record_date ?? row.transaction_date),
+      job_card_id:      String(p.job_card_id ?? ""),
+      job_number:       (p.job_number as string | null) ?? null,
+      product:          (p.product as string | null) ?? null,
+      machine_number:   (p.machine_number as string | null) ?? null,
+      shift:            (p.shift as string | null) ?? null,
+      job_date:         (p.job_date as string | null) ?? null,
+      planned_mt:       (p.planned_mt as number | null) ?? null,
+      actual_mt:        (p.actual_mt as number | null) ?? null,
+      oil_issued_kg:    (p.oil_issued_kg as number | null) ?? null,
+      sulphur_supplier: (p.sulphur_supplier as string | null) ?? null,
+      sulphur_lot:      (p.sulphur_lot as string | null) ?? null,
+      total_bags:       Number(p.total_bags ?? 0),
+      store_remark:     String(p.store_remark ?? ""),
+     });
+    } else {
+     // Legacy manual row
+     rows.push({
+      legacy: true,
+      id:       row.id,
+      date:     row.transaction_date,
+      values:   (p.values as Record<string, number>) ?? {},
+      total_mt: Number(p.total_mt ?? 0),
+     });
+    }
    } catch { /* skip */ }
   }
   setHistory(rows);
@@ -1489,99 +1603,128 @@ function DailyProductionSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- const handleSave = async () => {
-  if (!entry.date) { showToast("Enter a date.", true); return; }
-  if (!user) return;
+ // ── Load a v2 row into edit mode ────────────────────────────────────────
+ const startEdit = async (row: SavedDailyProdRowV2 & { legacy: false }) => {
+  setBatchNo(row.batch_no);
+  setRecordDate(row.record_date);
+  setStoreRemark(row.store_remark);
+  setEditId(row.id);
+  // Re-fetch production data so it reflects any QC updates
+  await fetchBatch(row.batch_no);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
 
-  // Check at least one column has a value
-  const hasAny = DAILY_PROD_COLS.some(c => Number(entry[c.key]) > 0);
-  if (!hasAny) { showToast("Enter at least one production quantity.", true); return; }
+ const cancelEdit = () => {
+  clearFetch();
+  setRecordDate(today());
+ };
+
+ // ── Save ────────────────────────────────────────────────────────────────
+ const handleSave = async () => {
+  if (!fetched) { showToast("Enter a Batch Number and load the production data first.", true); return; }
+  if (!recordDate) { showToast("Select a record date.", true); return; }
+  if (!user) return;
 
   setSubmitting(true);
   try {
-   // We need an item_id FK — use any active item as a placeholder anchor.
-   // Daily production entries are keyed by reference_type='daily_prod' not by item.
-   // Use a dummy lookup: find the first active FG item for this factory.
-   // If none found, we cannot insert (ledger requires item_id). Show helpful error.
+   const payload: Omit<SavedDailyProdRowV2, "id"> = {
+    version:          2,
+    batch_no:         batchNo.trim(),
+    record_date:      recordDate,
+    job_card_id:      fetched.job_card_id,
+    job_number:       fetched.job_number,
+    product:          fetched.product,
+    machine_number:   fetched.machine_number,
+    shift:            fetched.shift,
+    job_date:         fetched.job_date,
+    planned_mt:       fetched.planned_mt,
+    actual_mt:        fetched.actual_mt,
+    oil_issued_kg:    fetched.oil_issued_kg,
+    sulphur_supplier: fetched.sulphur_supplier,
+    sulphur_lot:      fetched.sulphur_lot,
+    total_bags:       fetched.total_bags,
+    store_remark:     storeRemark.trim(),
+   };
+
+   // Need item_id FK anchor (used in both branches)
    const { data: itemData } = await supabase
-    .from("stores_stock_items")
-    .select("id, factory_id")
-    .eq("is_active", true)
-    .eq("category", "finished_good")
-    .limit(1)
-    .maybeSingle();
+    .from("stores_stock_items").select("id, factory_id")
+    .eq("is_active", true).eq("category", "finished_good")
+    .limit(1).maybeSingle();
+   if (!itemData) { showToast("No stock items found. Run migrations 027 and 031 first.", true); return; }
 
-   if (!itemData) {
-    showToast("No stock items found. Run migrations 027 and 031 in Supabase first.", true);
-    setSubmitting(false);
-    return;
-   }
-
-   const numericVals: Record<string, number> = {};
-   DAILY_PROD_COLS.forEach(c => {
-    numericVals[c.key] = Number(entry[c.key]) || 0;
-   });
-
-   const payload = {
-    date:   entry.date,
-    values:  numericVals,
-    total_mt: totalMt,
+   const ledgerRow = {
+    item_id:            itemData.id,
+    factory_id:         itemData.factory_id,
+    transaction_date:   recordDate,
+    transaction_source: "manual" as const,
+    qty_received:       fetched.actual_mt != null ? fetched.actual_mt : 0,
+    qty_issued:         0,
+    dispatch_qty:       0,
+    closing_balance:    0,
+    reference_type:     "daily_prod",
+    remark:             JSON.stringify(payload),
+    entered_by:         user.id,
    };
 
    if (editId) {
-    // UPDATE existing row
-    const { error } = await supabase.from("stores_stock_ledger")
-     .update({ transaction_date: entry.date, remark: JSON.stringify(payload) })
+    // Try UPDATE first (works if migration 047 is deployed).
+    // Falls back to DELETE + INSERT if UPDATE is not permitted.
+    const { error: updErr } = await supabase
+     .from("stores_stock_ledger")
+     .update({ transaction_date: recordDate, remark: JSON.stringify(payload) })
      .eq("id", editId);
-    if (error) { showToast("Update failed: " + error.message, true); return; }
-    showToast("Updated -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+
+    if (updErr) {
+     // UPDATE blocked (migration 047 not yet deployed) — try delete + re-insert
+     const { error: delErr } = await supabase
+      .from("stores_stock_ledger")
+      .delete()
+      .eq("id", editId);
+
+     if (delErr) {
+      // Both UPDATE and DELETE blocked — guide user to run the migration
+      showToast(
+       "Edit requires a one-time DB setup. Visit /api/migrate-047 in your browser to apply it, then try again.",
+       true
+      );
+      return;
+     }
+     const { error: insErr } = await supabase.from("stores_stock_ledger").insert(ledgerRow);
+     if (insErr) { showToast("Update failed (re-insert): " + insErr.message, true); return; }
+    }
+
+    showToast("Updated -- Batch " + payload.batch_no + " (" + payload.product + ")");
     setEditId(null);
    } else {
-    const { error } = await supabase.from("stores_stock_ledger").insert({
-     item_id:      itemData.id,
-     factory_id:     itemData.factory_id,
-     transaction_date:  entry.date,
-     transaction_source: "manual",
-     qty_received:    0,
-     qty_issued:     0,
-     dispatch_qty:    0,
-     closing_balance:  0,
-     reference_type:   "daily_prod",
-     remark:       JSON.stringify(payload),
-     entered_by:     user.id,
-    });
+    const { error } = await supabase.from("stores_stock_ledger").insert(ledgerRow);
     if (error) { showToast("Save failed: " + error.message, true); return; }
-    showToast("Daily production saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+    showToast("Saved -- Batch " + payload.batch_no + " | " + payload.product + " | " + (payload.actual_mt?.toFixed(3) ?? "?") + " MT");
    }
-   setEntry(blankDailyProdRow());
+   clearFetch();
+   setRecordDate(today());
    loadHistory();
   } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
   } finally { setSubmitting(false); }
  };
 
- // Column totals for the TOTAL row in history
- const colTotals: Record<string, number> = {};
- DAILY_PROD_COLS.forEach(c => {
-  colTotals[c.key] = history.reduce((s, r) => s + (r.values[c.key] ?? 0), 0);
- });
- const grandTotalMt = history.reduce((s, r) => s + r.total_mt, 0);
-
+ // ── Render ───────────────────────────────────────────────────────────────
  return (
   <>
    {/* ── Entry form ── */}
    <div className="card">
-    <h3>{editId ? "Edit Daily Production Entry" : "Daily Production Entry"}</h3>
+    <h3>{editId ? "Edit Daily Production Record" : "Daily Production — Batch Lookup"}</h3>
 
     {/* Edit mode banner */}
     {editId && (
      <div style={{
       background: "var(--warn-soft)", border: "1px solid var(--warn)",
-      borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+      borderRadius: 8, padding: "10px 14px", marginBottom: 14,
       display: "flex", justifyContent: "space-between", alignItems: "center",
      }}>
       <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
-       Editing existing entry — save to update, or cancel to discard.
+       Editing existing record — only Record Date and Store Remark are editable.
       </span>
       <button type="button" className="btn btn-ghost"
        style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
@@ -1591,81 +1734,173 @@ function DailyProductionSection() {
      </div>
     )}
 
-    <div style={{ marginBottom: 12 }}>
-     <label>Date *</label>
-     <input type="date" value={entry.date}
-      onChange={e => setField("date", e.target.value)}
-      style={{ maxWidth: 200 }} />
+    {/* Step 1 — Batch Number input */}
+    <div style={{ marginBottom: 14 }}>
+     <label style={{ fontWeight: 700 }}>Batch Number *</label>
+     <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <input
+       type="text"
+       placeholder="Enter Batch Number (e.g. 164, Ex61, JB-045)..."
+       value={batchNo}
+       onChange={e => { setBatchNo(e.target.value); setFetched(null); setFetchError(null); }}
+       onKeyDown={e => { if (e.key === "Enter") fetchBatch(batchNo); }}
+       style={{ flex: 1, minWidth: 220 }}
+      />
+      <button type="button" className="btn btn-secondary"
+       style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+       disabled={fetching || !batchNo.trim()}
+       onClick={() => fetchBatch(batchNo)}>
+       {fetching ? "Searching..." : "Load Details"}
+      </button>
+      {(fetched || fetchError) && (
+       <button type="button" className="btn btn-ghost"
+        style={{ width: "auto", padding: "10px 14px", marginTop: 0, fontSize: 12 }}
+        onClick={clearFetch}>
+        Clear
+       </button>
+      )}
+     </div>
+     <div className="field-hint" style={{ marginTop: 4 }}>
+      Enter the Job Number or Batch/Material Code. All production details will be fetched automatically from the finalized QC Job Card.
+     </div>
     </div>
 
-    {/* 25 kg bag columns */}
-    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
-     textTransform: "uppercase", marginBottom: 4, marginTop: 8 }}>
-     25 kg Bags
-    </div>
-    <div className="row2">
-     {DAILY_PROD_COLS.filter(c => c.colGroup === "25kg").map(col => (
-      <div key={col.key}>
-       <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
-        value={entry[col.key]}
-        onChange={e => setField(col.key, e.target.value)} />
+    {/* Error state */}
+    {fetchError && (
+     <div style={{
+      padding: "12px 14px", borderRadius: 8, marginBottom: 14,
+      background: "var(--warn-soft)", color: "var(--warn)",
+      fontSize: 13, fontWeight: 600, border: "1px solid var(--warn)",
+     }}>
+      {fetchError}
+     </div>
+    )}
+
+    {/* Step 2 — Auto-fetched production details (read-only) */}
+    {fetched && (
+     <>
+      <div style={{
+       background: "var(--ok-soft)", border: "1px solid var(--ok)",
+       borderRadius: 8, padding: "12px 14px", marginBottom: 14,
+       fontSize: 12, color: "var(--ok)", fontWeight: 700,
+      }}>
+       ✓ Production data loaded from finalized QC Job Card — all fields are read-only.
       </div>
-    ))}
-    </div>
 
-    {/* 50 kg bag columns */}
-    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
-     textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
-     50 kg Bags
-    </div>
-    <div className="row2">
-     {DAILY_PROD_COLS.filter(c => c.colGroup === "50kg").map(col => (
-      <div key={col.key}>
-       <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
-        value={entry[col.key]}
-        onChange={e => setField(col.key, e.target.value)} />
+      {/* Production info grid */}
+      <div style={{
+       display: "grid", gridTemplateColumns: "1fr 1fr",
+       gap: "6px 16px", fontSize: 13, lineHeight: 1.8,
+       padding: "12px 14px", background: "var(--panel)",
+       borderRadius: 8, marginBottom: 14, border: "1px solid var(--line)",
+      }}>
+       <div><b>Product:</b>{" "}
+        <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+         {fetched.product ?? "N/A"}
+        </span>
+       </div>
+       <div><b>Job Number:</b> {fetched.job_number ?? "N/A"}</div>
+       <div><b>Machine:</b> {fetched.machine_number ?? "N/A"}</div>
+       <div><b>Shift:</b> {fetched.shift ?? "N/A"}</div>
+       <div><b>Job Date:</b> {fmtDate(fetched.job_date)}</div>
+       <div><b>Total Bags:</b>{" "}
+        <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+         {fetched.total_bags} bags
+        </span>
+       </div>
+       <div><b>Planned Production:</b> {fetched.planned_mt != null ? fetched.planned_mt + " MT" : "N/A"}</div>
+       <div><b>Actual Production:</b>{" "}
+        <span style={{ fontWeight: 700, color: "var(--ok)" }}>
+         {fetched.actual_mt != null ? fetched.actual_mt + " MT" : "N/A"}
+        </span>
+       </div>
+       <div><b>Oil Issued:</b> {fetched.oil_issued_kg != null ? fetched.oil_issued_kg + " kg" : "N/A"}</div>
+       <div><b>Sulphur Supplier:</b> {fetched.sulphur_supplier ?? "N/A"}</div>
+       <div><b>Sulphur Lot:</b> {fetched.sulphur_lot ?? "N/A"}</div>
+       <div style={{ gridColumn: "1 / -1", marginTop: 4, paddingTop: 6,
+        borderTop: "1px solid var(--line)", fontSize: 11,
+        color: "var(--ink-soft)", fontStyle: "italic" }}>
+        QC Status: Finalized ✓ — Production data is locked and cannot be changed.
+       </div>
       </div>
-    ))}
-    </div>
 
-    {/* 250 kg bag column */}
-    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
-     textTransform: "uppercase", marginBottom: 4, marginTop: 12 }}>
-     250 kg Bags (Jumbo)
-    </div>
-    <div style={{ maxWidth: 220 }}>
-     {DAILY_PROD_COLS.filter(c => c.colGroup === "250kg").map(col => (
-      <div key={col.key}>
-       <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
-        value={entry[col.key]}
-        onChange={e => setField(col.key, e.target.value)} />
+      {/* Hourly readings breakdown */}
+      {fetched.readings.length > 0 && (
+       <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)",
+         textTransform: "uppercase", marginBottom: 6 }}>
+         Hourly Readings ({fetched.readings.length} entries)
+        </div>
+        <div style={{ overflowX: "auto" }}>
+         <table className="dash" style={{ minWidth: 480 }}>
+          <thead>
+           <tr>
+            <th style={{ fontSize: 11 }}>Date</th>
+            <th style={{ fontSize: 11 }}>Start</th>
+            <th style={{ fontSize: 11 }}>Stop</th>
+            <th style={{ fontSize: 11, textAlign: "right" }}>Hours</th>
+            <th style={{ fontSize: 11 }}>Batch No</th>
+            <th style={{ fontSize: 11, textAlign: "right" }}>Bags</th>
+           </tr>
+          </thead>
+          <tbody>
+           {fetched.readings.map((r, idx) => (
+            <tr key={idx}>
+             <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtDate(r.reading_date)}</td>
+             <td style={{ fontSize: 12 }}>{r.start_time ?? "—"}</td>
+             <td style={{ fontSize: 12 }}>{r.stop_time ?? "—"}</td>
+             <td style={{ textAlign: "right", fontSize: 12 }}>{r.total_hours ?? "—"}</td>
+             <td style={{ fontSize: 12 }}>{r.batch_no ?? "—"}</td>
+             <td style={{ textAlign: "right", fontWeight: 600, fontSize: 12 }}>{r.bags ?? 0}</td>
+            </tr>
+           ))}
+           <tr style={{ background: "var(--clay-soft)", borderTop: "2px solid var(--line)" }}>
+            <td colSpan={5} style={{ fontWeight: 700, fontSize: 12 }}>TOTAL BAGS</td>
+            <td style={{ textAlign: "right", fontWeight: 700, fontSize: 13 }}>{fetched.total_bags}</td>
+           </tr>
+          </tbody>
+         </table>
+        </div>
+       </div>
+      )}
+
+      {/* Step 3 — Store-editable fields */}
+      <div style={{
+       border: "2px solid var(--clay)", borderRadius: 8,
+       padding: "14px 16px", marginBottom: 4,
+      }}>
+       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--clay)",
+        textTransform: "uppercase", marginBottom: 10 }}>
+        Store Incharge Fields (editable)
+       </div>
+       <div className="row2">
+        <div>
+         <label>Record Date *</label>
+         <input type="date" value={recordDate}
+          onChange={e => setRecordDate(e.target.value)}
+          style={{ maxWidth: 200 }} />
+         <div className="field-hint">Date this record is being logged for.</div>
+        </div>
+        <div>
+         <label>Store Remark</label>
+         <input type="text"
+          placeholder="Optional note..."
+          value={storeRemark}
+          onChange={e => setStoreRemark(e.target.value)} />
+        </div>
+       </div>
       </div>
-    ))}
-    </div>
-
-    {/* Total MT (computed live) */}
-    <div style={{
-     marginTop: 14, padding: "12px 16px",
-     background: "var(--clay-soft)", borderRadius: 8,
-     display: "flex", justifyContent: "space-between", alignItems: "center",
-    }}>
-     <span style={{ fontWeight: 700, fontSize: 14 }}>TOTAL MT</span>
-     <span style={{ fontWeight: 700, fontSize: 20, color: "var(--clay)" }}>
-      {totalMt.toFixed(3)} MT
-     </span>
-    </div>
-    <div className="field-hint" style={{ marginTop: 6 }}>
-     Formula: (25 kg cols x 25 + 50 kg cols x 50 + JUMBO x 250) / 1000
-    </div>
+     </>
+    )}
    </div>
 
-   <button className="btn btn-primary" type="button"
-    disabled={submitting} onClick={handleSave}>
-    {submitting ? "Saving..." : editId ? "Update Entry" : "Save Daily Production"}
-   </button>
+   {fetched && (
+    <button className="btn btn-primary" type="button"
+     disabled={submitting || !fetched}
+     onClick={handleSave}>
+     {submitting ? "Saving..." : editId ? "Update Record" : "Save Production Record"}
+    </button>
+   )}
 
    {/* ── History table ── */}
    <div className="card" style={{ marginTop: 16 }}>
@@ -1673,86 +1908,87 @@ function DailyProductionSection() {
     {histLoading
      ? <div className="empty">Loading...</div>
      : history.length === 0
-      ? <div className="empty">No entries yet.</div>
+      ? <div className="empty">No records yet.</div>
       : (
        <div style={{ overflowX: "auto" }}>
-        <table className="dash" style={{ minWidth: 1100 }}>
+        <table className="dash" style={{ minWidth: 760 }}>
          <thead>
           <tr>
-           <th>Date</th>
-           {DAILY_PROD_COLS.map(c => (
-            <th key={c.key} style={{ textAlign: "right", fontSize: 10 }}>
-             {c.shortLabel}
-             <div style={{ fontWeight: 400, color: "var(--ink-soft)" }}>
-              {c.bagKg}kg
-             </div>
-           </th>
-          ))}
-           <th style={{ textAlign: "right", color: "var(--clay)" }}>
-            TOTAL MT
-           </th>
+           <th>Record Date</th>
+           <th>Batch No</th>
+           <th>Product</th>
+           <th>Machine</th>
+           <th>Shift</th>
+           <th style={{ textAlign: "right" }}>Bags</th>
+           <th style={{ textAlign: "right" }}>Actual MT</th>
+           <th>Remark</th>
            <th></th>
           </tr>
          </thead>
          <tbody>
-          {history.map(row => (
-           <tr key={row.id} style={{ background: editId === row.id ? "var(--warn-soft)" : undefined }}>
-            <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>
-             {fmtDate(row.date)}
-            </td>
-            {DAILY_PROD_COLS.map(c => (
-             <td key={c.key} style={{ textAlign: "right" }}>
-              {row.values[c.key] > 0
-               ? row.values[c.key].toFixed(0)
-               : <span style={{ color: "var(--line)" }}>-</span>}
+          {history.map(row => {
+           if (row.legacy) {
+            // Legacy manual row — display old data, no edit
+            const legacyMt = row.total_mt;
+            return (
+             <tr key={row.id} style={{ background: "#f8f8f8" }}>
+              <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtDate(row.date)}</td>
+              <td colSpan={6} style={{ fontSize: 11, color: "var(--ink-soft)", fontStyle: "italic" }}>
+               Legacy entry — {DAILY_PROD_COLS.filter(c => (row.values[c.key] ?? 0) > 0)
+                .map(c => c.shortLabel + ": " + row.values[c.key])
+                .join(" | ")}
+              </td>
+              <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+               {legacyMt.toFixed(3)} MT
+              </td>
+              <td>
+               <span style={{
+                fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                background: "var(--line)", color: "var(--ink-soft)",
+               }}>Legacy</span>
+              </td>
+             </tr>
+            );
+           }
+           // New v2 row
+           return (
+            <tr key={row.id} style={{ background: editId === row.id ? "var(--warn-soft)" : undefined }}>
+             <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtDate(row.record_date)}</td>
+             <td style={{ fontWeight: 700, color: "var(--clay)" }}>{row.batch_no}</td>
+             <td style={{ fontSize: 12 }}>{row.product ?? "N/A"}</td>
+             <td style={{ fontSize: 12 }}>{row.machine_number ?? "—"}</td>
+             <td style={{ fontSize: 12 }}>{row.shift ?? "—"}</td>
+             <td style={{ textAlign: "right", fontWeight: 600 }}>{row.total_bags}</td>
+             <td style={{ textAlign: "right", fontWeight: 700, color: "var(--ok)" }}>
+              {row.actual_mt != null ? row.actual_mt.toFixed(3) : "—"}
              </td>
-           ))}
-            <td style={{ textAlign: "right", fontWeight: 700,
-             color: "var(--clay)" }}>
-             {row.total_mt.toFixed(3)}
-            </td>
-            <td>
-             <button type="button"
-              onClick={() => startEdit(row)}
-              style={{
-               padding: "3px 10px", fontSize: 11, fontWeight: 700,
-               border: "1px solid var(--clay)", borderRadius: 6,
-               background: editId === row.id ? "var(--warn)" : "var(--clay-soft)",
-               color: editId === row.id ? "#fff" : "var(--clay)",
-               cursor: "pointer", whiteSpace: "nowrap",
-              }}>
-              {editId === row.id ? "Editing" : "Edit"}
-             </button>
-            </td>
-           </tr>
-         ))}
-          {/* TOTAL row */}
-          <tr style={{ borderTop: "2px solid var(--line)",
-           background: "var(--clay-soft)" }}>
-           <td style={{ fontWeight: 700 }}>TOTAL</td>
-           {DAILY_PROD_COLS.map(c => (
-            <td key={c.key} style={{ textAlign: "right", fontWeight: 700 }}>
-             {colTotals[c.key] > 0 ? colTotals[c.key].toFixed(0) : "-"}
-            </td>
-          ))}
-           <td style={{ textAlign: "right", fontWeight: 700,
-            color: "var(--clay)", fontSize: 14 }}>
-            {grandTotalMt.toFixed(3)}
-           </td>
-          </tr>
+             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>{row.store_remark || "—"}</td>
+             <td>
+              <button type="button"
+               onClick={() => startEdit(row)}
+               style={{
+                padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                border: "1px solid var(--clay)", borderRadius: 6,
+                background: editId === row.id ? "var(--warn)" : "var(--clay-soft)",
+                color: editId === row.id ? "#fff" : "var(--clay)",
+                cursor: "pointer", whiteSpace: "nowrap",
+               }}>
+               {editId === row.id ? "Editing" : "Edit"}
+              </button>
+             </td>
+            </tr>
+           );
+          })}
          </tbody>
         </table>
        </div>
-     )
+      )
     }
    </div>
   </>
-);
+ );
 }
 
-// =============================================================================
-// DAILY DISPATCH SECTION
-//
 // Mirrors the DAILY DISPATCH 2026-27 tab in the DPR Excel.
 // Columns (B through O + TOTAL MT):
 //  B CEAT 108/EXPORT   25 kg bags
