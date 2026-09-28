@@ -23,10 +23,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { FACTORY_CODE, FACTORY_NAME } from "@/lib/factory-config";
 
-const IS_FACTORY_SCOPED = !!(
-  process.env.NEXT_PUBLIC_FACTORY_CODE &&
-  process.env.NEXT_PUBLIC_FACTORY_CODE !== ""
-);
 const isA20 = FACTORY_CODE === "A20";
 
 export default function AppNav() {
@@ -117,13 +113,10 @@ export default function AppNav() {
 
   return (
     <nav className="app-nav">
-      {/* Factory-scoped: show factory name instead of "⬅ Modules" back link.
-          Lab users still get a "⬅ Modules" link since they have two modules. */}
-      {IS_FACTORY_SCOPED && role !== "chemist" && role !== "lab_manager" ? (
-        <span style={{ fontSize: 11, color: "var(--ink-soft)", padding: "6px 0", display: "block" }}>
-          {FACTORY_NAME}
-        </span>
-      ) : (
+      {/* Only lab users (chemist / lab_manager) have two modules to switch
+          between, so only they get the "⬅ Modules" back link. Production,
+          Operator and Stores are single-module — they see the factory name. */}
+      {role === "chemist" || role === "lab_manager" ? (
         <Link
           href="/select-module"
           aria-current={pathname === "/select-module" ? "page" : undefined}
@@ -131,6 +124,10 @@ export default function AppNav() {
         >
           ⬅ Modules
         </Link>
+      ) : (
+        <span style={{ fontSize: 11, color: "var(--ink-soft)", padding: "6px 0", display: "block" }}>
+          {FACTORY_NAME}
+        </span>
       )}
 
       {links.map(({ href, label }) => (
