@@ -182,6 +182,43 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
   result: string; remark: string | null; reviewed_at: string;
  }[]>([]);
 
+ // ── Oil item selector (stock deduction) ─────────────────────────────────
+ const [oilItems, setOilItems]           = useState<StoresStockItem[]>([]);
+ const [selectedOilItemId, setSelectedOilItemId] = useState("");
+ const [oilItemBalance, setOilItemBalance]     = useState<number | null>(null);
+
+ // Load all active oil-related items from stores_stock_items once
+ const loadOilItems = useCallback(async () => {
+  const { data } = await supabase
+   .from("stores_stock_items")
+   .select("*")
+   .eq("is_active", true)
+   .eq("category", "raw_material")
+   .order("item_name");
+  if (data) {
+   // Filter to items whose names contain oil-related keywords
+   const oilKeywords = ["oil", "grind", "lubric", "elasto", "sapphire", "citrine", "parthan"];
+   const oils = (data as StoresStockItem[]).filter(i =>
+    oilKeywords.some(k => i.item_name.toLowerCase().includes(k))
+   );
+   setOilItems(oils);
+  }
+ }, [supabase]);
+
+ // Fetch current balance for a selected oil item
+ const handleOilItemChange = async (itemId: string) => {
+  setSelectedOilItemId(itemId);
+  setOilItemBalance(null);
+  if (!itemId) return;
+  const { data } = await supabase
+   .from("stores_stock_ledger")
+   .select("closing_balance")
+   .eq("item_id", itemId)
+   .order("created_at", { ascending: false })
+   .limit(1).maybeSingle();
+  setOilItemBalance((data as { closing_balance: number } | null)?.closing_balance ?? 0);
+ };
+
  const loadCards = useCallback(async () => {
   setLoading(true);
   let q = supabase
@@ -196,7 +233,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
   setLoading(false);
  }, [supabase, showToast, filter]);
 
- useEffect(() => { loadCards(); }, [loadCards]);
+ useEffect(() => { loadCards(); loadOilItems(); }, [loadCards, loadOilItems]);
 
  // Open a card — load rejection history if any
  const openCard = async (jc: PulveriserJobCard) => {
@@ -204,6 +241,8 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
   setOilIssued(jc.oil_issued_kg?.toString() ?? "");
   setStoresNote(jc.stores_incharge_note ?? "");
   setRejectionHistory([]);
+  setSelectedOilItemId("");
+  setOilItemBalance(null);
   const { data: reviews } = await supabase
    .from("pulveriser_job_card_reviews")
    .select("result, remark, reviewed_at")
@@ -219,6 +258,8 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
   setOilIssued("");
   setStoresNote("");
   setRejectionHistory([]);
+  setSelectedOilItemId("");
+  setOilItemBalance(null);
  };
 
  // Issue oil — the core action
@@ -245,7 +286,34 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
    if (!data?.length) {
     showToast("Save blocked -- check factory access or card status.", true); return;
    }
+
+   // Deduct issued oil from stock ledger (if an oil item was selected)
+   if (selectedOilItemId) {
+    const selectedOilItem = oilItems.find(i => i.id === selectedOilItemId);
+    const prevBal = oilItemBalance ?? 0;
+    const newBal  = prevBal - n;
+    await supabase.from("stores_stock_ledger").insert({
+     item_id:            selectedOilItemId,
+     factory_id:         selectedOilItem?.factory_id ?? selected.factory_id,
+     transaction_date:   new Date().toISOString().slice(0, 10),
+     transaction_source: "manual",
+     qty_received:       0,
+     qty_issued:         n,
+     dispatch_qty:       0,
+     closing_balance:    newBal,
+     reference_type:     "oil_issue",
+     remark:             JSON.stringify({
+      source:    "Oil Issue — Job Card",
+      job_number: selected.job_number ?? selected.id,
+      party_code: selected.party_code ?? null,
+      remark:    storesNote.trim() || null,
+     }),
+     entered_by: user.id,
+    });
+   }
+
    const nowISO = new Date().toISOString();
+   const selectedOilItem = oilItems.find(i => i.id === selectedOilItemId);
    const { subject, html } = buildStoresEmail({
     jobNumber:       selected.job_number,
     materialCode:    selected.material_code,
@@ -257,11 +325,24 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
    void notifyEvent({
     eventType: "pulveriser_stores", subject, html,
     factoryId: selected.factory_id, referenceId: selected.id,
+    sheetData: {
+     type: "job_card",
+     row: {
+      job_number:    selected.job_number ?? selected.id,
+      party_code:    selected.party_code ?? null,
+      status:        "pending",
+      oil_issued_kg: n,
+      stores_by:     profile?.full_name ?? null,
+      stores_at:     nowISO,
+     },
+    },
    });
    const isRework = rejectionHistory.some(r => r.result === "not_ok");
-   showToast(isRework
-    ? "Rework oil re-issued -- operator will see the rejection context."
-    : "Oil issued -- operator can now run the batch.");
+   showToast(
+    (isRework ? "Rework oil re-issued" : "Oil issued") +
+    (selectedOilItem ? " from " + selectedOilItem.item_name : "") +
+    " -- operator can now run the batch."
+   );
    closeCard();
    loadCards();
   } catch (e: unknown) {
@@ -407,13 +488,63 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
        {isReworkCard ? "Re-Issue Oil (Rework Batch)" : "Issue Oil"}
       </h3>
       <div className="field-hint" style={{ marginBottom: 12 }}>
-       Enter the oil quantity to issue to the operator.
+       Select the oil type and enter the quantity to issue.
        {jc.oil_required_kg != null && (
         <span style={{ fontWeight: 700, color: "var(--clay)" }}>
          {" "}Required: {jc.oil_required_kg} kg
         </span>
        )}
       </div>
+
+      {/* Oil type dropdown */}
+      <label>Oil Type *</label>
+      {oilItems.length === 0 ? (
+       <div className="field-hint" style={{ marginBottom: 8 }}>
+        No oil items found in Stock Ledger. Add oil items via Stock Ledger → Stock Items first.
+       </div>
+      ) : (
+       <select
+        value={selectedOilItemId}
+        onChange={e => handleOilItemChange(e.target.value)}
+        style={{ marginBottom: 4 }}>
+        <option value="">-- Select oil type (optional) --</option>
+        {oilItems.map(item => (
+         <option key={item.id} value={item.id}>
+          {item.item_name} ({item.item_code})
+         </option>
+        ))}
+       </select>
+      )}
+
+      {/* Current stock balance for selected oil */}
+      {selectedOilItemId && (
+       <div style={{
+        marginBottom: 12, padding: "8px 12px", borderRadius: 6,
+        background: oilItemBalance != null && Number(oilIssued) > (oilItemBalance ?? 0)
+         ? "var(--warn-soft)" : "var(--ok-soft)",
+        fontSize: 13,
+       }}>
+        <b>Current Stock:</b>{" "}
+        <span style={{ fontWeight: 700, color: "var(--ok)" }}>
+         {oilItemBalance != null ? oilItemBalance.toFixed(3) + " kg" : "Loading..."}
+        </span>
+        {oilIssued && Number.isFinite(Number(oilIssued)) && Number(oilIssued) > 0 && oilItemBalance != null && (
+         <span style={{ marginLeft: 12 }}>
+          → After issue:{" "}
+          <span style={{
+           fontWeight: 700,
+           color: (oilItemBalance - Number(oilIssued)) < 0 ? "var(--warn)" : "var(--ok)",
+          }}>
+           {(oilItemBalance - Number(oilIssued)).toFixed(3)} kg
+          </span>
+          {(oilItemBalance - Number(oilIssued)) < 0 && (
+           <span style={{ color: "var(--warn)", marginLeft: 6 }}>⚠ Insufficient stock</span>
+          )}
+         </span>
+        )}
+       </div>
+      )}
+
       <label>Oil Issued (kg) *</label>
       <input type="number" min="0" step="0.001" placeholder="0"
        value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
@@ -427,6 +558,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
        {isReworkCard
         ? "This note + the rejection reason will be shown to the operator."
         : "This note will be visible to the operator."}
+       {selectedOilItemId && " The issued quantity will be deducted from the selected oil stock."}
       </div>
       <button className="btn btn-primary" type="button"
        disabled={submitting || !oilIssued.trim()}
@@ -5001,18 +5133,43 @@ function ApprovalSection() {
 
 // =============================================================================
 // TAB 4 -- STOCK LEDGER
+//
+// Read-only overview + stock update capability.
+// Each item shows current balance. Clicking an item opens the detail view with:
+//   - Current balance + threshold warning
+//   - "Add Stock" form — for receiving new stock (adds to balance)
+//   - "Deduct Stock" form — for manual adjustments or recording production use
+//   - Full transaction history (last 100 rows) with color-coded movements
 // =============================================================================
 function StockLedgerSection() {
+ const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
 
- const [items, setItems]     = useState<StoresStockItem[]>([]);
- const [loading, setLoading]   = useState(true);
- const [filterCat, setFilterCat] = useState<StockItemCategory | "all">("all");
+ const [items, setItems]          = useState<StoresStockItem[]>([]);
+ const [loading, setLoading]       = useState(true);
+ const [filterCat, setFilterCat]   = useState<StockItemCategory | "all">("all");
  const [activeItem, setActiveItem] = useState<StoresStockItem | null>(null);
- const [ledger, setLedger]    = useState<StoresStockLedger[]>([]);
+ const [ledger, setLedger]         = useState<StoresStockLedger[]>([]);
  const [ledgerLoading, setLedgerLoading] = useState(false);
- const [balances, setBalances]  = useState<Record<string, number>>({});
+ const [balances, setBalances]     = useState<Record<string, number>>({});
+
+ // ── Stock update form state ───────────────────────────────────────────────
+ const [mode, setMode]             = useState<"view" | "add" | "deduct">("view");
+ const [updateQty, setUpdateQty]   = useState("");
+ const [updateDate, setUpdateDate] = useState(today());
+ const [updateSource, setUpdateSource] = useState("");
+ const [updateRemark, setUpdateRemark] = useState("");
+ const [submitting, setSubmitting] = useState(false);
+
+ const ADD_SOURCES = [
+  "New Stock Received", "Stock Transfer In", "Return from Production",
+  "Opening Balance Entry", "Adjustment (surplus)", "Other",
+ ] as const;
+ const DEDUCT_SOURCES = [
+  "Production Use", "Issued to Department", "Damage / Loss",
+  "Stock Transfer Out", "Adjustment (shortage)", "Other",
+ ] as const;
 
  const loadItems = useCallback(async () => {
   setLoading(true);
@@ -5040,136 +5197,392 @@ function StockLedgerSection() {
  useEffect(() => { loadItems(); }, [loadItems]);
 
  const openItem = async (item: StoresStockItem) => {
-  setActiveItem(item); setLedgerLoading(true);
+  setActiveItem(item);
+  setMode("view");
+  setLedgerLoading(true);
+  setUpdateQty(""); setUpdateDate(today()); setUpdateSource(""); setUpdateRemark("");
   const { data, error } = await supabase
    .from("stores_stock_ledger").select("*").eq("item_id", item.id)
-   .order("created_at", { ascending: false }).limit(50);
+   .order("created_at", { ascending: false }).limit(100);
   if (error) showToast("Ledger load failed: " + error.message, true);
   else setLedger((data ?? []) as StoresStockLedger[]);
   setLedgerLoading(false);
  };
 
+ const closeItem = () => {
+  setActiveItem(null); setLedger([]); setMode("view");
+  setUpdateQty(""); setUpdateDate(today()); setUpdateSource(""); setUpdateRemark("");
+ };
+
+ const handleUpdate = async () => {
+  if (!activeItem || !user) return;
+  const qty = Number(updateQty);
+  if (!Number.isFinite(qty) || qty <= 0) {
+   showToast("Enter a valid quantity greater than 0.", true); return;
+  }
+  if (!updateSource) { showToast("Select a source / reason.", true); return; }
+  if (!updateDate)   { showToast("Select a date.", true); return; }
+
+  setSubmitting(true);
+  try {
+   const { data: lastRow } = await supabase
+    .from("stores_stock_ledger").select("closing_balance")
+    .eq("item_id", activeItem.id)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+   const prevBal = (lastRow as { closing_balance: number } | null)?.closing_balance ?? 0;
+   const isAdd   = mode === "add";
+   const newBal  = isAdd ? prevBal + qty : prevBal - qty;
+
+   const { error } = await supabase.from("stores_stock_ledger").insert({
+    item_id:            activeItem.id,
+    factory_id:         activeItem.factory_id,
+    transaction_date:   updateDate,
+    transaction_source: "manual",
+    qty_received:       isAdd ? qty : 0,
+    qty_issued:         isAdd ? 0 : qty,
+    dispatch_qty:       0,
+    closing_balance:    newBal,
+    reference_type:     isAdd ? "stock_add" : "stock_deduct",
+    remark:             JSON.stringify({
+     source: updateSource, remark: updateRemark.trim() || null,
+     qty, direction: isAdd ? "in" : "out",
+    }),
+    entered_by: user.id,
+   });
+
+   if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   setBalances(prev => ({ ...prev, [activeItem.id]: newBal }));
+   showToast(
+    (isAdd ? "Stock added" : "Stock deducted") +
+    " — " + activeItem.item_name + " " +
+    (isAdd ? "+" : "−") + qty.toFixed(3) + " " + activeItem.unit +
+    " | New balance: " + newBal.toFixed(3)
+   );
+   setMode("view");
+   setUpdateQty(""); setUpdateDate(today()); setUpdateSource(""); setUpdateRemark("");
+   const { data: fresh } = await supabase
+    .from("stores_stock_ledger").select("*").eq("item_id", activeItem.id)
+    .order("created_at", { ascending: false }).limit(100);
+   setLedger((fresh ?? []) as StoresStockLedger[]);
+  } catch (e: unknown) {
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+  } finally { setSubmitting(false); }
+ };
+
+ const sourceLabel = (row: StoresStockLedger): string => {
+  if (row.reference_type === "stock_add" || row.reference_type === "stock_deduct") {
+   try {
+    const p = JSON.parse(row.remark ?? "{}") as { source?: string };
+    return p.source ?? (row.reference_type === "stock_add" ? "Stock In" : "Stock Out");
+   } catch { return row.reference_type === "stock_add" ? "Stock In" : "Stock Out"; }
+  }
+  switch (row.transaction_source) {
+   case "production_fg":      return "Production FG";
+   case "production_rm_oil":  return "Auto Oil Deduct";
+   case "production_rm_sul":  return "Auto Sulphur Deduct";
+   case "dispatch":           return "Dispatch";
+   case "manual":             return "Manual Entry";
+   default:                   return row.transaction_source;
+  }
+ };
+
  if (activeItem) {
-  const bal = balances[activeItem.id] ?? 0;
+  const bal   = balances[activeItem.id] ?? 0;
   const below = activeItem.min_threshold != null && bal < activeItem.min_threshold;
+  const sources = mode === "add" ? ADD_SOURCES : DEDUCT_SOURCES;
+
   return (
    <>
-    <button className="back-link" type="button"
-     onClick={() => { setActiveItem(null); setLedger([]); }}>
-     Back to Stock List
-    </button>
-    <div className="readonly-block">
-     <b>{activeItem.item_name}</b> ({activeItem.item_code})
-     <br />
-     {CATEGORY_LABEL[activeItem.category]} Unit: {activeItem.unit}
-     <br />
-     <b>Current Balance: {fmt(bal, 3)} {activeItem.unit}</b>
-     {activeItem.min_threshold != null && (
-      <span style={{ marginLeft: 10, fontWeight: 700,
+    <button className="back-link" type="button" onClick={closeItem}>Back to Stock List</button>
+
+    {/* Balance banner */}
+    <div style={{
+     padding: "14px 18px", borderRadius: 10, marginBottom: 16,
+     background: below ? "var(--warn-soft)" : "var(--ok-soft)",
+     border: "1.5px solid " + (below ? "var(--warn)" : "var(--ok)"),
+     display: "flex", justifyContent: "space-between", alignItems: "center",
+    }}>
+     <div>
+      <div style={{ fontWeight: 700, fontSize: 15 }}>
+       {activeItem.item_name}
+       <span style={{ fontSize: 12, fontWeight: 400, color: "var(--ink-soft)", marginLeft: 8 }}>
+        ({activeItem.item_code}) · {CATEGORY_LABEL[activeItem.category]}
+       </span>
+      </div>
+      {activeItem.min_threshold != null && (
+       <div style={{ fontSize: 12, marginTop: 2,
+        color: below ? "var(--warn)" : "var(--ink-soft)" }}>
+        {below ? "⚠ Below minimum threshold" : "✓ Above minimum threshold"}
+        {" — "}Min: {activeItem.min_threshold} {activeItem.unit}
+       </div>
+      )}
+     </div>
+     <div style={{ textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Current Balance</div>
+      <div style={{ fontWeight: 700, fontSize: 22,
        color: below ? "var(--warn)" : "var(--ok)" }}>
-       {below ? "Below threshold" : "OK"} (min {activeItem.min_threshold})
-      </span>
-    )}
+       {bal.toFixed(3)} <span style={{ fontSize: 14 }}>{activeItem.unit}</span>
+      </div>
+     </div>
     </div>
+
+    {/* Action buttons */}
+    {mode === "view" && (
+     <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <button type="button" className="btn btn-primary"
+       style={{ width: "auto", padding: "10px 22px", marginTop: 0 }}
+       onClick={() => { setMode("add"); setUpdateSource(""); }}>
+       + Add Stock (Received)
+      </button>
+      <button type="button" className="btn btn-secondary"
+       style={{ width: "auto", padding: "10px 22px", marginTop: 0 }}
+       onClick={() => { setMode("deduct"); setUpdateSource(""); }}>
+       − Deduct Stock
+      </button>
+     </div>
+    )}
+
+    {/* Add / Deduct form */}
+    {mode !== "view" && (
+     <div className="card" style={{
+      border: "2px solid " + (mode === "add" ? "var(--ok)" : "var(--warn)"),
+      marginBottom: 16,
+     }}>
+      <h3 style={{ color: mode === "add" ? "var(--ok)" : "var(--warn)" }}>
+       {mode === "add" ? "Add Stock — " : "Deduct Stock — "}{activeItem.item_name}
+      </h3>
+      <div className="field-hint" style={{ marginBottom: 12 }}>
+       {mode === "add"
+        ? "Record new stock received. This quantity will be added to the current balance."
+        : "Record stock used or removed. This quantity will be subtracted from the current balance."}
+       {" "}Current: <b>{bal.toFixed(3)} {activeItem.unit}</b>
+      </div>
+
+      <div className="row2">
+       <div>
+        <label>Quantity ({activeItem.unit}) *</label>
+        <input type="number" min="0.001" step="0.001" placeholder="0.000"
+         value={updateQty} onChange={e => setUpdateQty(e.target.value)}
+         style={{ fontSize: 16, fontWeight: 700 }} />
+        {updateQty && Number.isFinite(Number(updateQty)) && Number(updateQty) > 0 && (
+         <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700,
+          color: mode === "add" ? "var(--ok)" : "var(--warn)" }}>
+          New balance: {mode === "add"
+           ? (bal + Number(updateQty)).toFixed(3)
+           : (bal - Number(updateQty)).toFixed(3)} {activeItem.unit}
+          {mode === "deduct" && Number(updateQty) > bal && (
+           <span style={{ color: "var(--warn)", marginLeft: 8 }}>⚠ Will go negative</span>
+          )}
+         </div>
+        )}
+       </div>
+       <div>
+        <label>Date *</label>
+        <input type="date" value={updateDate}
+         onChange={e => setUpdateDate(e.target.value)} />
+       </div>
+      </div>
+
+      <div className="row2">
+       <div>
+        <label>{mode === "add" ? "Source" : "Reason"} *</label>
+        <select value={updateSource} onChange={e => setUpdateSource(e.target.value)}>
+         <option value="">-- Select --</option>
+         {sources.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+       </div>
+       <div>
+        <label>Remark (optional)</label>
+        <input type="text"
+         placeholder={mode === "add" ? "Invoice no, vehicle no..." : "Dept, batch no, reason..."}
+         value={updateRemark} onChange={e => setUpdateRemark(e.target.value)} />
+       </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+       <button type="button" className="btn btn-primary"
+        style={{
+         width: "auto", padding: "10px 22px", marginTop: 0,
+         background: mode === "deduct" ? "var(--warn)" : undefined,
+        }}
+        disabled={submitting || !updateQty || !updateSource}
+        onClick={handleUpdate}>
+        {submitting ? "Saving..."
+         : mode === "add" ? "Confirm Stock Addition"
+         : "Confirm Deduction"}
+       </button>
+       <button type="button" className="btn btn-ghost"
+        style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
+        onClick={() => {
+         setMode("view");
+         setUpdateQty(""); setUpdateDate(today()); setUpdateSource(""); setUpdateRemark("");
+        }}>
+        Cancel
+       </button>
+      </div>
+     </div>
+    )}
+
+    {/* Ledger history */}
     <div className="card">
-     <h3>Ledger History (last 50)</h3>
+     <h3>Stock Movement History (last 100)</h3>
      {ledgerLoading
       ? <div className="empty">Loading...</div>
       : ledger.length === 0
        ? <div className="empty">No transactions yet.</div>
        : (
         <div style={{ overflowX: "auto" }}>
-         <table className="dash" style={{ minWidth: 520 }}>
+         <table className="dash" style={{ minWidth: 660 }}>
           <thead>
            <tr>
             <th>Date</th>
-            <th>Source</th>
-            <th style={{ textAlign: "right" }}>Received</th>
-            <th style={{ textAlign: "right" }}>Issued</th>
-            <th style={{ textAlign: "right" }}>Dispatch</th>
+            <th>Source / Reason</th>
+            <th style={{ textAlign: "right", color: "var(--ok)" }}>+ Received</th>
+            <th style={{ textAlign: "right", color: "var(--warn)" }}>− Issued</th>
+            <th style={{ textAlign: "right", color: "var(--clay)" }}>Dispatch</th>
             <th style={{ textAlign: "right" }}>Balance</th>
+            <th>Remark</th>
            </tr>
           </thead>
           <tbody>
-           {ledger.map(row => (
-            <tr key={row.id}>
-             <td>{fmtDate(row.transaction_date)}</td>
-             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
-              {row.transaction_source === "manual" ? "Manual"
-               : row.transaction_source === "production_fg" ? "Production FG"
-               : row.transaction_source === "production_rm_oil" ? "Auto Oil"
-               : row.transaction_source === "production_rm_sul" ? "Auto Sulphur"
-               : "Dispatch"}
-             </td>
-             <td style={{ textAlign: "right",
-              color: row.qty_received > 0 ? "var(--ok)" : undefined }}>
-              {row.qty_received > 0 ? "+" + fmt(row.qty_received) : "0"}
-             </td>
-             <td style={{ textAlign: "right",
-              color: row.qty_issued > 0 ? "var(--warn)" : undefined }}>
-              {row.qty_issued > 0 ? fmt(row.qty_issued) : "0"}
-             </td>
-             <td style={{ textAlign: "right",
-              color: row.dispatch_qty > 0 ? "var(--clay)" : undefined }}>
-              {row.dispatch_qty > 0 ? fmt(row.dispatch_qty) : "0"}
-             </td>
-             <td style={{ textAlign: "right", fontWeight: 700 }}>
-              {fmt(row.closing_balance)}
-             </td>
-            </tr>
-          ))}
+           {ledger.map(row => {
+            let remarkText = "";
+            try {
+             const p = JSON.parse(row.remark ?? "{}") as { remark?: string | null };
+             remarkText = p.remark ?? "";
+            } catch { remarkText = row.remark ?? ""; }
+            return (
+             <tr key={row.id} style={{
+              background:
+               row.reference_type === "stock_add"    ? "rgba(27,94,32,.05)"
+               : row.reference_type === "stock_deduct" ? "rgba(211,47,47,.04)"
+               : undefined,
+             }}>
+              <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.transaction_date)}</td>
+              <td>
+               <span style={{
+                display: "inline-block", padding: "1px 8px", borderRadius: 8,
+                fontSize: 11, fontWeight: 700,
+                background:
+                 row.reference_type === "stock_add"    ? "var(--ok-soft)"
+                 : row.reference_type === "stock_deduct" ? "var(--warn-soft)"
+                 : row.transaction_source === "production_fg"      ? "#e3f2fd"
+                 : row.transaction_source.includes("production") ? "var(--clay-soft)"
+                 : "var(--line)",
+                color:
+                 row.reference_type === "stock_add"    ? "var(--ok)"
+                 : row.reference_type === "stock_deduct" ? "var(--warn)"
+                 : row.transaction_source === "production_fg"      ? "#1565c0"
+                 : row.transaction_source.includes("production") ? "var(--clay)"
+                 : "var(--ink-soft)",
+               }}>
+                {sourceLabel(row)}
+               </span>
+              </td>
+              <td style={{ textAlign: "right", color: row.qty_received > 0 ? "var(--ok)" : undefined,
+               fontWeight: row.qty_received > 0 ? 700 : undefined }}>
+               {row.qty_received > 0 ? "+" + fmt(row.qty_received) : <span style={{ color: "var(--line)" }}>—</span>}
+              </td>
+              <td style={{ textAlign: "right", color: row.qty_issued > 0 ? "var(--warn)" : undefined,
+               fontWeight: row.qty_issued > 0 ? 700 : undefined }}>
+               {row.qty_issued > 0 ? "−" + fmt(row.qty_issued) : <span style={{ color: "var(--line)" }}>—</span>}
+              </td>
+              <td style={{ textAlign: "right", color: row.dispatch_qty > 0 ? "var(--clay)" : undefined }}>
+               {row.dispatch_qty > 0 ? fmt(row.dispatch_qty) : <span style={{ color: "var(--line)" }}>—</span>}
+              </td>
+              <td style={{ textAlign: "right", fontWeight: 700,
+               color: row.closing_balance < 0 ? "var(--warn)" : undefined }}>
+               {fmt(row.closing_balance, 3)}
+              </td>
+              <td style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: 160, whiteSpace: "normal" }}>
+               {remarkText || "—"}
+              </td>
+             </tr>
+            );
+           })}
           </tbody>
          </table>
         </div>
-      )
+       )
      }
     </div>
    </>
- );
+  );
  }
 
+ // ── List view ─────────────────────────────────────────────────────────────
  const filtered = filterCat === "all" ? items : items.filter(i => i.category === filterCat);
  return (
   <>
-   <div className="chip-group" style={{ marginBottom: 12 }}>
-    {(["all", "raw_material", "finished_good", "packaging_material"] as const).map(cat => (
-     <button key={cat} type="button"
-      className={"chip" + (filterCat === cat ? " selected" : "")}
-      onClick={() => setFilterCat(cat)}>
-      {cat === "all" ? "All" : CATEGORY_LABEL[cat]}
-     </button>
-   ))}
+   <div style={{ display: "flex", justifyContent: "space-between",
+    alignItems: "center", marginBottom: 12 }}>
+    <div className="chip-group" style={{ margin: 0 }}>
+     {(["all", "raw_material", "finished_good", "packaging_material"] as const).map(cat => (
+      <button key={cat} type="button"
+       className={"chip" + (filterCat === cat ? " selected" : "")}
+       onClick={() => setFilterCat(cat)}>
+       {cat === "all" ? "All" : CATEGORY_LABEL[cat]}
+      </button>
+     ))}
+    </div>
+    <button type="button" className="btn btn-ghost"
+     style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
+     onClick={loadItems}>Refresh</button>
    </div>
+
+   {/* Below-threshold warning banner */}
+   {(() => {
+    const itemsBelow = items.filter(i =>
+     i.min_threshold != null && (balances[i.id] ?? 0) < i.min_threshold
+    );
+    return itemsBelow.length > 0 ? (
+     <div style={{
+      padding: "10px 14px", borderRadius: 8, marginBottom: 14,
+      background: "var(--warn-soft)", fontSize: 13, color: "var(--warn)",
+      fontWeight: 600, border: "1px solid var(--warn)",
+     }}>
+      ⚠ {itemsBelow.length} item{itemsBelow.length > 1 ? "s" : ""} below minimum threshold:{" "}
+      {itemsBelow.map(i => i.item_name).join(", ")}
+     </div>
+    ) : null;
+   })()}
+
    {loading
     ? <div className="empty">Loading...</div>
     : filtered.length === 0
      ? <div className="empty">No items found.</div>
      : filtered.map(item => {
-      const bal = balances[item.id] ?? null;
+      const bal   = balances[item.id] ?? null;
       const below = bal != null && item.min_threshold != null && bal < item.min_threshold;
       return (
        <div key={item.id} className="pending-item" onClick={() => openItem(item)}>
         <div className="pi-top">
          <span style={{ fontWeight: 700 }}>{item.item_name}</span>
          <span style={{ fontWeight: 700, fontSize: 15,
-          color: below ? "var(--warn)" : "var(--ok)" }}>
-          {bal != null ? fmt(bal, 2) + " " + item.unit : "N/A"}
+          color: below ? "var(--warn)" : bal != null ? "var(--ok)" : "var(--ink-soft)" }}>
+          {bal != null ? fmt(bal, 3) + " " + item.unit : "No data"}
          </span>
         </div>
         <div className="pi-sub">
-         {CATEGORY_LABEL[item.category]} Code: {item.item_code}
-         {below
-          ? <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
-            Below min ({item.min_threshold})
-           </span>
-          : null}
+         {CATEGORY_LABEL[item.category]}
+         <span style={{ color: "var(--ink-soft)", margin: "0 6px" }}>·</span>
+         Code: {item.item_code}
+         {below && (
+          <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
+           ⚠ Below min ({item.min_threshold} {item.unit})
+          </span>
+         )}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 3 }}>
+         Tap to view history or update stock
         </div>
        </div>
-     );
+      );
      })
    }
   </>
-);
+ );
 }
 
 // =============================================================================

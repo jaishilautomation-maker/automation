@@ -1163,6 +1163,7 @@ export interface StoresStockLedger {
   transaction_date: string;        // ISO date
   transaction_type: string;        // 'in' | 'out' | 'adjustment' | etc.
   transaction_source: string;      // 'manual' | 'oil_issue' | 'dispatch' | etc.
+  reference_type: string | null;   // 'job_card' | 'prn' | 'slip' | 'stock_add' | 'stock_deduct' | etc.
   quantity: number;
   qty_received: number;            // inbound qty for this row
   qty_issued: number;              // outbound (issue) qty for this row
