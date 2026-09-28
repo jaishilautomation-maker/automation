@@ -22,9 +22,7 @@ function useModuleTitle(): { title: string; sub: string } {
     pathname.startsWith("/production")  ||
     pathname.startsWith("/breakdown")   ||
     pathname.startsWith("/maintenance") ||
-    pathname.startsWith("/lab")         ||
-    pathname.startsWith("/dashboard")   ||
-    pathname.startsWith("/records")
+    pathname.startsWith("/dashboard")
   ) {
     return {
       title: `Job Card — JSCI · ${FACTORY_NAME}`,

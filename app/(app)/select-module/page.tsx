@@ -72,7 +72,7 @@ function landingPath(module: ActivityModule, role: AppRole | null): string {
     if (role === "operator")                          return "/pulveriser/operator";
     if (role === "stores")                            return "/stores";
     if (role === "production_incharge")               return "/pulveriser/production";
-    if (role === "chemist" || role === "lab_manager") return "/lab";
+    if (role === "chemist" || role === "lab_manager") return "/pulveriser/lab";
     return "/dashboard";
   }
   return "/lab-qc";

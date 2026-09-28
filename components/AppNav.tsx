@@ -104,9 +104,7 @@ export default function AppNav() {
     } else if (role === "chemist" || role === "lab_manager") {
       links = [
         { href: "/pulveriser/lab", label: "Pulveriser QC Review" },
-        { href: "/lab",       label: "Pending shifts" },
         { href: "/pulveriser/records", label: "Job Card Records" },
-        { href: "/records",   label: "My submissions" },
         { href: "/dashboard", label: "Dashboard" },
       ];
     } else if (role === "factory_admin" || role === "company_admin") {
