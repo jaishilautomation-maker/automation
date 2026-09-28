@@ -4861,11 +4861,12 @@ function OilConsumptionSection() {
 interface QcDecisionRow {
   id: string;
   decided_at: string;
-  source: "Job Card QC" | "Product QC";
-  decision: "Approved" | "Rejected";
+  source: "Job Card QC" | "Product QC" | "RM QC";
+  decision: "Approved" | "Rejected" | "Grade A" | "Grade B";
   product_batch: string;
   details: string;
   remark: string | null;
+  grade?: "A" | "B" | null;   // populated for RM QC and Batch Analysis rows
   reviewed_by_name?: string;
 }
 
@@ -4875,7 +4876,7 @@ function ApprovalSection() {
 
   const [rows, setRows]           = useState<QcDecisionRow[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [filter, setFilter]       = useState<"All" | "Approved" | "Rejected">("All");
+  const [filter, setFilter]       = useState<"All" | "Approved" | "Rejected" | "Grade A" | "Grade B">("All");
   const [search, setSearch]       = useState("");
   const [days, setDays]           = useState<30 | 60 | 90>(30);
 
@@ -4966,6 +4967,91 @@ function ApprovalSection() {
       }
     }
 
+    // ── Source 3: rm_qc — Grade A / Grade B from incoming_grade ─────────────
+    const { data: rmqc, error: rmqcErr } = await supabase
+      .from("rm_qc")
+      .select(`
+        id, submitted_at, test_date, test_results, remarks,
+        batches ( batch_number, lot_number ),
+        materials ( name, code )
+      `)
+      .gte("submitted_at", since)
+      .order("submitted_at", { ascending: false })
+      .limit(200);
+
+    if (rmqcErr) {
+      showToast("Could not load RM QC: " + rmqcErr.message, true);
+    } else {
+      for (const r of (rmqc ?? []) as Record<string, unknown>[]) {
+        const tr      = (r.test_results as Record<string, unknown>) ?? {};
+        const rawGrade = tr["incoming_grade"] as string | null | undefined;
+        // Only show rows that have an explicit grade (A or B = Crude Sulphur rows)
+        if (!rawGrade) continue;
+        const grade: "A" | "B" = rawGrade === "A" ? "A" : "B";
+        const batch    = r.batches    as Record<string, unknown> | null;
+        const material = r.materials  as Record<string, unknown> | null;
+        collected.push({
+          id:         r.id as string + "_rmqc",
+          decided_at: r.submitted_at as string,
+          source:     "RM QC",
+          decision:   grade === "A" ? "Grade A" : "Grade B",
+          grade,
+          product_batch: [
+            material?.name ?? "Raw Material",
+            batch?.batch_number ? "Batch: " + batch.batch_number : "",
+            batch?.lot_number   ? "Lot: "   + batch.lot_number   : "",
+          ].filter(Boolean).join(" | "),
+          details: [
+            "Test date: " + fmtDate(r.test_date as string),
+            tr["purity_percent"] != null ? "Purity: " + tr["purity_percent"] + "%" : "",
+            tr["acidity_percent"] != null ? "Acidity: " + tr["acidity_percent"] + "%" : "",
+          ].filter(Boolean).join(" | "),
+          remark: r.remarks as string | null,
+        });
+      }
+    }
+
+    // ── Source 4: batch_analysis — Grade A / Grade B from rework_action ──────
+    const { data: ba, error: baErr } = await supabase
+      .from("batch_analysis")
+      .select(`
+        id, submitted_at, analysis_date, rework_action, appearance, remarks,
+        batches ( batch_number, lot_number )
+      `)
+      .gte("submitted_at", since)
+      .order("submitted_at", { ascending: false })
+      .limit(200);
+
+    if (baErr) {
+      showToast("Could not load batch analysis: " + baErr.message, true);
+    } else {
+      for (const r of (ba ?? []) as Record<string, unknown>[]) {
+        const batch = r.batches as Record<string, unknown> | null;
+        const reworkAction = r.rework_action as string | null;
+        // Grade B if chemist selected "Downgrade to Grade B"; Grade A otherwise
+        const grade: "A" | "B" = reworkAction === "downgrade_grade_b" ? "B" : "A";
+        collected.push({
+          id:         r.id as string + "_ba",
+          decided_at: r.submitted_at as string,
+          source:     "Product QC",
+          decision:   grade === "A" ? "Grade A" : "Grade B",
+          grade,
+          product_batch: [
+            "Sulphur Powder",
+            batch?.batch_number ? "Batch: " + batch.batch_number : "",
+            batch?.lot_number   ? "Lot: "   + batch.lot_number   : "",
+          ].filter(Boolean).join(" | "),
+          details: [
+            "Batch Analysis",
+            "Date: " + fmtDate(r.analysis_date as string),
+            r.appearance ? "Appearance: " + r.appearance : "",
+            reworkAction === "downgrade_grade_b" ? "Downgraded to Grade B" : "Grade A (Pass)",
+          ].filter(Boolean).join(" | "),
+          remark: r.remarks as string | null,
+        });
+      }
+    }
+
     // Sort combined list newest first
     collected.sort((a, b) => b.decided_at.localeCompare(a.decided_at));
     setRows(collected);
@@ -4974,8 +5060,10 @@ function ApprovalSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const approvedCount = rows.filter(r => r.decision === "Approved").length;
-  const rejectedCount = rows.filter(r => r.decision === "Rejected").length;
+  const approvedCount  = rows.filter(r => r.decision === "Approved").length;
+  const rejectedCount  = rows.filter(r => r.decision === "Rejected").length;
+  const gradeACount    = rows.filter(r => r.decision === "Grade A").length;
+  const gradeBCount    = rows.filter(r => r.decision === "Grade B").length;
 
   const filtered = rows.filter(r => {
     const matchDecision = filter === "All" || r.decision === filter;
@@ -4985,35 +5073,49 @@ function ApprovalSection() {
     return matchDecision && matchSearch;
   });
 
+  // Color / label helpers
+  const decisionStyle = (d: QcDecisionRow["decision"]) => {
+    switch (d) {
+      case "Approved": return { bg: "var(--ok)",        label: "APPROVED",  cardBg: "var(--ok-soft)",   border: "color-mix(in srgb, var(--ok) 40%, transparent)" };
+      case "Rejected": return { bg: "var(--warn)",      label: "REJECTED",  cardBg: "var(--warn-soft)", border: "color-mix(in srgb, var(--warn) 40%, transparent)" };
+      case "Grade A":  return { bg: "#1565c0",          label: "GRADE A",   cardBg: "#e3f2fd",          border: "#90caf9" };
+      case "Grade B":  return { bg: "#e65100",          label: "GRADE B",   cardBg: "#fff3e0",          border: "#ffcc80" };
+    }
+  };
+
   return (
     <>
       {/* Summary badges */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{
-          flex: 1, padding: "12px 16px", borderRadius: 8, textAlign: "center",
+          flex: 1, minWidth: 100, padding: "12px 14px", borderRadius: 8, textAlign: "center",
           background: "var(--ok-soft)",
           border: "1px solid color-mix(in srgb, var(--ok) 30%, transparent)",
         }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--ok)" }}>
-            {approvedCount}
-          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--ok)" }}>{approvedCount}</div>
           <div style={{ fontSize: 12, color: "var(--ok)", fontWeight: 600 }}>Approved</div>
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
-            Last {days} days
-          </div>
         </div>
         <div style={{
-          flex: 1, padding: "12px 16px", borderRadius: 8, textAlign: "center",
+          flex: 1, minWidth: 100, padding: "12px 14px", borderRadius: 8, textAlign: "center",
           background: "var(--warn-soft)",
           border: "1px solid color-mix(in srgb, var(--warn) 30%, transparent)",
         }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--warn)" }}>
-            {rejectedCount}
-          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--warn)" }}>{rejectedCount}</div>
           <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>Rejected</div>
-          <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
-            Last {days} days
-          </div>
+        </div>
+        <div style={{
+          flex: 1, minWidth: 100, padding: "12px 14px", borderRadius: 8, textAlign: "center",
+          background: "#e3f2fd", border: "1px solid #90caf9",
+        }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#1565c0" }}>{gradeACount}</div>
+          <div style={{ fontSize: 12, color: "#1565c0", fontWeight: 600 }}>Grade A</div>
+        </div>
+        <div style={{
+          flex: 1, minWidth: 100, padding: "12px 14px", borderRadius: 8, textAlign: "center",
+          background: "#fff3e0", border: "1px solid #ffcc80",
+        }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#e65100" }}>{gradeBCount}</div>
+          <div style={{ fontSize: 12, color: "#e65100", fontWeight: 600 }}>Grade B</div>
         </div>
       </div>
 
@@ -5022,9 +5124,9 @@ function ApprovalSection() {
         padding: "10px 14px", borderRadius: 8, marginBottom: 14,
         background: "var(--clay-soft)", fontSize: 12, color: "var(--ink-soft)",
       }}>
-        This view is automatically updated from chemist QC decisions.
-        Approved = Lab marked OK / Product QC passed.
-        Rejected = Lab marked NOT OK / Product QC failed.
+        Automatically updated from chemist QC decisions.
+        <b> Grade A / Grade B</b> come from RM QC (Crude Sulphur IS-6655) and Batch Analysis.
+        <b> Approved / Rejected</b> come from Job Card QC and Product QC.
         You cannot edit these entries here.
       </div>
 
@@ -5037,15 +5139,18 @@ function ApprovalSection() {
             border: "1px solid var(--line)", borderRadius: 6, width: 200 }} />
 
         <div className="chip-group" style={{ margin: 0 }}>
-          {(["All", "Approved", "Rejected"] as const).map(f => (
+          {(["All", "Approved", "Rejected", "Grade A", "Grade B"] as const).map(f => (
             <button key={f} type="button"
               className={"chip" + (filter === f ? " selected" : "")}
               onClick={() => setFilter(f)}
               style={filter === f ? {
-                background: f === "Approved" ? "var(--ok)"
+                background:
+                  f === "Approved" ? "var(--ok)"
                   : f === "Rejected" ? "var(--warn)"
+                  : f === "Grade A" ? "#1565c0"
+                  : f === "Grade B" ? "#e65100"
                   : "var(--clay)",
-                borderColor: "transparent",
+                borderColor: "transparent", color: "#fff",
               } : {}}>
               {f}
             </button>
@@ -5072,60 +5177,73 @@ function ApprovalSection() {
       {loading ? <div className="empty">Loading QC decisions...</div>
         : filtered.length === 0
           ? <div className="empty">No {filter !== "All" ? filter.toLowerCase() + " " : ""}QC decisions in the last {days} days.</div>
-          : filtered.map(row => (
-            <div key={row.id} style={{
-              border: "2px solid",
-              borderColor: row.decision === "Approved"
-                ? "color-mix(in srgb, var(--ok) 40%, transparent)"
-                : "color-mix(in srgb, var(--warn) 40%, transparent)",
-              borderRadius: 10, padding: "12px 14px", marginBottom: 10,
-              background: row.decision === "Approved" ? "var(--ok-soft)" : "var(--warn-soft)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between",
-                alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{
-                      fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 12,
-                      background: row.decision === "Approved" ? "var(--ok)" : "var(--warn)",
-                      color: "#fff",
-                    }}>
-                      {row.decision === "Approved" ? "APPROVED" : "REJECTED"}
-                    </span>
-                    <span style={{ fontSize: 11, color: "var(--ink-soft)",
-                      background: "#fff", padding: "2px 8px", borderRadius: 10,
-                      border: "1px solid var(--line)" }}>
-                      {row.source}
-                    </span>
-                  </div>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-                    {row.product_batch}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {row.details}
-                  </div>
-                  {row.remark && (
-                    <div style={{ marginTop: 6, fontSize: 12, padding: "4px 8px",
-                      background: "#fff", borderRadius: 6,
-                      color: row.decision === "Rejected" ? "var(--warn)" : "var(--ok)",
-                      fontStyle: "italic" }}>
-                      "{row.remark}"
+          : filtered.map(row => {
+            const ds = decisionStyle(row.decision);
+            return (
+              <div key={row.id} style={{
+                border: "2px solid", borderColor: ds.border,
+                borderRadius: 10, padding: "12px 14px", marginBottom: 10,
+                background: ds.cardBg,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between",
+                  alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center",
+                      gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{
+                        fontSize: 12, fontWeight: 700, padding: "2px 10px",
+                        borderRadius: 12, background: ds.bg, color: "#fff",
+                      }}>
+                        {ds.label}
+                      </span>
+                      <span style={{ fontSize: 11, color: "var(--ink-soft)",
+                        background: "#fff", padding: "2px 8px", borderRadius: 10,
+                        border: "1px solid var(--line)" }}>
+                        {row.source}
+                      </span>
+                      {/* Extra grade badge for RM QC rows */}
+                      {row.grade && row.source === "RM QC" && (
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, padding: "2px 8px",
+                          borderRadius: 10,
+                          background: row.grade === "A" ? "#e3f2fd" : "#fff3e0",
+                          color: row.grade === "A" ? "#1565c0" : "#e65100",
+                          border: "1px solid " + (row.grade === "A" ? "#90caf9" : "#ffcc80"),
+                        }}>
+                          IS-6655 Grade {row.grade}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div style={{ textAlign: "right", fontSize: 11,
-                  color: "var(--ink-soft)", whiteSpace: "nowrap", marginLeft: 12 }}>
-                  {new Date(row.decided_at).toLocaleDateString("en-IN", {
-                    day: "2-digit", month: "short", year: "numeric",
-                  })}
-                  <br />
-                  {new Date(row.decided_at).toLocaleTimeString("en-IN", {
-                    hour: "2-digit", minute: "2-digit",
-                  })}
+                    <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+                      {row.product_batch}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                      {row.details}
+                    </div>
+                    {row.remark && (
+                      <div style={{ marginTop: 6, fontSize: 12, padding: "4px 8px",
+                        background: "#fff", borderRadius: 6, fontStyle: "italic",
+                        color: row.decision === "Rejected" ? "var(--warn)"
+                          : row.decision === "Grade B" ? "#e65100"
+                          : "var(--ok)" }}>
+                        &ldquo;{row.remark}&rdquo;
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 11,
+                    color: "var(--ink-soft)", whiteSpace: "nowrap", marginLeft: 12 }}>
+                    {new Date(row.decided_at).toLocaleDateString("en-IN", {
+                      day: "2-digit", month: "short", year: "numeric",
+                    })}
+                    <br />
+                    {new Date(row.decided_at).toLocaleTimeString("en-IN", {
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
       }
     </>
   );
