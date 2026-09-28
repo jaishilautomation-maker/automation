@@ -71,6 +71,11 @@ export default function BatchAnalysisPage() {
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
   const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().slice(0, 10));
+  // JSCI/QC/16 Final Inspection header fields (stored in test_results JSONB).
+  const [jobNo, setJobNo]               = useState("");
+  const [srNo, setSrNo]                 = useState("");
+  const [shift, setShift]               = useState("");   // "day" | "night" | ""
+  const [lotNo, setLotNo]               = useState("");
   const [remarks, setRemarks]           = useState("");
   const [reworkAction, setReworkAction] = useState<ReworkAction | "">("");
   const [submitting, setSubmitting]     = useState(false);
@@ -232,6 +237,14 @@ export default function BatchAnalysisPage() {
         setAnalysisDate(existing.analysis_date);
         setRemarks(existing.remarks ?? "");
         setPartyCode((existing as BatchAnalysis & { party_code?: string | null }).party_code ?? "");
+        {
+          // Restore the JSCI/QC/16 header fields from test_results.
+          const trh = (existing.test_results ?? {}) as Record<string, unknown>;
+          setJobNo(trh.job_no != null ? String(trh.job_no) : "");
+          setSrNo(trh.sr_no != null ? String(trh.sr_no) : "");
+          setShift(trh.shift != null ? String(trh.shift) : "");
+          setLotNo(trh.lot_no != null ? String(trh.lot_no) : "");
+        }
         setReworkAction(
           ((existing as BatchAnalysis & { rework_action?: ReworkAction | null }).rework_action ?? "") as ReworkAction | ""
         );
@@ -259,6 +272,10 @@ export default function BatchAnalysisPage() {
     setValues(init);
     setRemarks("");
     setReworkAction("");
+    setJobNo("");
+    setSrNo("");
+    setShift("");
+    setLotNo("");
   };
 
   const handleBatchBlur = () => { resolveBatch(batchNumber); };
@@ -337,6 +354,13 @@ export default function BatchAnalysisPage() {
           testResults[d.test_key] = raw;
         }
       });
+
+      // JSCI/QC/16 header fields — stored alongside the test values so they
+      // flow to the DB, the report, and the sheet without a schema change.
+      if (jobNo.trim())  testResults["job_no"] = jobNo.trim();
+      if (srNo.trim())   testResults["sr_no"]  = srNo.trim();
+      if (shift)         testResults["shift"]  = shift;
+      if (lotNo.trim())  testResults["lot_no"] = lotNo.trim();
 
       const appearanceVal = values["colour_appearance"] ?? null;
       const appearanceOkRaw = values["appearance_ok"];
@@ -544,6 +568,46 @@ export default function BatchAnalysisPage() {
         <>
           <div className="card">
             <h3>Analysis Details</h3>
+            {/* JSCI/QC/16 Final Inspection header fields */}
+            <div className="row2">
+              <div>
+                <label>Sr No</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 393"
+                  value={srNo}
+                  onChange={e => setSrNo(e.target.value)}
+                />
+              </div>
+              <div>
+                <label>Job No</label>
+                <input
+                  type="text"
+                  placeholder="e.g. P-324"
+                  value={jobNo}
+                  onChange={e => setJobNo(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="row2">
+              <div>
+                <label>Shift</label>
+                <select value={shift} onChange={e => setShift(e.target.value)}>
+                  <option value="">— Select shift —</option>
+                  <option value="day">Day</option>
+                  <option value="night">Night</option>
+                </select>
+              </div>
+              <div>
+                <label>Lot No</label>
+                <input
+                  type="text"
+                  placeholder="e.g. A"
+                  value={lotNo}
+                  onChange={e => setLotNo(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="row2">
               <div>
                 <label>Analysis Date *</label>

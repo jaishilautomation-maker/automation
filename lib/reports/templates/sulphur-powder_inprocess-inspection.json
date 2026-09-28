@@ -1,26 +1,31 @@
 {
   "template": "sulphur-powder_inprocess-inspection.xlsx",
   "fields": {
+    "report_date": "batch_analysis.analysis_date",
+    "sr_no": "batch_analysis.test_results.sr_no",
+    "job_no": "batch_analysis.test_results.job_no",
+    "shift": "batch_analysis.test_results.shift",
+    "lot_no": "batch_analysis.test_results.lot_no",
     "batch_no": "batch_analysis.batch_no",
-    "lot_no": "batch_analysis.lot_no",
-    "analysis_date": "batch_analysis.analysis_date",
     "chemist_name": "batch_analysis.chemist_name",
-    "remarks": "batch_analysis.remarks",
 
-    "colour_appearance": "batch_analysis.test_results.colour_appearance",
     "purity_percent": "batch_analysis.test_results.purity_percent",
+    "insolubility_toluene": "batch_analysis.test_results.insolubility_toluene",
     "acidity_percent": "batch_analysis.test_results.acidity_percent",
     "ash_percent": "batch_analysis.test_results.ash_percent",
-    "moisture_percent": "batch_analysis.test_results.moisture_percent",
+    "mesh_150u_100": "batch_analysis.test_results.mesh100_pct",
+    "mesh_75u_200": "batch_analysis.test_results.mesh200_pct",
+    "mesh_45u_325": "batch_analysis.test_results.mesh325_pct",
     "oil_percent": "batch_analysis.test_results.oil_percent",
     "heat_loss_percent": "batch_analysis.test_results.heat_loss_percent",
-    "mesh100_pct": "batch_analysis.test_results.mesh100_pct",
-    "mesh200_pct": "batch_analysis.test_results.mesh200_pct",
-    "mesh325_pct": "batch_analysis.test_results.mesh325_pct",
     "sg_value": "batch_analysis.test_results.sg_value",
-    "bd_value": "batch_analysis.test_results.bd_value",
     "melting_point": "batch_analysis.test_results.melting_point",
-    "insolubility_toluene": "batch_analysis.test_results.insolubility_toluene",
-    "total_sulphur_percent": "batch_analysis.test_results.total_sulphur_percent"
+    "alkalinity_naoh": "batch_analysis.test_results.alkalinity_naoh",
+    "total_sulphur_percent": "batch_analysis.test_results.total_sulphur_percent",
+    "softening_point": "batch_analysis.test_results.softening_point",
+    "acetone_solubility": "batch_analysis.test_results.acetone_solubility",
+    "appearance": "batch_analysis.test_results.colour_appearance",
+
+    "remarks": "batch_analysis.remarks"
   }
 }
