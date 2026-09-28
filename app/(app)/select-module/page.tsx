@@ -52,6 +52,8 @@ export function setDemoRole(role: AppRole | null): void {
   try {
     if (role) sessionStorage.setItem(DEMO_ROLE_KEY, role);
     else sessionStorage.removeItem(DEMO_ROLE_KEY);
+    // Notify AppNav / AppHeader to re-read immediately (same-tab)
+    window.dispatchEvent(new Event("jsci-demo-role-change"));
   } catch { /* ignore */ }
 }
 
@@ -118,6 +120,15 @@ export default function SelectModulePage() {
 
   // ── factory_admin: handle demo role selection ─────────────────────────────
   const [demoRoleActive, setDemoRoleActive] = useState<AppRole | null>(null);
+
+  // When an admin lands on the picker, clear any active demo role so they
+  // start fresh (this is the "Switch Role" entry point).
+  useEffect(() => {
+    if (isAdmin) {
+      setDemoRole(null);
+      setDemoRoleActive(null);
+    }
+  }, [isAdmin]);
 
   const handleDemoRolePick = useCallback((demoRole: AppRole) => {
     setDemoRole(demoRole);

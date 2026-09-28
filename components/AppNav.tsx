@@ -19,17 +19,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
+import { useEffectiveRole } from "@/lib/use-effective-role";
 import { FACTORY_CODE, FACTORY_NAME } from "@/lib/factory-config";
 
 const isA20 = FACTORY_CODE === "A20";
 
 export default function AppNav() {
   const pathname = usePathname();
-  const { profile } = useAuth();
   const { activeModule } = useModule();
-  const role = profile?.role;
+  // Use the effective role: for admins this is the demo role they picked,
+  // so the nav reflects exactly what that role sees.
+  const { effectiveRole, isAdmin } = useEffectiveRole();
+  const role = effectiveRole;
 
   // Hide nav on the module/factory selector itself
   if (pathname === "/select-module") return null;
@@ -113,10 +115,17 @@ export default function AppNav() {
 
   return (
     <nav className="app-nav">
-      {/* Only lab users (chemist / lab_manager) have two modules to switch
-          between, so only they get the "⬅ Modules" back link. Production,
-          Operator and Stores are single-module — they see the factory name. */}
-      {role === "chemist" || role === "lab_manager" ? (
+      {/* Admins (demo mode) get a persistent Switch Role link on every page. */}
+      {isAdmin ? (
+        <Link
+          href="/select-module"
+          aria-current={pathname === "/select-module" ? "page" : undefined}
+          title="Switch role"
+          style={{ fontWeight: 600 }}
+        >
+          ⇄ Switch Role
+        </Link>
+      ) : role === "chemist" || role === "lab_manager" ? (
         <Link
           href="/select-module"
           aria-current={pathname === "/select-module" ? "page" : undefined}

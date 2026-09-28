@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useEffectiveRole } from "@/lib/use-effective-role";
 import { FACTORY_NAME } from "@/lib/factory-config";
-import { getDemoRole, setDemoRole } from "@/app/(app)/select-module/page";
+import { setDemoRole } from "@/app/(app)/select-module/page";
 import type { AppRole } from "@/lib/types";
 
 function useModuleTitle(): { title: string; sub: string } {
@@ -19,10 +19,13 @@ function useModuleTitle(): { title: string; sub: string } {
   if (
     pathname.startsWith("/pulveriser")  ||
     pathname.startsWith("/operator")    ||
+    pathname.startsWith("/stores")      ||
     pathname.startsWith("/production")  ||
     pathname.startsWith("/breakdown")   ||
     pathname.startsWith("/maintenance") ||
-    pathname.startsWith("/dashboard")
+    pathname.startsWith("/lab")         ||
+    pathname.startsWith("/dashboard")   ||
+    pathname.startsWith("/records")
   ) {
     return {
       title: `Job Card — JSCI · ${FACTORY_NAME}`,
@@ -35,27 +38,22 @@ function useModuleTitle(): { title: string; sub: string } {
   };
 }
 
-const DEMO_ROLE_LABELS: Partial<Record<AppRole, string>> = {
+const ROLE_LABELS: Partial<Record<AppRole, string>> = {
   production_incharge: "Production",
   chemist:             "Lab / QC",
+  lab_manager:         "Lab Manager",
   stores:              "Stores",
   operator:            "Operator",
+  factory_admin:       "Admin",
+  company_admin:       "Admin",
+  viewer:              "Viewer",
 };
 
 export default function AppHeader() {
   const { profile, signOut } = useAuth();
+  const { isAdmin, demoRole } = useEffectiveRole();
   const router = useRouter();
   const { title, sub } = useModuleTitle();
-
-  // Read demo role from sessionStorage (only relevant for factory_admin)
-  const [demoRole, setDemoRoleState] = useState<AppRole | null>(null);
-  useEffect(() => {
-    if (profile?.role === "factory_admin" || profile?.role === "company_admin") {
-      setDemoRoleState(getDemoRole());
-    }
-  }, [profile?.role]);
-
-  const isAdmin = profile?.role === "factory_admin" || profile?.role === "company_admin";
 
   const handleLogout = async () => {
     setDemoRole(null);
@@ -65,16 +63,16 @@ export default function AppHeader() {
   };
 
   const handleSwitchRole = () => {
-    setDemoRole(null);
-    setDemoRoleState(null);
+    // select-module clears the demo role on mount
     router.push("/select-module");
   };
 
-  const displayRole = isAdmin && demoRole
-    ? `Admin · ${DEMO_ROLE_LABELS[demoRole] ?? demoRole}`
-    : isAdmin
-    ? "Admin"
-    : (profile?.role ?? "—");
+  // Role pill: for admins show "Admin · <demo role>", else the plain role
+  const displayRole = isAdmin
+    ? demoRole
+      ? `Admin · ${ROLE_LABELS[demoRole] ?? demoRole}`
+      : "Admin"
+    : (ROLE_LABELS[profile?.role as AppRole] ?? profile?.role ?? "—");
 
   return (
     <header className="app-header">
@@ -87,7 +85,7 @@ export default function AppHeader() {
           <b>{profile?.full_name ?? "—"}</b>
           <span className="role-pill">{displayRole}</span>
         </div>
-        {isAdmin && demoRole && (
+        {isAdmin && (
           <button
             className="btn btn-ghost"
             type="button"
