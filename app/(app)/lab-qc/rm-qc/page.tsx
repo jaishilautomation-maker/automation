@@ -703,6 +703,15 @@ export default function RmQcPage() {
               placeholder="Enter invoice number"
               value={crudeInvoiceNumber}
               onChange={e => { setCrudeInvoiceNumber(e.target.value); setBatchId(""); }}
+              onKeyDown={e => {
+                if (e.key === "Enter") {
+                  // Link on Enter (not just Tab/blur). Prevent an accidental
+                  // form submit and blur so the field also loses focus.
+                  e.preventDefault();
+                  void resolveCrudeInvoice();
+                  e.currentTarget.blur();
+                }
+              }}
               onBlur={resolveCrudeInvoice}
             />
             {resolvingInvoice && <div className="field-hint">Linking invoice…</div>}
@@ -712,7 +721,7 @@ export default function RmQcPage() {
               </div>
             )}
             {!resolvingInvoice && crudeInvoiceNumber.trim() && !batchId && (
-              <div className="field-hint">Tab out of the field to link this invoice.</div>
+              <div className="field-hint">Press Enter to link this invoice.</div>
             )}
           </div>
 
