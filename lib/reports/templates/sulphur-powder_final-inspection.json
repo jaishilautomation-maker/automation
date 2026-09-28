@@ -1,19 +1,32 @@
 {
   "template": "sulphur-powder_final-inspection.xlsx",
   "fields": {
-    "batch_no": "product_qc.batch_no",
-    "job_no": "product_qc.job_no",
-    "product_name": "product_qc.product_name",
-    "test_date": "product_qc.test_date",
-    "chemist_name": "product_qc.chemist_name",
-    "appearance": "product_qc.appearance",
-    "overall_result": "product_qc.overall_result",
-    "purity_actual": "product_qc.test_results.purity_cs2",
-    "acidity_actual": "product_qc.test_results.acidity_h2so4",
-    "ash_actual": "product_qc.test_results.ash_content",
-    "hl70_actual": "product_qc.test_results.heat_loss_70",
-    "mesh_a": "product_qc.test_results.mesh_150u_100mesh",
-    "mesh_b": "product_qc.test_results.mesh_75u_200mesh",
-    "remarks": "product_qc.remarks"
+    "report_date": "batch_analysis.analysis_date",
+    "sr_no": "batch_analysis.test_results.sr_no",
+    "job_no": "batch_analysis.test_results.job_no",
+    "shift": "batch_analysis.test_results.shift",
+    "lot_no": "batch_analysis.test_results.lot_no",
+    "batch_no": "batch_analysis.batch_no",
+    "customer_name": "batch_analysis.customer_name",
+    "chemist_name": "batch_analysis.chemist_name",
+
+    "purity_percent": "batch_analysis.test_results.purity_percent",
+    "insolubility_toluene": "batch_analysis.test_results.insolubility_toluene",
+    "acidity_percent": "batch_analysis.test_results.acidity_percent",
+    "ash_percent": "batch_analysis.test_results.ash_percent",
+    "mesh_150u_100": "batch_analysis.test_results.mesh100_pct",
+    "mesh_75u_200": "batch_analysis.test_results.mesh200_pct",
+    "mesh_45u_325": "batch_analysis.test_results.mesh325_pct",
+    "oil_percent": "batch_analysis.test_results.oil_percent",
+    "heat_loss_percent": "batch_analysis.test_results.heat_loss_percent",
+    "sg_value": "batch_analysis.test_results.sg_value",
+    "melting_point": "batch_analysis.test_results.melting_point",
+    "alkalinity_naoh": "batch_analysis.test_results.alkalinity_naoh",
+    "total_sulphur_percent": "batch_analysis.test_results.total_sulphur_percent",
+    "softening_point": "batch_analysis.test_results.softening_point",
+    "acetone_solubility": "batch_analysis.test_results.acetone_solubility",
+    "appearance": "batch_analysis.test_results.colour_appearance",
+
+    "remarks": "batch_analysis.remarks"
   }
 }

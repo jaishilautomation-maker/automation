@@ -13,12 +13,12 @@
 
 import { AUTOMATION_EMAIL, LAB_QC_EMAIL } from "@/lib/notifications/send-email";
 
-/** The four form types, one per finalization trigger point. */
+/** Form types, one per finalization trigger point. */
 export type ReportFormType =
-  | "incoming-inspection" // rm_qc finalized
-  | "inprocess-inspection" // batch_analysis finalized
-  | "final-inspection" // product_qc finalized
-  | "coa"; // COA generation action
+  | "incoming-inspection" // rm_qc finalized (JSCI/QC/03)
+  | "final-inspection" // batch_analysis finalized — A-20/1 Sulphur Powder (JSCI/QC/16)
+  | "product-final-inspection" // product_qc finalized — A-20 SC/liquid products
+  | "coa"; // COA generation action (JSCI/QC/17)
 
 /** Departmental mailboxes. Adjust addresses here as the org confirms them. */
 export const ROLE_EMAILS = {
@@ -36,13 +36,13 @@ export type RoleKey = keyof typeof ROLE_EMAILS;
  */
 const FORM_TYPE_ROLES: Record<ReportFormType, RoleKey[]> = {
   // Raw-material incoming inspection — Stores raised the receipt, Lab tested it.
-  "incoming-inspection":  ["lab", "stores"],
-  // In-process (batch) analysis — Production runs the batch, Lab analyses it.
-  "inprocess-inspection": ["lab", "production", "operator"],
-  // Final product inspection — Production + Lab; Stores dispatches finished goods.
-  "final-inspection":     ["lab", "production", "stores"],
+  "incoming-inspection":       ["lab", "stores"],
+  // Final inspection of produced Sulphur Powder (A-20/1 batch analysis).
+  "final-inspection":          ["lab", "production", "stores"],
+  // Final product inspection for A-20 SC/liquid products.
+  "product-final-inspection":  ["lab", "production", "stores"],
   // Certificate of Analysis — Lab issues it, Stores dispatches against it.
-  "coa":                  ["lab", "stores"],
+  "coa":                       ["lab", "stores"],
 };
 
 /**

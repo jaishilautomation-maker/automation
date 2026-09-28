@@ -353,7 +353,7 @@ async function loadBatchAnalysis(
   const { data, error } = await supabase
     .from("batch_analysis")
     .select(
-      "id, factory_id, batch_id, chemist_id, analysis_date, appearance, remarks, test_results"
+      "id, factory_id, batch_id, chemist_id, party_code, analysis_date, appearance, remarks, test_results"
     )
     .eq("id", id)
     .maybeSingle();
@@ -367,10 +367,14 @@ async function loadBatchAnalysis(
   const product = batch?.product_id
     ? await getProduct(supabase, batch.product_id as string)
     : null;
+  const party = await getPartyName(supabase, d.party_code as string);
   return flatten(d, {
     batch_no: batch?.batch_number ?? null,
     lot_no: batch?.lot_number ?? null,
     chemist_name: await getChemistName(supabase, d.chemist_id as string),
+    // Customer / party for the Final Inspection header. party_code is the raw
+    // code; customer_name is the display name from the parties master.
+    customer_name: party?.customer_name ?? (d.party_code as string) ?? null,
     // batch_analysis is Sulphur-Powder-only; fall back to that code if the
     // batch has no product linked.
     __product_code: product?.code ?? "SULPHUR_POWDER_FG",
@@ -507,6 +511,19 @@ async function getMaterial(
   return (data as { code: string | null; name: string | null }) ?? null;
 }
 
+async function getPartyName(
+  supabase: SupabaseClient,
+  partyCode: string | null | undefined
+): Promise<{ customer_name: string | null } | null> {
+  if (!partyCode) return null;
+  const { data } = await supabase
+    .from("parties")
+    .select("customer_name")
+    .eq("party_code", partyCode)
+    .maybeSingle();
+  return (data as { customer_name: string | null }) ?? null;
+}
+
 async function getChemistName(
   supabase: SupabaseClient,
   chemistId: string | null | undefined
@@ -545,9 +562,9 @@ function buildSubject(source: ReportSource, record: FlatRecord): string {
     case "rm_qc":
       return `[JSCI A-20/1] Incoming Inspection Report — ${batch}`;
     case "batch_analysis":
-      return `[JSCI A-20/1] In-Process Inspection Report — ${batch}`;
-    case "product_qc":
       return `[JSCI A-20/1] Final Inspection Report — ${batch}`;
+    case "product_qc":
+      return `[JSCI A-20] Final Inspection Report — ${batch}`;
     case "coa":
       return `[JSCI A-20/1] Certificate of Analysis — ${
         (record.customer_name as string) ?? batch

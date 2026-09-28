@@ -18,15 +18,15 @@ import type { ReportFormType } from "@/lib/reports/recipients";
 /** The source event that fired report generation. */
 export type ReportSource =
   | "rm_qc" // → incoming-inspection
-  | "batch_analysis" // → inprocess-inspection
-  | "product_qc" // → final-inspection
+  | "batch_analysis" // → final-inspection (A-20/1 Sulphur Powder, JSCI/QC/16)
+  | "product_qc" // → product-final-inspection (A-20 products)
   | "coa"; // → coa
 
 /** Every source maps to exactly one form type. */
 export const SOURCE_TO_FORM_TYPE: Record<ReportSource, ReportFormType> = {
   rm_qc:          "incoming-inspection",
-  batch_analysis: "inprocess-inspection",
-  product_qc:     "final-inspection",
+  batch_analysis: "final-inspection",
+  product_qc:     "product-final-inspection",
   coa:            "coa",
 };
 
