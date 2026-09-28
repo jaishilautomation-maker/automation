@@ -63,7 +63,7 @@ interface SpecRow {
 
 type RiskStatus = "pass" | "fail" | "none";
 
-type CrudeGrade = "A" | "B" | "Reject" | null;
+type CrudeGrade = "A" | "B" | null;
 
 // Synthetic "party" code seeded in migration 048 carrying the IS-6655 A-Grade
 // incoming spec limits for Crude Sulphur. The chemist does NOT pick a grade —
@@ -71,9 +71,9 @@ type CrudeGrade = "A" | "B" | "Reject" | null;
 // A-grade limits (see determineCrudeGrade below).
 const CRUDE_A_GRADE_CODE = "SULPHUR_A_GRADE";
 
-// IS-6655 purity bands (% solubility in CS2) used to auto-grade a batch.
-const CRUDE_PURITY_A_MIN = 98.0;   // >= 98 and within A limits → A
-const CRUDE_PURITY_B_MIN = 90.0;   // >= 90 (but not A) → B; < 90 → Reject
+// IS-6655 purity band (% solubility in CS2) used to auto-grade a batch.
+// A batch is only ever A or B — there is no reject outcome for crude sulphur.
+const CRUDE_PURITY_A_MIN = 98.0;   // >= 98 and within A limits → A; else → B
 
 // Oil incoming spec sheet: Appearance "Clear & Bright", Density 0.850–0.880,
 // Viscosity "Report" (recorded, no limit).
@@ -469,16 +469,17 @@ export default function RmQcPage() {
 
   // --------------------------------------------------------------------------
   // Auto-determine grade from ENTERED values (IS-6655) — no upfront selection.
-  //   A      → purity ≥ 98 AND every A-grade limit met (acidity/ash/heat-loss)
-  //   B      → purity in 90–97.99, OR purity ≥ 98 but an A limit exceeded
-  //   Reject → purity < 90
-  //   null   → purity not yet entered (nothing to grade)
+  // Crude sulphur readings are consistently above the lowest bound, so there is
+  // no "Reject" outcome: a batch is either A or B. Any exceptional low reading
+  // is captured as B (the safety-side catch-all) rather than rejected.
+  //   A    → purity ≥ 98 AND every A-grade limit met (acidity/ash/heat-loss)
+  //   B    → anything else (purity < 98, or ≥ 98 with an A limit exceeded)
+  //   null → purity not yet entered (nothing to grade)
   // --------------------------------------------------------------------------
   const crudeGrade: CrudeGrade = (() => {
     const purityRaw = values["purity_percent"] ?? "";
     const purity = parseFloat(purityRaw);
     if (purityRaw === "" || isNaN(purity)) return null;
-    if (purity < CRUDE_PURITY_B_MIN) return "Reject";
     if (purity >= CRUDE_PURITY_A_MIN && crudeAllWithinA) return "A";
     return "B";
   })();
@@ -764,10 +765,9 @@ export default function RmQcPage() {
               {/* Auto-determined grade banner (IS-6655). Grade is computed from
                   the entered values — the chemist does not pick it. */}
               {crudeSpecs.length > 0 && crudeGrade && (() => {
-                const isReject = crudeGrade === "Reject";
                 const isA = crudeGrade === "A";
-                const accent = isReject ? "#c0392b" : isA ? "var(--ok)" : "var(--warn)";
-                const bg = isReject ? "#fde8e8" : isA ? "var(--ok-soft)" : "#fff4e0";
+                const accent = isA ? "var(--ok)" : "var(--warn)";
+                const bg = isA ? "var(--ok-soft)" : "#fff4e0";
                 return (
                   <div className="card" style={{
                     display: "flex", alignItems: "center", gap: 12,
@@ -777,7 +777,7 @@ export default function RmQcPage() {
                       fontSize: 14, fontWeight: 700, padding: "4px 14px", borderRadius: 14,
                       background: bg, color: accent,
                     }}>
-                      {isReject ? "GRADE: REJECT" : `GRADE: ${crudeGrade}`}
+                      {`GRADE: ${crudeGrade}`}
                     </span>
                     <span className="field-hint" style={{ margin: 0 }}>
                       Auto-determined from entered values (IS-6655) ·{" "}

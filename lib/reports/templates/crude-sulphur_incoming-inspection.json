@@ -2,6 +2,7 @@
   "template": "crude-sulphur_incoming-inspection.xlsx",
   "fields": {
     "batch_no": "rm_qc.batch_no",
+    "invoice_no": "rm_qc.batch_no",
     "lot_no": "rm_qc.lot_no",
     "material_name": "rm_qc.material_name",
     "test_date": "rm_qc.test_date",
