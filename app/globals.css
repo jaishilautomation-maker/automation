@@ -455,6 +455,46 @@ table.dash td { padding: 8px 8px; border-bottom: 1px solid var(--line); }
 @media (max-width: 400px) {
   .module-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Mobile header / nav fix ──────────────────────────────────────────────
+   On small screens the header title + user badge + Switch Role button could
+   grow taller than the nav's hardcoded top offset (56px), causing the nav to
+   overlap the header (most visible on the Production role's longer header).
+
+   Fix: pin the header to a FIXED height on mobile and let its inner content
+   truncate to fit. The nav's sticky `top` then always matches exactly. */
+@media (max-width: 600px) {
+  .app-header {
+    height: 52px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    gap: 8px;
+    overflow: hidden;
+  }
+  .app-header .title {
+    font-size: 13px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55vw;
+  }
+  .app-header .sub { font-size: 10px; white-space: nowrap; }
+
+  .user-badge { gap: 6px; flex-shrink: 0; }
+  .user-badge .who { font-size: 10px; }
+  .user-badge .who b { font-size: 11px; }
+  .user-badge .btn.btn-ghost {
+    font-size: 11px !important;
+    padding: 3px 7px !important;
+    margin-right: 2px !important;
+    white-space: nowrap;
+  }
+  .logout-btn { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+
+  /* Nav sits exactly below the fixed-height header */
+  .app-nav { top: 52px; }
+}
 .module-tile {
   background: var(--panel);
   border: 2px solid var(--line);
