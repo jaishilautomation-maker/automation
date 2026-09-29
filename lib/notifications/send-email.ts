@@ -55,6 +55,16 @@ const LAB_QC_EVENT_PREFIX = "lab_qc_";
 export const FACTORY_EMAIL = "factory@jaishilsulphur.com";
 const FACTORY_EVENT_TYPES = new Set(["pulveriser_production", "pulveriser_operator"]);
 
+// ---------------------------------------------------------------------------
+// TEMPORARY global CC — every notification (all roles, all event types) is
+// additionally delivered to these addresses. Remove this block (and its use
+// in sendEmail below) when the temporary monitoring period ends.
+// ---------------------------------------------------------------------------
+const TEMP_CC_EMAILS = [
+  "chinmaythakker@jaishilsulphur.com",
+  "samirthakkar@jaishilsulphur.com",
+];
+
 // The Workspace mailbox the service account impersonates as the sender.
 // Must match the account authorised in Workspace Admin → Domain-wide Delegation.
 // Client ID 111764033913967609618 is delegated for this address.
@@ -277,6 +287,10 @@ export async function sendEmail(args: SendEmailArgs): Promise<void> {
   if (args.eventType && FACTORY_EVENT_TYPES.has(args.eventType)) {
     recipients = Array.from(new Set([...recipients, FACTORY_EMAIL]));
   }
+
+  // TEMPORARY: CC every notification to the monitoring addresses. Remove this
+  // line (and the TEMP_CC_EMAILS constant above) when no longer needed.
+  recipients = Array.from(new Set([...recipients, ...TEMP_CC_EMAILS]));
   let success   = false;
   let errorMsg: string | null = null;
 
