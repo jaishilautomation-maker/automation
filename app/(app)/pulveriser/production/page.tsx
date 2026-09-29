@@ -30,10 +30,6 @@ import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
 const MAX_ENTRIES = 6;
 
-// Sulphur source options for the RM-entry dropdown. Kept as a small in-code
-// list for now (per 29-09-26 meeting); can move to a master table later.
-const SULPHUR_SOURCES = ["Reliance", "HPCL", "Other"] as const;
-
 // Preferred display order for the Party/CODE dropdown (matches vfd_parameters
 // party_code labels after migration 043). Codes not listed here fall to the end,
 // alphabetically.
@@ -396,11 +392,9 @@ export default function PulveriserProductionPage() {
             <div className="row2">
               <div>
                 <label>Source</label>
-                <select value={e.sulSupplier}
-                  onChange={ev => updateEntry(e.key, { sulSupplier: ev.target.value })}>
-                  <option value="">-- Select source --</option>
-                  {SULPHUR_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <input type="text" placeholder="e.g. Reliance, HPCL"
+                  value={e.sulSupplier}
+                  onChange={ev => updateEntry(e.key, { sulSupplier: ev.target.value })} />
               </div>
               <div>
                 <label>Lot Number</label>
