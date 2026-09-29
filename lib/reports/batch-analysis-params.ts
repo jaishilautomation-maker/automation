@@ -26,7 +26,7 @@ export interface BatchAnalysisParam {
  * form + reports fall back to this complete list.
  */
 export const BATCH_ANALYSIS_PARAMS: BatchAnalysisParam[] = [
-  { resultKey: "purity_percent",        label: "Purity / Solubility in CS2", unit: "%",  rawInputs: ["ash_m1", "ash_m"] },
+  { resultKey: "purity_percent",        label: "Purity / Solubility in CS2", unit: "%",  rawInputs: ["purity_e", "purity_w1", "purity_w2"] },
   { resultKey: "insolubility_toluene",  label: "Insolubility in Toluene",    unit: "%",  rawInputs: [] },
   { resultKey: "acidity_percent",       label: "Acidity (as H2SO4)",         unit: "%",  rawInputs: ["acidity_v1", "acidity_v2", "acidity_n", "acidity_m"] },
   { resultKey: "ash_percent",           label: "Ash Content",                unit: "%",  rawInputs: ["ash_m1", "ash_m"] },
@@ -53,6 +53,9 @@ export function rawInputLabel(key: string): string {
 }
 
 const RAW_INPUT_LABELS: Record<string, string> = {
+  purity_e: "Empty crucible E (g)",
+  purity_w1: "Sample taken W1 (g)",
+  purity_w2: "Empty + residue W2 (g)",
   ash_m1: "Residue M1 (g)",
   ash_m: "Sample M (g)",
   acidity_v1: "Titre material V1 (mL)",

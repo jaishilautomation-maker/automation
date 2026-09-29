@@ -25,6 +25,7 @@ import type { QcTestDefinition, BatchAnalysis } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
+import { paramsForParty } from "@/lib/reports/batch-analysis-params";
 
 interface PartyOption {
   party_code: string;
@@ -218,6 +219,23 @@ export default function BatchAnalysisPage() {
   const selectedPartyName =
     parties.find(p => p.party_code === partyCode)?.customer_name || partyCode || null;
   const partyResultKeys = partyCode ? specs.map(s => s.parameter) : [];
+
+  // Which test-definition fields to render. When a party is selected, show only
+  // that party's parameters — each result field plus the raw inputs that feed
+  // it (from the shared catalog) — always keeping appearance/photo. No party →
+  // show every field (full/default set).
+  const visibleTestKeys: Set<string> | null = (() => {
+    if (!partyCode || specs.length === 0) return null; // null = show all
+    const keys = new Set<string>(["colour_appearance", "appearance_photo"]);
+    for (const p of paramsForParty(partyResultKeys)) {
+      keys.add(p.resultKey);
+      for (const raw of p.rawInputs) keys.add(raw);
+    }
+    return keys;
+  })();
+  const visibleDefs = visibleTestKeys
+    ? testDefs.filter(d => visibleTestKeys.has(d.test_key))
+    : testDefs;
 
   // -------------------------------------------------------------------------
   // Resolve batch number on blur → find existing batch + analysis
@@ -672,7 +690,7 @@ export default function BatchAnalysisPage() {
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Green fields are auto-calculated. Enter input values and they update automatically.
               </div>
-              {testDefs.map(def => (
+              {visibleDefs.map(def => (
                 <QcFieldRenderer
                   key={def.id}
                   def={def}
