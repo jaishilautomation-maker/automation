@@ -99,6 +99,8 @@ export async function generateAndEmailReport(
   let filled: Buffer;
   if (args.source === "batch_analysis") {
     filled = await buildBatchAnalysisWorkbook(record, args.variant);
+  } else if (args.source === "job_card") {
+    filled = await buildJobCardWorkbook(record);
   } else {
     const { xlsx: xlsxName, json: jsonName } = templateFiles(basename);
     const templateBuf = await downloadFile(supabase, xlsxName);
@@ -343,6 +345,142 @@ function str(v: unknown): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
+// ---------------------------------------------------------------------------
+// Pulveriser Job Card workbook — code-generated on Lab QC OK finalization.
+// Sections: Production, Stores & Oil, Operator, Hourly Readings, QC sign-off.
+// ---------------------------------------------------------------------------
+async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
+  const d = record;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "JSCI Automation";
+  const ws = wb.addWorksheet("Job Card");
+  ws.columns = [{ width: 34 }, { width: 30 }, { width: 30 }];
+
+  const thin = { style: "thin" as const };
+  const centre = (cell: string) => {
+    ws.getCell(cell).alignment = { horizontal: "center", vertical: "middle" };
+  };
+
+  let r = 1;
+  ws.mergeCells(`A${r}:C${r}`);
+  ws.getCell(`A${r}`).value = "M/s JAISHIL SULPHUR & CHEMICAL INDUSTRIES";
+  ws.getCell(`A${r}`).font = { bold: true, size: 14 }; centre(`A${r}`); r++;
+  ws.mergeCells(`A${r}:C${r}`);
+  ws.getCell(`A${r}`).value = "Plot No-A-20/1 MIDC, Phase-I, DOMBIVALI"; centre(`A${r}`); r++;
+  ws.mergeCells(`A${r}:C${r}`);
+  ws.getCell(`A${r}`).value = "PULVERISER JOB CARD (Form JSCI/PROD/02)";
+  ws.getCell(`A${r}`).font = { bold: true, underline: true, size: 12 }; centre(`A${r}`); r++;
+  r++;
+
+  const section = (title: string) => {
+    ws.mergeCells(`A${r}:C${r}`);
+    ws.getCell(`A${r}`).value = title;
+    ws.getCell(`A${r}`).font = { bold: true, size: 12, color: { argb: "FF1B5E20" } };
+    r++;
+  };
+  const kv = (label: string, value: unknown) => {
+    ws.getCell(`A${r}`).value = label; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:C${r}`);
+    ws.getCell(`B${r}`).value = str(value);
+    ws.getCell(`A${r}`).border = { bottom: thin };
+    ws.getCell(`B${r}`).border = { bottom: thin };
+    r++;
+  };
+  // Production values store MT; the UI shows kg (×1000). Match the UI.
+  const mtToKg = (v: unknown) =>
+    typeof v === "number" ? v * 1000 : v == null ? "" : v;
+
+  section("Production Details");
+  kv("Machine Number", d.machine_number);
+  kv("Job Number", d.job_number);
+  kv("Shift", d.shift);
+  kv("Job Date", d.job_date);
+  kv("Batch / Material Code", d.material_code);
+  kv("Party / CODE", d.party_code);
+  kv("Sulphur Supplier", d.sulphur_supplier);
+  kv("Sulphur Lot Number", d.sulphur_lot_number);
+  kv("Sulphur Empty Date", d.sulphur_empty_date);
+  kv("Oil Supplier", d.oil_supplier);
+  kv("Oil Batch Number", d.oil_batch_number);
+  kv("Oil Quantity (kg)", d.oil_quantity);
+  kv("Planned Production (kg)", mtToKg(d.planned_production_mt));
+  kv("Oil Required (kg)", d.oil_required_kg);
+  r++;
+
+  section("Stores & Oil Consumption");
+  kv("Oil Issued (kg)", d.oil_issued_kg);
+  kv("Actual Production (kg)", mtToKg(d.actual_production_mt));
+  kv("Expected Oil (kg)", d.expected_oil_kg);
+  kv("Actual Oil Consumption (kg)", d.actual_oil_consumption_kg);
+  kv("Oil Variance (kg)", d.oil_variance_kg);
+  kv("Extra / Leftover Balance (kg)", d.oil_extra_leftover_balance_kg);
+  kv(
+    "Oil Consumption %",
+    typeof d.oil_consumption_percent === "number"
+      ? `${(d.oil_consumption_percent as number).toFixed(2)}%`
+      : d.oil_consumption_percent
+  );
+  r++;
+
+  section("Operator Details");
+  kv("Classifier VFD", d.classifier_vfd);
+  kv("Blower Inlet Valve", d.blower_inlet_valve);
+  kv("Blower Outlet Valve", d.blower_outlet_valve);
+  kv("Finished Goods Bag", d.finished_goods_bag);
+  kv("Packing Size", d.packing_size);
+  kv("QC Incharge Note", d.qc_incharge_note);
+  kv("Stores Incharge Note", d.stores_incharge_note);
+  kv("Work Details", d.work_details);
+  kv("Machine Cleaning", d.checkpoint_machine_cleaning ? "✓" : "✗");
+  kv("Roller Check", d.checkpoint_roller_check ? "✓" : "✗");
+  kv("Mesh Cloth Check", d.checkpoint_mesh_cloth_check ? "✓" : "✗");
+  r++;
+
+  // Hourly readings table
+  const readings = (d.__readings as Record<string, unknown>[]) ?? [];
+  section(`Hourly Readings (${readings.length})`);
+  if (readings.length > 0) {
+    const hdr = ["Date", "Machine", "Start", "Stop", "Hours", "Planned", "Batch", "Bags"];
+    hdr.forEach((h, i) => {
+      const cell = ws.getCell(r, i + 1);
+      cell.value = h; cell.font = { bold: true };
+      cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+    });
+    // widen to 8 cols for the readings block
+    if (ws.columnCount < 8) {
+      for (let c = 4; c <= 8; c++) ws.getColumn(c).width = 12;
+    }
+    r++;
+    for (const rd of readings) {
+      const row = [
+        str(rd.reading_date), str(rd.machine), str(rd.start_time), str(rd.stop_time),
+        str(rd.total_hours), str(rd.planned_production), str(rd.batch_no), str(rd.bags),
+      ];
+      row.forEach((v, i) => {
+        const cell = ws.getCell(r, i + 1);
+        cell.value = v;
+        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+      });
+      r++;
+    }
+  } else {
+    kv("Readings", "None recorded");
+  }
+  r++;
+
+  section("QC Sign-off");
+  kv("Lab Result", d.__lab_result === "ok" ? "OK — Finalized" : str(d.__lab_result));
+  kv("Lab Remark", d.__lab_remark);
+  kv("Reviewed By", d.__lab_by);
+  kv("Reviewed At", d.__lab_at);
+  r++;
+  ws.getCell(`A${r}`).value = "Form JSCI/PROD/02 · Rev 02";
+  ws.getCell(`C${r}`).value = "Authorised Sign.";
+
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
+}
+
 /**
  * Write a value into every cell of a Named Range. definedNames.getRanges
  * returns entries like `Sheet1!$B$5` or `Sheet1!$B$5:$B$5`; we expand each and
@@ -471,7 +609,56 @@ async function loadRecord(
       return loadProductQc(supabase, recordId);
     case "coa":
       return loadCoa(supabase, recordId);
+    case "job_card":
+      return loadJobCard(supabase, recordId);
   }
+}
+
+async function loadJobCard(
+  supabase: SupabaseClient,
+  id: string
+): Promise<FlatRecord | null> {
+  const { data, error } = await supabase
+    .from("pulveriser_job_cards")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.error("[generate-report] pulveriser_job_cards load error:", error.message);
+    return null;
+  }
+  if (!data) return null;
+  const d = data as Record<string, unknown>;
+
+  // Hourly readings for the readings table in the report.
+  const { data: readings } = await supabase
+    .from("pulveriser_hourly_readings")
+    .select("*")
+    .eq("job_card_id", id)
+    .order("created_at");
+
+  // Latest lab review (result + who/when) for the QC sign-off block.
+  const { data: review } = await supabase
+    .from("pulveriser_job_card_reviews")
+    .select("result, remark, reviewed_by, reviewed_at")
+    .eq("job_card_id", id)
+    .order("reviewed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const rev = (review ?? null) as Record<string, unknown> | null;
+  const labByName = rev?.reviewed_by
+    ? await getChemistName(supabase, rev.reviewed_by as string)
+    : null;
+
+  return flatten(d, {
+    // batch_no alias for the shared filename helper / subject line.
+    batch_no: d.job_number ?? d.material_code ?? d.id,
+    __readings: (readings ?? []) as Record<string, unknown>[],
+    __lab_result: rev?.result ?? null,
+    __lab_remark: rev?.remark ?? null,
+    __lab_by: labByName,
+    __lab_at: rev?.reviewed_at ?? null,
+  });
 }
 
 async function loadRmQc(
@@ -755,6 +942,10 @@ function buildSubject(
       return `[JSCI A-20/1] Certificate of Analysis — ${
         (record.customer_name as string) ?? batch
       }`;
+    case "job_card":
+      return `[JSCI A-20/1] Pulveriser Job Card — ${
+        (record.job_number as string) ?? batch
+      }`;
   }
 }
 
@@ -767,6 +958,7 @@ function buildBodyHtml(
   const date =
     (record.test_date as string) ??
     (record.analysis_date as string) ??
+    (record.job_date as string) ??
     (record.generated_at as string) ??
     "";
   const rows: string[] = [

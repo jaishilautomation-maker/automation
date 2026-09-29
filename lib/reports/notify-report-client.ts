@@ -13,7 +13,8 @@ export type ReportSource =
   | "rm_qc"
   | "batch_analysis"
   | "product_qc"
-  | "coa";
+  | "coa"
+  | "job_card";
 
 /**
  * Optional report variant. Currently only batch_analysis uses it:

@@ -20,7 +20,8 @@ export type ReportSource =
   | "rm_qc" // → incoming-inspection
   | "batch_analysis" // → final-inspection OR inprocess-inspection (variant)
   | "product_qc" // → product-final-inspection (A-20 products)
-  | "coa"; // → coa
+  | "coa" // → coa
+  | "job_card"; // → pulveriser job card (code-generated, dynamic)
 
 /**
  * Report variant — only batch_analysis uses it:
@@ -39,6 +40,7 @@ export const SOURCE_TO_FORM_TYPE: Record<ReportSource, ReportFormType> = {
   batch_analysis: "final-inspection",
   product_qc:     "product-final-inspection",
   coa:            "coa",
+  job_card:       "job-card",
 };
 
 /** Resolve the effective form type for a source + optional variant. */

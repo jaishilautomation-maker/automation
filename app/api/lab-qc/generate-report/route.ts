@@ -27,6 +27,7 @@ const VALID_SOURCES: ReportSource[] = [
   "batch_analysis",
   "product_qc",
   "coa",
+  "job_card",
 ];
 
 const VALID_VARIANTS: ReportVariant[] = ["final", "inprocess"];

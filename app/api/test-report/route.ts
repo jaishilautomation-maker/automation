@@ -104,6 +104,7 @@ export async function GET(req: NextRequest) {
       batch_analysis: "batch_analysis",
       product_qc:     "product_qc",
       coa:            "coa_documents",
+      job_card:       "pulveriser_job_cards",
     };
     const table = tableMap[source];
     const { data, error } = await supabase.from(table).select("id, factory_id").eq("id", recordId).maybeSingle();

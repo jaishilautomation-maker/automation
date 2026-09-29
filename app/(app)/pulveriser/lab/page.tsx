@@ -26,6 +26,7 @@ import {
   type PulveriserJobCardReview,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
+import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildLabEmail } from "@/lib/notifications/pulveriser-emails";
 
 /** Read-only labelled field row. */
@@ -132,6 +133,13 @@ export default function PulveriserLabPage() {
           },
         },
       });
+
+      // On OK the card is finalized — generate + email the job-card Excel report
+      // (automation@ + factory@). Fire-and-forget; NOT OK sends it to rework so
+      // no report is issued.
+      if (result === "ok") {
+        void notifyReport({ source: "job_card", recordId: active.id });
+      }
 
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."

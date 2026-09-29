@@ -11,7 +11,7 @@
 // as sendEmail({ recipients }).
 // =============================================================================
 
-import { AUTOMATION_EMAIL, LAB_QC_EMAIL } from "@/lib/notifications/send-email";
+import { AUTOMATION_EMAIL, LAB_QC_EMAIL, FACTORY_EMAIL } from "@/lib/notifications/send-email";
 
 /** Form types, one per finalization trigger point. */
 export type ReportFormType =
@@ -19,7 +19,8 @@ export type ReportFormType =
   | "final-inspection" // batch_analysis: party fully filled + all pass (JSCI/QC/16)
   | "inprocess-inspection" // batch_analysis: partial / no party / failed+rework
   | "product-final-inspection" // product_qc finalized — A-20 SC/liquid products
-  | "coa"; // COA generation action (JSCI/QC/17)
+  | "coa" // COA generation action (JSCI/QC/17)
+  | "job-card"; // Pulveriser job card finalized (Lab QC OK)
 
 /** Departmental mailboxes. Adjust addresses here as the org confirms them. */
 export const ROLE_EMAILS = {
@@ -27,6 +28,7 @@ export const ROLE_EMAILS = {
   production: "production@jaishilsulphur.com",
   stores:     "stores@jaishilsulphur.com",
   operator:   "operator@jaishilsulphur.com",
+  factory:    FACTORY_EMAIL,                         // factory@jaishilsulphur.com
 } as const;
 
 export type RoleKey = keyof typeof ROLE_EMAILS;
@@ -47,6 +49,8 @@ const FORM_TYPE_ROLES: Record<ReportFormType, RoleKey[]> = {
   "product-final-inspection":  ["lab", "production", "stores"],
   // Certificate of Analysis — Lab issues it, Stores dispatches against it.
   "coa":                       ["lab", "stores"],
+  // Pulveriser job card (Lab QC OK) — automation@ + factory@ only.
+  "job-card":                  ["factory"],
 };
 
 /**
