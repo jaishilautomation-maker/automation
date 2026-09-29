@@ -50,6 +50,11 @@ export const AUTOMATION_EMAIL = "automation@jaishilsulphur.com";
 export const LAB_QC_EMAIL = "qcdombivli@jaishilsulphur.com";
 const LAB_QC_EVENT_PREFIX = "lab_qc_";
 
+// Factory mailbox. Production and Operator job-card submissions are also
+// delivered here, in the same format, in addition to AUTOMATION_EMAIL.
+export const FACTORY_EMAIL = "factory@jaishilsulphur.com";
+const FACTORY_EVENT_TYPES = new Set(["pulveriser_production", "pulveriser_operator"]);
+
 // The Workspace mailbox the service account impersonates as the sender.
 // Must match the account authorised in Workspace Admin → Domain-wide Delegation.
 // Client ID 111764033913967609618 is delegated for this address.
@@ -262,9 +267,16 @@ export async function sendEmail(args: SendEmailArgs): Promise<void> {
   // same format. Applied here (server-side, by eventType) so it covers every
   // lab-qc page without each caller having to opt in. Deduplicated in case the
   // caller already listed it.
-  const recipients = args.eventType?.startsWith(LAB_QC_EVENT_PREFIX)
+  let recipients = args.eventType?.startsWith(LAB_QC_EVENT_PREFIX)
     ? Array.from(new Set([...baseRecipients, LAB_QC_EMAIL]))
     : baseRecipients;
+
+  // Production / Operator job-card submissions are additionally delivered to
+  // the factory mailbox, in the same format. Applied here (server-side, by
+  // eventType) so every caller is covered. Deduplicated.
+  if (args.eventType && FACTORY_EVENT_TYPES.has(args.eventType)) {
+    recipients = Array.from(new Set([...recipients, FACTORY_EMAIL]));
+  }
   let success   = false;
   let errorMsg: string | null = null;
 
