@@ -212,6 +212,13 @@ export default function BatchAnalysisPage() {
   const reportVariant: "final" | "inprocess" =
     partyCode && allPartyParamsFilled && !anyFail ? "final" : "inprocess";
 
+  // Party context for the notification email: the party's display name and the
+  // list of result-parameter keys it specs on. Empty when no party is selected
+  // (email + report then fall back to the full default parameter set).
+  const selectedPartyName =
+    parties.find(p => p.party_code === partyCode)?.customer_name || partyCode || null;
+  const partyResultKeys = partyCode ? specs.map(s => s.parameter) : [];
+
   // -------------------------------------------------------------------------
   // Resolve batch number on blur → find existing batch + analysis
   // -------------------------------------------------------------------------
@@ -424,6 +431,8 @@ export default function BatchAnalysisPage() {
           submittedByName: profile?.full_name ?? "—",
           submittedAt:     baUpdateISO,
           isUpdate:        true,
+          partyName:       selectedPartyName,
+          partyResultKeys: partyResultKeys,
         });
         void notifyEvent({
           eventType: "lab_qc_batch_analysis",
@@ -502,6 +511,8 @@ export default function BatchAnalysisPage() {
           submittedByName: profile?.full_name ?? "—",
           submittedAt:     baInsertISO,
           isUpdate:        false,
+          partyName:       selectedPartyName,
+          partyResultKeys: partyResultKeys,
         });
         void notifyEvent({
           eventType: "lab_qc_batch_analysis",

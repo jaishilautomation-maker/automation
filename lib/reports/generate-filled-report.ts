@@ -39,6 +39,7 @@ import {
   type ReportVariant,
   type ReportFieldMap,
 } from "@/lib/reports/template-map";
+import { paramsForParty } from "@/lib/reports/batch-analysis-params";
 
 const BUCKET = "report-templates";
 
@@ -89,20 +90,27 @@ export async function generateAndEmailReport(
 
   const productCode = record.__product_code as string | null;
   const basename = templateBasename(args.source, productCode, args.variant);
-  const { xlsx: xlsxName, json: jsonName } = templateFiles(basename);
 
-  // 2) Download the template + field-map in-memory.
-  const templateBuf = await downloadFile(supabase, xlsxName);
-  if (!templateBuf) {
-    return { ok: false, reason: `template not found in bucket: ${xlsxName}` };
+  // 2+3) Produce the populated workbook Buffer.
+  //   batch_analysis → DYNAMIC: build a party-filtered, results-only table in
+  //   code (no fixed template), so the report shows exactly the party's
+  //   parameters and nothing blank. Every other source keeps the fixed
+  //   named-range template path.
+  let filled: Buffer;
+  if (args.source === "batch_analysis") {
+    filled = await buildBatchAnalysisWorkbook(record, args.variant);
+  } else {
+    const { xlsx: xlsxName, json: jsonName } = templateFiles(basename);
+    const templateBuf = await downloadFile(supabase, xlsxName);
+    if (!templateBuf) {
+      return { ok: false, reason: `template not found in bucket: ${xlsxName}` };
+    }
+    const fieldMap = await loadFieldMap(supabase, jsonName);
+    if (!fieldMap) {
+      return { ok: false, reason: `field map not found in bucket: ${jsonName}` };
+    }
+    filled = await populateWorkbook(templateBuf, fieldMap, record);
   }
-  const fieldMap = await loadFieldMap(supabase, jsonName);
-  if (!fieldMap) {
-    return { ok: false, reason: `field map not found in bucket: ${jsonName}` };
-  }
-
-  // 3) Populate Named Ranges and export to a Buffer.
-  const filled = await populateWorkbook(templateBuf, fieldMap, record);
   const filename = `${basename}_${safeRef(record)}.xlsx`;
 
   const attachment: EmailAttachment = {
@@ -188,6 +196,126 @@ async function populateWorkbook(
 
   const out = await workbook.xlsx.writeBuffer();
   return Buffer.from(out as ArrayBuffer);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic batch-analysis workbook — built entirely in code (no fixed template).
+// Shows ONLY the selected party's calculated result parameters (or the full
+// default set when no party). Results only — raw inputs stay in the text email.
+// ---------------------------------------------------------------------------
+async function buildBatchAnalysisWorkbook(
+  record: FlatRecord,
+  variant?: ReportVariant
+): Promise<Buffer> {
+  const tr = (record.test_results ?? {}) as Record<string, unknown>;
+  const partyKeys = record.__party_result_keys as string[] | undefined;
+  const params = paramsForParty(partyKeys);
+  const isInprocess = variant === "inprocess";
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "JSCI Automation";
+  const ws = wb.addWorksheet(isInprocess ? "Finish Goods Testing" : "Final Inspection");
+  ws.columns = [{ width: 8 }, { width: 40 }, { width: 18 }, { width: 28 }];
+
+  const thin = { style: "thin" as const };
+  const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
+  const setBox = (cell: string) => { ws.getCell(cell).border = boxAll; };
+  const centre = (cell: string) => {
+    ws.getCell(cell).alignment = { horizontal: "center", vertical: "middle" };
+  };
+
+  // Header
+  ws.mergeCells("A1:D1");
+  ws.getCell("A1").value = "M/s JAISHIL SULPHUR & CHEMICAL INDUSTRIES";
+  ws.getCell("A1").font = { bold: true, size: 14 }; centre("A1");
+  ws.mergeCells("A2:D2");
+  ws.getCell("A2").value = "Plot No-A-20/1 MIDC, Phase-I, DOMBIVALI"; centre("A2");
+  ws.mergeCells("A3:D3");
+  ws.getCell("A3").value = isInprocess
+    ? "FINISH GOODS TESTING OF SULPHUR"
+    : "FINAL INSPECTION RECORD";
+  ws.getCell("A3").font = { bold: true, underline: true, size: 12 }; centre("A3");
+
+  // Meta block
+  const meta: [string, string][] = [
+    ["Date:", str(record.analysis_date)],
+    ["Item:", "SULPHUR POWDER - 99.5%"],
+    ["Sr No:", str(tr.sr_no)],
+    ["Job No:", str(tr.job_no)],
+    ["Shift:", str(tr.shift)],
+    ["Lot No:", str(tr.lot_no)],
+    ["Batch No:", str(record.batch_no)],
+    ["Customer:", str(record.customer_name) || "— (no party — full set)"],
+    ["Checked By:", str(record.chemist_name)],
+  ];
+  let r = 5;
+  for (const [label, value] of meta) {
+    ws.getCell(`A${r}`).value = label; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = value;
+    r++;
+  }
+
+  // Parameter table header
+  r++;
+  const H = r;
+  ws.getCell(`A${H}`).value = "SR NO";
+  ws.getCell(`B${H}`).value = "PARAMETER";
+  ws.getCell(`C${H}`).value = "OBSERVATION IN %";
+  ws.getCell(`D${H}`).value = "REMARKS";
+  for (const c of ["A", "B", "C", "D"]) {
+    ws.getCell(`${c}${H}`).font = { bold: true };
+    ws.getCell(`${c}${H}`).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    setBox(`${c}${H}`);
+  }
+  r++;
+
+  // One row per party (or full) result parameter — RESULT ONLY.
+  let sr = 1;
+  for (const p of params) {
+    const v = tr[p.resultKey];
+    const display =
+      v !== undefined && v !== null && v !== "" ? String(v) : "";
+    ws.getCell(`A${r}`).value = sr; centre(`A${r}`);
+    ws.getCell(`B${r}`).value = p.unit ? `${p.label} (${p.unit})` : p.label;
+    ws.getCell(`C${r}`).value = display;
+    for (const c of ["A", "B", "C", "D"]) setBox(`${c}${r}`);
+    r++; sr++;
+  }
+
+  // In-process: rework action + reasons/reassigned party.
+  if (isInprocess) {
+    r++;
+    ws.getCell(`A${r}`).value = "Confirmation / Non-Confirmation of Finish Goods";
+    ws.getCell(`A${r}`).font = { bold: true }; r++;
+    ws.getCell(`A${r}`).value = "Rework Action:"; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = str(record.rework_label); setBox(`B${r}`); r++;
+    ws.getCell(`A${r}`).value = "Reasons / Reassigned Party:"; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = str(record.remarks); setBox(`B${r}`); r++;
+  } else {
+    r++;
+    ws.getCell(`A${r}`).value = "Remarks:"; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = str(record.remarks); setBox(`B${r}`); r++;
+  }
+
+  // Footer
+  r++;
+  ws.getCell(`A${r}`).value = isInprocess
+    ? "Doc. No. JSCI/QC (Finish Goods Testing)"
+    : "Doc. No. JSCI/QC/16";
+  ws.getCell(`C${r}`).value = "Rev: 00";
+  ws.getCell(`D${r}`).value = "Authorised Sign.";
+
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
+}
+
+/** Coerce a record value to a display string (empty for null/undefined). */
+function str(v: unknown): string {
+  return v === null || v === undefined ? "" : String(v);
 }
 
 /**
@@ -371,6 +499,10 @@ async function loadBatchAnalysis(
     ? await getProduct(supabase, batch.product_id as string)
     : null;
   const party = await getPartyName(supabase, d.party_code as string);
+  // The party's result-parameter keys drive which rows appear in the report.
+  const partyResultKeys = d.party_code
+    ? await getPartySpecKeys(supabase, d.party_code as string)
+    : [];
   // Human-readable rework action for the in-process report.
   const reworkLabel =
     d.rework_action === "downgrade_grade_b" ? "Downgrade to Grade B"
@@ -378,6 +510,7 @@ async function loadBatchAnalysis(
     : null;
   return flatten(d, {
     rework_label: reworkLabel,
+    __party_result_keys: partyResultKeys,
     batch_no: batch?.batch_number ?? null,
     lot_no: batch?.lot_number ?? null,
     chemist_name: await getChemistName(supabase, d.chemist_id as string),
@@ -531,6 +664,19 @@ async function getPartyName(
     .eq("party_code", partyCode)
     .maybeSingle();
   return (data as { customer_name: string | null }) ?? null;
+}
+
+/** The result-parameter keys a party specs on (coa_customer_specs.parameter). */
+async function getPartySpecKeys(
+  supabase: SupabaseClient,
+  partyCode: string
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("coa_customer_specs")
+    .select("parameter")
+    .eq("party_code", partyCode)
+    .eq("is_active", true);
+  return ((data ?? []) as { parameter: string }[]).map((r) => r.parameter);
 }
 
 async function getChemistName(

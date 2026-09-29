@@ -5,6 +5,8 @@
 // All formatters are pure — no DB calls, no side effects.
 // =============================================================================
 
+import { paramsForParty, rawInputLabel } from "@/lib/reports/batch-analysis-params";
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -220,11 +222,61 @@ export interface BatchAnalysisEmailArgs {
   submittedByName: string;
   submittedAt:    string;
   isUpdate:       boolean;
+  /** Selected customer/party name (for the email header). Null = no party. */
+  partyName?:     string | null;
+  /**
+   * The party's result-parameter keys (coa_customer_specs.parameter). When set,
+   * the email shows only these parameters (raw inputs + calculated result).
+   * Null/empty → the full default parameter set.
+   */
+  partyResultKeys?: string[] | null;
 }
 
 export function buildBatchAnalysisEmail(d: BatchAnalysisEmailArgs): { subject: string; html: string } {
   const verb = d.isUpdate ? "Updated" : "Saved";
   const subject = `[JSCI A-20/1] Batch Analysis ${verb} — ${d.batchNumber}`;
+
+  const tr = d.testResults ?? {};
+  const params = paramsForParty(d.partyResultKeys);
+
+  // Build one block per parameter: the calculated result, then its raw inputs.
+  const paramBlocks = params
+    .map((p) => {
+      const resultVal = tr[p.resultKey];
+      const rawRows = p.rawInputs
+        .filter((k) => tr[k] !== undefined && tr[k] !== null && tr[k] !== "")
+        .map(
+          (k) => `
+          <tr>
+            <td style="padding:3px 8px 3px 20px;color:#888;font-size:12px">${rawInputLabel(k)}</td>
+            <td style="padding:3px 8px;font-size:12px">${String(tr[k])}</td>
+          </tr>`
+        )
+        .join("");
+      const unit = p.unit ? ` ${p.unit}` : "";
+      const resultDisplay =
+        resultVal !== undefined && resultVal !== null && resultVal !== ""
+          ? `${String(resultVal)}${unit}`
+          : "—";
+      return `
+        <tr style="border-top:1px solid #e0e0e0">
+          <td style="padding:6px 8px;font-weight:700">${p.label}</td>
+          <td style="padding:6px 8px;font-weight:700">${resultDisplay}</td>
+        </tr>
+        ${rawRows}`;
+    })
+    .join("");
+
+  const resultsTable = `
+    <table style="border-collapse:collapse;font-size:13px;width:100%;margin-top:8px">
+      <thead>
+        <tr style="background:#f5f5f5">
+          <th style="padding:5px 8px;text-align:left">Parameter</th>
+          <th style="padding:5px 8px;text-align:left">Result / Raw Input</th>
+        </tr>
+      </thead>
+      <tbody>${paramBlocks}</tbody>
+    </table>`;
 
   const html = emailWrap(
     `Batch Analysis: ${d.batchNumber}`,
@@ -234,13 +286,16 @@ export function buildBatchAnalysisEmail(d: BatchAnalysisEmailArgs): { subject: s
     ${table([
       ["Batch Number",   d.batchNumber],
       ["Analysis Date",  fmtDate(d.analysisDate)],
+      ["Customer / Party", d.partyName || "— (no party — full parameter set)"],
       ["Appearance",     d.appearance     || "—"],
       ["Remarks",        d.remarks        || "—"],
       ["Saved By",       d.submittedByName],
       ["Saved At",       fmtTs(d.submittedAt)],
     ])}
-    <h4 style="margin:20px 0 8px;font-size:14px">Test Results</h4>
-    ${testResultsTable(d.testResults)}`,
+    <h4 style="margin:20px 0 8px;font-size:14px">
+      Test Results${d.partyName ? ` — ${d.partyName} parameters` : ""}
+    </h4>
+    ${resultsTable}`,
   );
 
   return { subject, html };
