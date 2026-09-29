@@ -380,7 +380,51 @@ export function buildLabTrialEmail(d: LabTrialEmailArgs): { subject: string; htm
   return { subject, html };
 }
 
+// ---------------------------------------------------------------------------
+// 8. Packing Material QC
+// ---------------------------------------------------------------------------
+
+export interface PackingQcEmailArgs {
+  itemName:        string;
+  itemCode?:       string | null;
+  poWeight:        string | null;
+  actualWeight:    string | null;
+  correlation:     string | null;   // e.g. "99.85%"
+  dropTest:        string | null;    // "pass" | "fail" | null
+  strengthCheck:   string | null;
+  overall:         string;           // "pass" | "fail"
+  remarks:         string | null;
+  submittedByName: string;
+  submittedAt:     string;
+}
+
+export function buildPackingQcEmail(d: PackingQcEmailArgs): { subject: string; html: string } {
+  const item = d.itemCode ? `${d.itemName} (${d.itemCode})` : d.itemName;
+  const subject = `[JSCI A-20/1] Packing Material QC — ${item} · ${d.overall.toUpperCase()}`;
+
+  const html = emailWrap(
+    `Packing Material QC: ${item}`,
+    `<p style="margin:0 0 16px;color:#555;font-size:14px">
+      A packing material QC result has been recorded.
+    </p>
+    ${table([
+      ["Item",           item],
+      ["PO Weight",      d.poWeight     || "—"],
+      ["Actual Weight",  d.actualWeight || "—"],
+      ["Correlation",    d.correlation  || "—"],
+      ["Drop Test",      d.dropTest     ? d.dropTest.toUpperCase()      : "—"],
+      ["Strength Check", d.strengthCheck ? d.strengthCheck.toUpperCase() : "—"],
+      ["Overall Result", d.overall.toUpperCase()],
+      ["Remarks",        d.remarks      || "—"],
+      ["Saved By",       d.submittedByName],
+      ["Saved At",       fmtTs(d.submittedAt)],
+    ])}`,
+  );
+
+  return { subject, html };
+}
+
 // =============================================================================
 // NOTE: COA and PDF report email builders were removed along with the
-// report-generation / COA feature. The 7 QC entry-type builders above remain.
+// report-generation / COA feature. The 8 QC entry-type builders above remain.
 // =============================================================================

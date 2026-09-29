@@ -17,6 +17,8 @@ import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { notifyEvent } from "@/lib/notifications/notify-client";
+import { buildPackingQcEmail } from "@/lib/notifications/lab-qc-emails";
 
 interface PackingItem {
   id: string;
@@ -77,7 +79,7 @@ export default function PackingQcPage() {
 
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("packing_qc").insert({
+      const { data: newRow, error } = await supabase.from("packing_qc").insert({
         factory_id:            activeFactory.id,
         item_id:               itemId,
         po_weight:             poWeight ? parseFloat(poWeight) : null,
@@ -87,9 +89,34 @@ export default function PackingQcPage() {
         overall_result:        overall,
         tested_by:             user.id,
         remarks:               remarks.trim() || null,
-      });
+      }).select("id").single();
 
-      if (error) { showToast("Could not save: " + error.message, true); return; }
+      if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
+
+      // Fire-and-forget notification email (same pattern as other Lab QC pages).
+      {
+        const selectedItem = items.find(it => it.id === itemId);
+        const { subject, html } = buildPackingQcEmail({
+          itemName:        selectedItem?.item_name ?? "Packing item",
+          itemCode:        selectedItem?.item_code ?? null,
+          poWeight:        poWeight || null,
+          actualWeight:    actualWeight || null,
+          correlation:     correlation ? `${correlation}%` : null,
+          dropTest:        dropTest || null,
+          strengthCheck:   strengthCheck || null,
+          overall,
+          remarks:         remarks.trim() || null,
+          submittedByName: profile?.full_name ?? "—",
+          submittedAt:     new Date().toISOString(),
+        });
+        void notifyEvent({
+          eventType:   "lab_qc_packing_qc",
+          subject,
+          html,
+          factoryId:   activeFactory.id,
+          referenceId: newRow.id,
+        });
+      }
 
       showToast("Packing QC saved ✓");
       setItemId(""); setPoWeight(""); setActualWeight("");
