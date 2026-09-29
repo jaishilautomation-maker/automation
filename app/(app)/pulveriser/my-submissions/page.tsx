@@ -34,12 +34,14 @@ const SOURCE_LABEL: Record<Source, string> = {
 
 const JC_STATUS_LABEL: Record<PulveriserStatus, string> = {
   pending_stores: "Awaiting Stores (oil issue)",
+  pending_production: "Rejected — Production triage",
   pending: "Pending",
   submitted_for_qc: "Submitted for QC",
   finalized: "Finalized",
 };
 const JC_STATUS_BADGE: Record<PulveriserStatus, string> = {
   pending_stores: "warn",
+  pending_production: "warn",
   pending: "warn",
   submitted_for_qc: "warn",
   finalized: "ok",

@@ -22,8 +22,10 @@ import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import {
   PULVERISER_MACHINES,
+  groupByJobNumber,
   type PulveriserMachine,
   type VfdParameter,
+  type PulveriserJobCard,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
@@ -282,6 +284,8 @@ export default function PulveriserProductionPage() {
 
   return (
     <>
+      <TriageQueue />
+
       <div className="card">
         <h3>New Pulveriser Job Card</h3>
         <div className="field-hint" style={{ marginBottom: 12 }}>
@@ -439,5 +443,210 @@ export default function PulveriserProductionPage() {
         </button>
       </div>
     </>
+  );
+}
+
+// =============================================================================
+// TriageQueue — rejected job cards awaiting Production's decision.
+//
+// When Lab marks a card NOT OK, the DB trigger sets it to 'pending_production'
+// (migration 052/053). Production reviews the Lab remark here and decides:
+//   • Stores issue   → route back to 'pending_stores' (Stores re-issues oil)
+//   • Operator issue → route back to 'pending'        (Operator re-runs batch)
+// From there the card flows normally back to Lab for final approval.
+// =============================================================================
+
+interface RejectInfo {
+  remark: string | null;
+  rejected_stage: string | null;
+  reviewed_at: string;
+}
+
+function TriageQueue() {
+  const { user } = useAuth();
+  const { activeFactory } = useModule();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [cards, setCards]     = useState<PulveriserJobCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rejectInfo, setRejectInfo] = useState<Record<string, RejectInfo>>({});
+  const [routingId, setRoutingId]   = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!activeFactory) { setCards([]); setLoading(false); return; }
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .eq("status", "pending_production")
+      .eq("factory_id", activeFactory.id)
+      .order("updated_at", { ascending: false });
+    if (error) { showToast("Rejected cards load nahi hue: " + error.message, true); setLoading(false); return; }
+    const rows = (data ?? []) as PulveriserJobCard[];
+    setCards(rows);
+
+    // Pull the latest NOT-OK review for each card (Lab remark + suggested stage).
+    if (rows.length > 0) {
+      const ids = rows.map(r => r.id);
+      const { data: reviews } = await supabase
+        .from("pulveriser_job_card_reviews")
+        .select("job_card_id, result, remark, rejected_stage, reviewed_at")
+        .in("job_card_id", ids)
+        .eq("result", "not_ok")
+        .order("reviewed_at", { ascending: false });
+      const map: Record<string, RejectInfo> = {};
+      for (const rv of (reviews ?? []) as {
+        job_card_id: string; remark: string | null; rejected_stage: string | null; reviewed_at: string;
+      }[]) {
+        // First (most recent) wins because the query is ordered desc.
+        if (!map[rv.job_card_id]) {
+          map[rv.job_card_id] = {
+            remark: rv.remark, rejected_stage: rv.rejected_stage, reviewed_at: rv.reviewed_at,
+          };
+        }
+      }
+      setRejectInfo(map);
+    } else {
+      setRejectInfo({});
+    }
+    setLoading(false);
+  }, [supabase, activeFactory, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Route a rejected card onward. target:
+  //   'pending_stores' = Stores issue (re-issue oil)
+  //   'pending'        = Operator issue (operator re-runs)
+  const route = async (jc: PulveriserJobCard, target: "pending_stores" | "pending") => {
+    if (!user) { showToast("Session expired — sign in again.", true); return; }
+    if (target === "pending" && jc.oil_issued_kg == null) {
+      showToast("Operator ko bhejne se pehle oil issue hona zaroori hai. Stores ko bhejein.", true);
+      return;
+    }
+    setRoutingId(jc.id);
+    try {
+      const { data, error } = await supabase
+        .from("pulveriser_job_cards")
+        .update({ status: target })
+        .eq("id", jc.id)
+        .eq("status", "pending_production")
+        .select("id");
+      if (error) { showToast("Route nahi hua: " + error.message, true); return; }
+      if (!data || data.length === 0) {
+        showToast("Save blocked — check your access or the card status.", true);
+        return;
+      }
+      void notifyEvent({
+        eventType: "pulveriser_production_triage",
+        subject: `Rework routed: ${jc.job_number ?? jc.id} → ${target === "pending_stores" ? "Stores" : "Operator"}`,
+        html: `<p>Production routed rejected job card <b>${jc.job_number ?? jc.id}</b> `
+          + `(Party/CODE ${jc.party_code ?? "—"}) to `
+          + `<b>${target === "pending_stores" ? "Stores (re-issue oil)" : "Operator (re-run batch)"}</b>.</p>`,
+        factoryId: jc.factory_id,
+        referenceId: jc.id,
+        sheetData: {
+          type: "job_card",
+          row: {
+            job_number: jc.job_number ?? jc.id,
+            party_code: jc.party_code ?? null,
+            status:     target,
+          },
+        },
+      });
+      showToast(
+        target === "pending_stores"
+          ? "Sent to Stores — they will re-issue oil / material."
+          : "Sent to Operator — they will re-run the batch."
+      );
+      load();
+    } catch {
+      showToast("Network error — try again.", true);
+    } finally {
+      setRoutingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="card">
+        <h3>Rejected — Awaiting your decision</h3>
+        <div className="empty">Loading…</div>
+      </div>
+    );
+  }
+
+  // Nothing to triage — render nothing so the New Job Card form is front and centre.
+  if (cards.length === 0) return null;
+
+  return (
+    <div className="card" style={{ borderColor: "var(--warn)" }}>
+      <h3 style={{ color: "var(--warn)" }}>
+        Rejected by Lab — decide where each batch goes ({cards.length})
+      </h3>
+      <div className="field-hint" style={{ marginBottom: 12 }}>
+        Lab marked these NOT OK. Review the reason, then send each card to Stores
+        (oil / material issue) or Operator (re-run the batch). It goes back to Lab
+        for final approval afterwards.
+      </div>
+
+      {groupByJobNumber(cards).map(group => (
+        <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+            Job: {group.jobNumber ?? "—"}
+            {group.entries.length > 1 && ` · ${group.entries.length} entries`}
+          </div>
+          {group.entries.map((jc, i) => {
+            const info = rejectInfo[jc.id];
+            const suggested = info?.rejected_stage;
+            return (
+              <div key={jc.id} style={{
+                border: "1px solid var(--line)", borderRadius: 8,
+                padding: 12, marginBottom: 10,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                  Entry {i + 1} · {jc.machine_number ?? "—"} · Batch {jc.material_code ?? "—"}
+                  {" · "}Party/CODE {jc.party_code ?? "—"}
+                </div>
+
+                {info?.remark && (
+                  <div style={{
+                    marginTop: 8, padding: "8px 12px", borderRadius: 6,
+                    background: "var(--warn-soft)", fontSize: 13,
+                  }}>
+                    <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 2 }}>
+                      Lab remark ({new Date(info.reviewed_at).toLocaleString("en-IN")}):
+                    </div>
+                    <div style={{ fontWeight: 600, color: "var(--warn)" }}>{info.remark}</div>
+                  </div>
+                )}
+
+                {suggested && (
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 6 }}>
+                    Lab suggested: <b>{suggested === "production" ? "Production/Stores issue" : "Operator issue"}</b>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                  <button type="button" className="btn btn-secondary"
+                    style={{ width: "auto", padding: "8px 16px", marginTop: 0 }}
+                    disabled={routingId === jc.id}
+                    onClick={() => route(jc, "pending_stores")}>
+                    {routingId === jc.id ? "…" : "Send to Stores (oil / material issue)"}
+                  </button>
+                  <button type="button" className="btn btn-primary"
+                    style={{ width: "auto", padding: "8px 16px", marginTop: 0 }}
+                    disabled={routingId === jc.id || jc.oil_issued_kg == null}
+                    title={jc.oil_issued_kg == null ? "Oil not issued yet — send to Stores first" : undefined}
+                    onClick={() => route(jc, "pending")}>
+                    {routingId === jc.id ? "…" : "Send to Operator (re-run batch)"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
   );
 }

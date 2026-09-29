@@ -940,6 +940,7 @@ export interface PackingBreakdownReport {
  */
 export type PulveriserStatus =
   | "pending_stores"
+  | "pending_production"   // Lab rejected → Production triage (stores vs operator issue)
   | "pending"
   | "submitted_for_qc"
   | "finalized";

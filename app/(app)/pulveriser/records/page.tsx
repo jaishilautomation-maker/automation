@@ -20,6 +20,7 @@ import {
 
 const STATUS_BADGE: Record<PulveriserStatus, string> = {
   pending_stores: "warn",
+  pending_production: "warn",
   pending: "warn",
   submitted_for_qc: "warn",
   finalized: "ok",
@@ -28,12 +29,14 @@ const STATUS_BADGE: Record<PulveriserStatus, string> = {
 // English / Hindi label sets. Operators see Hindi; everyone else English.
 const STATUS_LABEL_EN: Record<PulveriserStatus, string> = {
   pending_stores: "Awaiting Stores (oil issue)",
+  pending_production: "Rejected — Production triage",
   pending: "Pending",
   submitted_for_qc: "Submitted for QC",
   finalized: "Finalized",
 };
 const STATUS_LABEL_HI: Record<PulveriserStatus, string> = {
   pending_stores: "स्टोर्स की प्रतीक्षा (तेल जारी)",
+  pending_production: "अस्वीकृत — प्रोडक्शन निर्णय",
   pending: "लंबित",
   submitted_for_qc: "QC के लिए भेजा गया",
   finalized: "अंतिम रूप दिया गया",

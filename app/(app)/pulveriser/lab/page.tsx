@@ -5,9 +5,11 @@
 //
 // Lab reviews a 'submitted_for_qc' card (read-only view of ALL fields):
 //   OK     → inserts review(result='ok');  DB trigger sets card 'finalized'.
-//   NOT OK → inserts review(result='not_ok'); DB trigger sets card 'pending'
-//            (rework). Optionally flag rejected_stage='production' to reopen
-//            Production's fields instead of the default (operator).
+//   NOT OK → inserts review(result='not_ok'); DB trigger sets card
+//            'pending_production' (migration 052/053). Production then triages
+//            the reject and routes it to Stores or Operator, and it comes back
+//            here for final approval. The rejected_stage flag ('production' vs
+//            'operator') is a hint shown to Production to pre-select its route.
 //
 // Every review is appended to pulveriser_job_card_reviews — full history is
 // kept and shown if the card has been through rework before.
@@ -122,7 +124,7 @@ export default function PulveriserLabPage() {
           row: {
             job_number:  active.job_number ?? active.id,
             party_code:  active.party_code ?? null,
-            status:      result === "ok" ? "finalized" : "pending_stores",
+            status:      result === "ok" ? "finalized" : "pending_production",
             lab_result:  result,
             lab_remark:  remark.trim() || null,
             lab_by:      profile?.full_name ?? null,
@@ -133,7 +135,7 @@ export default function PulveriserLabPage() {
 
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."
-        : "Marked NOT OK — sent back to Stores for a full rework cycle.");
+        : "Marked NOT OK — sent to Production to decide the rework route.");
       goBack();
       loadPending();
     } catch (e: unknown) {
@@ -325,7 +327,12 @@ export default function PulveriserLabPage() {
         <div className="checkline" style={{ marginTop: 8 }}>
           <input type="checkbox" checked={reopenProduction}
             onChange={e => setReopenProduction(e.target.checked)} />
-          <span>NOT OK is about Production&apos;s fields (reopen Production instead of Operator)</span>
+          <span>This looks like a Production / Stores issue (hint for Production&apos;s triage)</span>
+        </div>
+        <div className="field-hint" style={{ marginTop: 6 }}>
+          NOT OK goes to Production first. They decide whether it&apos;s a Stores
+          issue or an Operator issue and route the batch accordingly; it returns
+          here for final approval.
         </div>
       </div>
 
@@ -337,7 +344,7 @@ export default function PulveriserLabPage() {
         <button className="btn btn-ghost" type="button"
           style={{ color: "var(--warn)" }}
           disabled={submitting} onClick={() => submitReview("not_ok")}>
-          {submitting ? "…" : "NOT OK — Send back"}
+          {submitting ? "…" : "NOT OK — Send to Production"}
         </button>
       </div>
     </>
