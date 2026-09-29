@@ -164,7 +164,7 @@ export default function PulveriserStoresPage() {
       <div className="readonly-block">
         <b>{active.machine_number}</b> · {active.job_date ?? "—"} · {active.shift ?? "—"} shift<br />
         <b>Batch:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · Job: {active.job_number ?? "—"}<br />
-        <b>Planned production:</b> {active.planned_production_mt ?? "—"} MT<br />
+        <b>Planned production:</b> {active.planned_production_mt != null ? `${active.planned_production_mt * 1000} kg` : "—"}<br />
         <b>Oil required (auto):</b>{" "}
         {active.oil_required_kg != null ? `${active.oil_required_kg} kg` : "NA (no oil standard for this code)"}
       </div>

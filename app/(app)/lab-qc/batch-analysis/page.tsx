@@ -72,6 +72,9 @@ export default function BatchAnalysisPage() {
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
   const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().slice(0, 10));
+  // Manufacturing date — defaults to today, chemist can override if the batch
+  // was produced on a different day than the analysis.
+  const [mfgDate, setMfgDate]           = useState(new Date().toISOString().slice(0, 10));
   // JSCI/QC/16 Final Inspection header fields (stored in test_results JSONB).
   const [jobNo, setJobNo]               = useState("");
   const [srNo, setSrNo]                 = useState("");
@@ -280,6 +283,7 @@ export default function BatchAnalysisPage() {
           const trh = (existing.test_results ?? {}) as Record<string, unknown>;
           setJobNo(trh.job_no != null ? String(trh.job_no) : "");
           setSrNo(trh.sr_no != null ? String(trh.sr_no) : "");
+          setMfgDate(trh.mfg_date != null ? String(trh.mfg_date) : new Date().toISOString().slice(0, 10));
           setShift(trh.shift != null ? String(trh.shift) : "");
           setLotNo(trh.lot_no != null ? String(trh.lot_no) : "");
         }
@@ -312,6 +316,7 @@ export default function BatchAnalysisPage() {
     setReworkAction("");
     setJobNo("");
     setSrNo("");
+    setMfgDate(new Date().toISOString().slice(0, 10));
     setShift("");
     setLotNo("");
   };
@@ -399,6 +404,7 @@ export default function BatchAnalysisPage() {
       if (srNo.trim())   testResults["sr_no"]  = srNo.trim();
       if (shift)         testResults["shift"]  = shift;
       if (lotNo.trim())  testResults["lot_no"] = lotNo.trim();
+      if (mfgDate)       testResults["mfg_date"] = mfgDate;
 
       const appearanceVal = values["colour_appearance"] ?? null;
       const appearanceOkRaw = values["appearance_ok"];
@@ -654,6 +660,14 @@ export default function BatchAnalysisPage() {
             </div>
             <div className="row2">
               <div>
+                <label>Manufacturing Date *</label>
+                <input
+                  type="date"
+                  value={mfgDate}
+                  onChange={e => setMfgDate(e.target.value)}
+                />
+              </div>
+              <div>
                 <label>Analysis Date *</label>
                 <input
                   type="date"
@@ -661,6 +675,8 @@ export default function BatchAnalysisPage() {
                   onChange={e => setAnalysisDate(e.target.value)}
                 />
               </div>
+            </div>
+            <div className="row2">
               <div>
                 <label>Customer / Party</label>
                 <select value={partyCode} onChange={e => setPartyCode(e.target.value)}>

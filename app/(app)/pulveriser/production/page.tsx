@@ -3,7 +3,7 @@
 // =============================================================================
 // Pulveriser Job Card — Production (Form JSCI/PROD/02)
 //
-// Production creates 1–3 ENTRIES under a single shared JOB NUMBER. Each entry
+// Production creates 1–6 ENTRIES under a single shared JOB NUMBER. Each entry
 // is its own pulveriser_job_cards row (Option A) with its own Party/CODE and a
 // full set of details (batch number + production plan + sulphur + oil), filled
 // in sequence. On "Create", one row per entry is inserted, all sharing the same
@@ -28,7 +28,11 @@ import {
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
-const MAX_ENTRIES = 3;
+const MAX_ENTRIES = 6;
+
+// Sulphur source options for the RM-entry dropdown. Kept as a small in-code
+// list for now (per 29-09-26 meeting); can move to a master table later.
+const SULPHUR_SOURCES = ["Reliance", "HPCL", "Other"] as const;
 
 // Preferred display order for the Party/CODE dropdown (matches vfd_parameters
 // party_code labels after migration 043). Codes not listed here fall to the end,
@@ -61,7 +65,7 @@ interface Entry {
   key: string;
   partyCode: string;
   batchNumber: string;      // was माल का कोड नंबर — stored in material_code
-  plannedMt: string;
+  plannedKg: string;        // entered in KG; converted to MT (÷1000) on save
   sulSupplier: string;
   sulLot: string;
   sulEmptyDate: string;
@@ -73,7 +77,7 @@ interface Entry {
 function blankEntry(): Entry {
   return {
     key: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    partyCode: "", batchNumber: "", plannedMt: "",
+    partyCode: "", batchNumber: "", plannedKg: "",
     sulSupplier: "", sulLot: "", sulEmptyDate: "",
     oilSupplier: "", oilBatch: "", oilQty: "",
   };
@@ -91,7 +95,7 @@ export default function PulveriserProductionPage() {
   const [shift, setShift]         = useState<"Day" | "Night" | "">("");
   const [jobDate, setJobDate]     = useState(todayISO());
 
-  // 1–3 entries
+  // 1–6 entries
   const [entries, setEntries]     = useState<Entry[]>([blankEntry()]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -110,15 +114,34 @@ export default function PulveriserProductionPage() {
 
   useEffect(() => { loadParams(); }, [loadParams]);
 
-  const oilStdFor = (partyCode: string): number | null =>
-    millParams.find(p => p.party_code === partyCode)?.oil_feed_std ?? null;
+  // Party codes that run without oil dosing. If their mill row ever has a NULL
+  // oil_feed_std (data drift after the 043 renames), treat it as 0 so oil
+  // required computes to a real 0 kg instead of showing "NA". Migration 051
+  // fixes the DB side; this keeps the UI correct even before it is applied.
+  const ZERO_OIL_CODES = new Set<string>([
+    "Shakti", "Rubber", "Ceat 108", "Plain-2615", "Plain Lanxess", "Sulphur Powder",
+  ]);
+
+  const oilStdFor = (partyCode: string): number | null => {
+    const std = millParams.find(p => p.party_code === partyCode)?.oil_feed_std ?? null;
+    if (std === null && ZERO_OIL_CODES.has(partyCode)) return 0;
+    return std;
+  };
   const paramFor = (partyCode: string): VfdParameter | null =>
     millParams.find(p => p.party_code === partyCode) ?? null;
 
+  // Planned production is entered in KG. The DB column planned_production_mt is
+  // still in MT (no schema change), so convert KG → MT (÷1000) at the boundary.
+  const plannedMtFor = (e: Entry): number | null => {
+    const kg = e.plannedKg.trim() === "" ? null : Number(e.plannedKg);
+    return kg !== null && Number.isFinite(kg) ? kg / 1000 : null;
+  };
+
   const oilRequiredFor = (e: Entry): number | null => {
     const std = oilStdFor(e.partyCode);
-    const mt = e.plannedMt.trim() === "" ? null : Number(e.plannedMt);
-    return mt !== null && std !== null && Number.isFinite(mt) ? mt * 1000 * std : null;
+    const kg = e.plannedKg.trim() === "" ? null : Number(e.plannedKg);
+    // oil required (kg) = planned KG × oil_feed_std  (== MT×1000×std)
+    return kg !== null && std !== null && Number.isFinite(kg) ? kg * std : null;
   };
 
   const updateEntry = (key: string, patch: Partial<Entry>) =>
@@ -163,7 +186,7 @@ export default function PulveriserProductionPage() {
     try {
       const nowISO = new Date().toISOString();
       const rows = entries.map(e => {
-        const mt = e.plannedMt.trim() === "" ? null : Number(e.plannedMt);
+        const mt = plannedMtFor(e);
         return {
           factory_id:            activeFactory.id,
           status:                "pending_stores" as const,
@@ -207,7 +230,7 @@ export default function PulveriserProductionPage() {
           machineNumber:       machine,
           materialCode:        e.batchNumber.trim(),
           partyCode:           e.partyCode,
-          plannedProductionMt: e.plannedMt.trim() === "" ? null : Number(e.plannedMt),
+          plannedProductionMt: plannedMtFor(e),
           oilRequiredKg:       oilRequiredFor(e),
           sulphurSupplier:     e.sulSupplier.trim()  || null,
           sulphurLotNumber:    e.sulLot.trim()       || null,
@@ -234,7 +257,7 @@ export default function PulveriserProductionPage() {
               machine_number:        machine,
               material_code:         e.batchNumber.trim(),
               status:                "pending_stores",
-              planned_production_mt: e.plannedMt.trim() === "" ? null : Number(e.plannedMt),
+              planned_production_mt: plannedMtFor(e),
               oil_required_kg:       oilRequiredFor(e),
               sulphur_supplier:      e.sulSupplier.trim()  || null,
               sulphur_lot_number:    e.sulLot.trim()       || null,
@@ -353,10 +376,10 @@ export default function PulveriserProductionPage() {
             )}
 
             {/* Production plan */}
-            <label style={{ marginTop: 12 }}>Planned Production (MT)</label>
-            <input type="number" min="0" step="0.001" placeholder="0"
-              value={e.plannedMt}
-              onChange={ev => updateEntry(e.key, { plannedMt: ev.target.value })} />
+            <label style={{ marginTop: 12 }}>Planned Production (kg)</label>
+            <input type="number" min="0" step="1" placeholder="0"
+              value={e.plannedKg}
+              onChange={ev => updateEntry(e.key, { plannedKg: ev.target.value })} />
             <div className="field-hint" style={{ marginTop: 8 }}>
               Oil required (auto):{" "}
               {oilReq !== null ? (
@@ -372,9 +395,12 @@ export default function PulveriserProductionPage() {
             <div style={{ marginTop: 14, fontWeight: 700, fontSize: 13 }}>Sulphur</div>
             <div className="row2">
               <div>
-                <label>Supplier</label>
-                <input type="text" value={e.sulSupplier}
-                  onChange={ev => updateEntry(e.key, { sulSupplier: ev.target.value })} />
+                <label>Source</label>
+                <select value={e.sulSupplier}
+                  onChange={ev => updateEntry(e.key, { sulSupplier: ev.target.value })}>
+                  <option value="">-- Select source --</option>
+                  {SULPHUR_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
               <div>
                 <label>Lot Number</label>
@@ -382,7 +408,7 @@ export default function PulveriserProductionPage() {
                   onChange={ev => updateEntry(e.key, { sulLot: ev.target.value })} />
               </div>
             </div>
-            <label>खाली करने की तारीख (Empty Date)</label>
+            <label>Date RM was received</label>
             <input type="date" value={e.sulEmptyDate}
               onChange={ev => updateEntry(e.key, { sulEmptyDate: ev.target.value })} />
 
@@ -400,9 +426,8 @@ export default function PulveriserProductionPage() {
                   onChange={ev => updateEntry(e.key, { oilBatch: ev.target.value })} />
               </div>
             </div>
-            <label>Oil Quantity</label>
-            <input type="number" min="0" step="0.001" placeholder="0" value={e.oilQty}
-              onChange={ev => updateEntry(e.key, { oilQty: ev.target.value })} />
+            {/* Oil Quantity input removed (29-09-26): oil required is
+                auto-calculated from Planned Production × oil standard. */}
           </div>
         );
       })}

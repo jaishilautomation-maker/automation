@@ -66,6 +66,16 @@ const CATEGORY_LABEL: Record<StockItemCategory, string> = {
 
 type Tab = "job_cards" | "received" | "supplied" | "daily_prod" | "daily_dispatch" | "packing_material" | "finished_goods" | "ball_mill" | "batch_wise" | "oil_consumption" | "approval" | "ledger" | "issue" | "prn" | "dispatch";
 
+// One-click "Create Issue Slip" carries this context from a Job Card into the
+// Issue Slip tab so the form opens pre-filled (no re-typing). matchItemName is
+// used to auto-select the matching stock item (e.g. an oil item by name).
+interface SlipPrefill {
+ matchItemName: string | null;  // stock item name to try to auto-select
+ qtyRequired: number | null;    // oil required (kg) from the job card
+ usedFor: string;               // e.g. "Job JB-0451 / Ceat 108 / Batch B-1024"
+ remark: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers -- plain ASCII only
 // ---------------------------------------------------------------------------
@@ -90,6 +100,15 @@ function nilText(s: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 export default function StoresPage() {
  const [tab, setTab] = useState<Tab>("job_cards");
+ // Pending prefill for the Issue Slip tab (set by the one-click action on a
+ // Job Card). Consumed + cleared by IssueSlipSection on mount.
+ const [slipPrefill, setSlipPrefill] = useState<SlipPrefill | null>(null);
+
+ // One-click: stash the job-card context and jump straight to the Issue Slip.
+ const createSlipFromJobCard = (prefill: SlipPrefill) => {
+  setSlipPrefill(prefill);
+  setTab("issue");
+ };
 
  const TABS: { id: Tab; label: string }[] = [
   { id: "job_cards",        label: "Job Cards" },
@@ -132,7 +151,7 @@ export default function StoresPage() {
    ))}
    </div>
 
-   {tab === "job_cards"        && <JobCardsSection onGoToTab={setTab} />}
+   {tab === "job_cards"        && <JobCardsSection onGoToTab={setTab} onCreateSlip={createSlipFromJobCard} />}
    {tab === "received"         && <ReceivedSection />}
    {tab === "supplied"         && <SuppliedSection />}
    {tab === "daily_prod"   && <DailyProductionSection />}
@@ -144,7 +163,7 @@ export default function StoresPage() {
    {tab === "oil_consumption" && <OilConsumptionSection />}
    {tab === "approval"       && <ApprovalSection />}
    {tab === "ledger"          && <StockLedgerSection />}
-   {tab === "issue"   && <IssueSlipSection />}
+   {tab === "issue"   && <IssueSlipSection prefill={slipPrefill} onPrefillConsumed={() => setSlipPrefill(null)} />}
    {tab === "prn"    && <PrnSection />}
    {tab === "dispatch"  && <DispatchSection />}
   </div>
@@ -163,7 +182,10 @@ export default function StoresPage() {
 //
 // Status filter: Pending Stores (action needed) | All Recent
 // =============================================================================
-function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
+function JobCardsSection({ onGoToTab, onCreateSlip }: {
+ onGoToTab: (t: Tab) => void;
+ onCreateSlip: (prefill: SlipPrefill) => void;
+}) {
  const { user, profile } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
@@ -444,7 +466,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
       <div><b>Shift:</b> {jc.shift ?? "N/A"}</div>
       <div><b>Batch No.:</b> {jc.material_code ?? "N/A"}</div>
       <div><b>Party / CODE:</b> {jc.party_code ?? "N/A"}</div>
-      <div><b>Planned Production:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</div>
+      <div><b>Planned Production:</b> {jc.planned_production_mt != null ? (jc.planned_production_mt * 1000) + " kg" : "N/A"}</div>
       <div>
        <b>Oil Required:</b>{" "}
        <span style={{ fontWeight: 700, color: "var(--clay)" }}>
@@ -473,7 +495,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
       <h3>Operator Details</h3>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
        gap: "6px 16px", fontSize: 13, lineHeight: 1.8 }}>
-       <div><b>Actual Production:</b> {jc.actual_production_mt} MT</div>
+       <div><b>Actual Production:</b> {jc.actual_production_mt != null ? (jc.actual_production_mt * 1000) + " kg" : "N/A"}</div>
        <div><b>Expected Oil:</b> {jc.expected_oil_kg ?? "N/A"} kg</div>
        <div><b>Actual Oil Consumption:</b> {jc.actual_oil_consumption_kg ?? "N/A"} kg</div>
        <div><b>Oil Variance:</b> {jc.oil_variance_kg ?? "N/A"} kg</div>
@@ -601,7 +623,20 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       <button type="button" className="btn btn-secondary"
        style={{ width: "auto", padding: "10px 18px", marginTop: 0 }}
-       onClick={() => { closeCard(); onGoToTab("issue"); }}>
+       onClick={() => {
+        const usedForParts = [
+         jc.job_number ? `Job ${jc.job_number}` : null,
+         jc.party_code ?? null,
+         jc.material_code ? `Batch ${jc.material_code}` : null,
+        ].filter(Boolean);
+        onCreateSlip({
+         matchItemName: jc.oil_supplier ?? null,
+         qtyRequired: jc.oil_required_kg ?? null,
+         usedFor: usedForParts.join(" / "),
+         remark: "",
+        });
+        closeCard();
+       }}>
        Create Issue Slip
       </button>
       <button type="button" className="btn btn-secondary"
@@ -680,7 +715,7 @@ function JobCardsSection({ onGoToTab }: { onGoToTab: (t: Tab) => void }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" }}>
            <span><b>Batch:</b> {jc.material_code ?? "N/A"}</span>
            <span><b>Party/Code:</b> {jc.party_code ?? "N/A"}</span>
-           <span><b>Planned:</b> {jc.planned_production_mt != null ? jc.planned_production_mt + " MT" : "N/A"}</span>
+           <span><b>Planned:</b> {jc.planned_production_mt != null ? (jc.planned_production_mt * 1000) + " kg" : "N/A"}</span>
            <span>
             <b>Oil Required:</b>{" "}
             <span style={{ color: "var(--clay)", fontWeight: 700 }}>
@@ -1831,7 +1866,7 @@ function DailyProductionSection() {
    } else {
     const { error } = await supabase.from("stores_stock_ledger").insert(ledgerRow);
     if (error) { showToast("Save failed: " + error.message, true); return; }
-    showToast("Saved -- Batch " + payload.batch_no + " | " + payload.product + " | " + (payload.actual_mt?.toFixed(3) ?? "?") + " MT");
+    showToast("Saved -- Batch " + payload.batch_no + " | " + payload.product + " | " + (payload.actual_mt != null ? (payload.actual_mt * 1000).toFixed(0) : "?") + " kg");
    }
    clearFetch();
    setRecordDate(today());
@@ -1940,10 +1975,10 @@ function DailyProductionSection() {
          {fetched.total_bags} bags
         </span>
        </div>
-       <div><b>Planned Production:</b> {fetched.planned_mt != null ? fetched.planned_mt + " MT" : "N/A"}</div>
+       <div><b>Planned Production:</b> {fetched.planned_mt != null ? (fetched.planned_mt * 1000) + " kg" : "N/A"}</div>
        <div><b>Actual Production:</b>{" "}
         <span style={{ fontWeight: 700, color: "var(--ok)" }}>
-         {fetched.actual_mt != null ? fetched.actual_mt + " MT" : "N/A"}
+         {fetched.actual_mt != null ? (fetched.actual_mt * 1000) + " kg" : "N/A"}
         </span>
        </div>
        <div><b>Oil Issued:</b> {fetched.oil_issued_kg != null ? fetched.oil_issued_kg + " kg" : "N/A"}</div>
@@ -2052,7 +2087,7 @@ function DailyProductionSection() {
            <th>Machine</th>
            <th>Shift</th>
            <th style={{ textAlign: "right" }}>Bags</th>
-           <th style={{ textAlign: "right" }}>Actual MT</th>
+           <th style={{ textAlign: "right" }}>Actual kg</th>
            <th>Remark</th>
            <th></th>
           </tr>
@@ -2071,7 +2106,7 @@ function DailyProductionSection() {
                 .join(" | ")}
               </td>
               <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600 }}>
-               {legacyMt.toFixed(3)} MT
+               {(legacyMt * 1000).toFixed(0)} kg
               </td>
               <td>
                <span style={{
@@ -2092,7 +2127,7 @@ function DailyProductionSection() {
              <td style={{ fontSize: 12 }}>{row.shift ?? "—"}</td>
              <td style={{ textAlign: "right", fontWeight: 600 }}>{row.total_bags}</td>
              <td style={{ textAlign: "right", fontWeight: 700, color: "var(--ok)" }}>
-              {row.actual_mt != null ? row.actual_mt.toFixed(3) : "—"}
+              {row.actual_mt != null ? (row.actual_mt * 1000).toFixed(0) : "—"}
              </td>
              <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>{row.store_remark || "—"}</td>
              <td>
@@ -5727,7 +5762,10 @@ interface SlipPayload {
  item_id: string;
 }
 
-function IssueSlipSection() {
+function IssueSlipSection({ prefill, onPrefillConsumed }: {
+ prefill?: SlipPrefill | null;
+ onPrefillConsumed?: () => void;
+} = {}) {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
@@ -5796,6 +5834,28 @@ function IssueSlipSection() {
    .limit(1).maybeSingle();
   setCurrentBalance((data as { closing_balance: number } | null)?.closing_balance ?? 0);
  };
+
+ // Apply a one-click prefill coming from a Job Card. Runs once items are loaded
+ // so we can auto-select a matching stock item by name. Consumed immediately so
+ // it doesn't re-apply while the user edits the form.
+ useEffect(() => {
+  if (!prefill || loading) return;
+  if (prefill.qtyRequired != null) {
+   setQtyRequired(String(prefill.qtyRequired));
+   setQtyIssued(String(prefill.qtyRequired));
+  }
+  if (prefill.usedFor) setUsedFor(prefill.usedFor);
+  if (prefill.remark)  setRemark(prefill.remark);
+  if (prefill.matchItemName) {
+   const needle = prefill.matchItemName.trim().toLowerCase();
+   const match = items.find(i =>
+    i.item_name.toLowerCase().includes(needle) || needle.includes(i.item_name.toLowerCase())
+   );
+   if (match) void handleItemChange(match.id);
+  }
+  onPrefillConsumed?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [prefill, loading, items]);
 
  const selectedItem  = items.find(i => i.id === selectedItemId);
  const qtyIssuedNum  = Number(qtyIssued);

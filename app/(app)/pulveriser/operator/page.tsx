@@ -127,7 +127,9 @@ export default function PulveriserOperatorPage() {
   const [submitting, setSubmitting]   = useState(false);
 
   // Operator-owned fields
-  const [actualMt, setActualMt]           = useState("");
+  // actualKg holds KG (as entered). DB column actual_production_mt stays in MT,
+  // so we convert KG → MT (÷1000) on save and MT → KG (×1000) when pre-filling.
+  const [actualKg, setActualKg]           = useState("");
   const [classifierVfd, setClassifierVfd] = useState("");
   const [blowerIn, setBlowerIn]           = useState("");
   const [blowerOut, setBlowerOut]         = useState("");
@@ -168,7 +170,7 @@ export default function PulveriserOperatorPage() {
   const openCard = async (jc: PulveriserJobCard) => {
     setActive(jc);
     // Pre-fill operator fields (may already hold values from a prior rework)
-    setActualMt(jc.actual_production_mt?.toString() ?? "");
+    setActualKg(jc.actual_production_mt != null ? (jc.actual_production_mt * 1000).toString() : "");
     setClassifierVfd(jc.classifier_vfd ?? "");
     setBlowerIn(jc.blower_inlet_valve ?? "");
     setBlowerOut(jc.blower_outlet_valve ?? "");
@@ -247,7 +249,7 @@ export default function PulveriserOperatorPage() {
 
   const goBack = () => {
     setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]);
-    setVfdParam(null); setActualMt(""); setRejectionHistory([]);
+    setVfdParam(null); setActualKg(""); setRejectionHistory([]);
   };
 
   // Classifier VFD mismatch flag — reference only, never blocks submission.
@@ -344,8 +346,10 @@ export default function PulveriserOperatorPage() {
     workDetails.trim() !== "";
 
   const persistOperatorFields = async (jcId: string, submit: boolean) => {
+    // Operator enters KG; store MT (÷1000). Reused for the email/sheet payloads.
+    const actualMtValue = actualKg.trim() === "" ? null : Number(actualKg) / 1000;
     const payload: Record<string, unknown> = {
-      actual_production_mt: actualMt.trim() === "" ? null : Number(actualMt),
+      actual_production_mt: actualMtValue,
       classifier_vfd:      classifierVfd.trim() || null,
       blower_inlet_valve:  blowerIn.trim() || null,
       blower_outlet_valve: blowerOut.trim() || null,
@@ -426,6 +430,8 @@ export default function PulveriserOperatorPage() {
       // Fire-and-forget email only on full submit (not on "save progress")
       if (submit) {
         const nowISO = new Date().toISOString();
+        // Fallback MT value (operator enters KG → store MT) if the re-read fails.
+        const actualMtValue = actualKg.trim() === "" ? null : Number(actualKg) / 1000;
         // Re-read the updated card fields for oil consumption values
         const { data: updatedCard } = await supabase
           .from("pulveriser_job_cards")
@@ -435,7 +441,7 @@ export default function PulveriserOperatorPage() {
         const { subject, html } = buildOperatorEmail({
           jobNumber:                 active.job_number,
           materialCode:              active.material_code,
-          actualProductionMt:        updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
+          actualProductionMt:        updatedCard?.actual_production_mt ?? actualMtValue,
           expectedOilKg:             updatedCard?.expected_oil_kg ?? null,
           actualOilConsumptionKg:    updatedCard?.actual_oil_consumption_kg ?? null,
           oilVarianceKg:             updatedCard?.oil_variance_kg ?? null,
@@ -466,7 +472,7 @@ export default function PulveriserOperatorPage() {
               job_number:                   active.job_number ?? active.id,
               party_code:                   active.party_code ?? null,
               status:                       "submitted_for_qc",
-              actual_production_mt:         updatedCard?.actual_production_mt ?? (actualMt.trim() === "" ? null : Number(actualMt)),
+              actual_production_mt:         updatedCard?.actual_production_mt ?? actualMtValue,
               expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
               actual_oil_consumption_kg:    updatedCard?.actual_oil_consumption_kg ?? null,
               oil_variance_kg:              updatedCard?.oil_variance_kg ?? null,
@@ -677,9 +683,9 @@ export default function PulveriserOperatorPage() {
       {/* Actual production — drives all oil-consumption calculations (DB trigger) */}
       <div className="card">
         <h3>वास्तविक उत्पादन</h3>
-        <label>वास्तविक उत्पादन (MT)</label>
-        <input type="number" min="0" step="0.001" placeholder="0"
-          value={actualMt} onChange={e => setActualMt(e.target.value)} />
+        <label>वास्तविक उत्पादन (kg)</label>
+        <input type="number" min="0" step="1" placeholder="0"
+          value={actualKg} onChange={e => setActualKg(e.target.value)} />
         <div className="field-hint" style={{ marginTop: 6 }}>
           तेल की खपत के आँकड़े इसी से अपने-आप गणना होते हैं (सहेजने पर)।
         </div>

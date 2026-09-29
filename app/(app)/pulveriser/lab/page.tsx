@@ -229,7 +229,7 @@ export default function PulveriserLabPage() {
         <F label="Oil Supplier" value={active.oil_supplier} />
         <F label="Oil Batch" value={active.oil_batch_number} />
         <F label="Oil Quantity" value={active.oil_quantity} />
-        <F label="Planned Production (MT)" value={active.planned_production_mt} />
+        <F label="Planned Production (kg)" value={active.planned_production_mt != null ? active.planned_production_mt * 1000 : null} />
         <F label="Oil Required (kg)" value={active.oil_required_kg} />
         {(active.production_at || active.oil_issued_at || active.operator_submitted_at) && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
@@ -270,7 +270,7 @@ export default function PulveriserLabPage() {
       <div className="card">
         <h3>Stores &amp; oil consumption</h3>
         <F label="Oil Issued (kg)" value={active.oil_issued_kg} />
-        <F label="Actual Production (MT)" value={active.actual_production_mt} />
+        <F label="Actual Production (kg)" value={active.actual_production_mt != null ? active.actual_production_mt * 1000 : null} />
         <F label="Expected Oil (kg)" value={active.expected_oil_kg} />
         <F label="Actual Oil Consumption (kg)" value={active.actual_oil_consumption_kg} />
         <F label="Oil Variance (kg)" value={active.oil_variance_kg} />

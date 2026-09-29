@@ -218,16 +218,24 @@ async function buildBatchAnalysisWorkbook(
   ws.columns = [{ width: 8 }, { width: 40 }, { width: 18 }, { width: 28 }];
 
   const thin = { style: "thin" as const };
+  const medium = { style: "medium" as const };
   const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
   const setBox = (cell: string) => { ws.getCell(cell).border = boxAll; };
   const centre = (cell: string) => {
     ws.getCell(cell).alignment = { horizontal: "center", vertical: "middle" };
   };
+  // Shared fills for a cleaner, printable look.
+  const HEADER_FILL = "FFEFE7DA"; // warm sand — company header band
+  const TABLE_HEAD_FILL = "FFE4EFE3"; // soft green — parameter table header
+  const fill = (cell: string, argb: string) => {
+    ws.getCell(cell).fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+  };
 
-  // Header
+  // Header band
   ws.mergeCells("A1:D1");
   ws.getCell("A1").value = "M/s JAISHIL SULPHUR & CHEMICAL INDUSTRIES";
   ws.getCell("A1").font = { bold: true, size: 14 }; centre("A1");
+  ws.getRow(1).height = 22;
   ws.mergeCells("A2:D2");
   ws.getCell("A2").value = "Plot No-A-20/1 MIDC, Phase-I, DOMBIVALI"; centre("A2");
   ws.mergeCells("A3:D3");
@@ -235,10 +243,22 @@ async function buildBatchAnalysisWorkbook(
     ? "FINISH GOODS TESTING OF SULPHUR"
     : "FINAL INSPECTION RECORD";
   ws.getCell("A3").font = { bold: true, underline: true, size: 12 }; centre("A3");
+  ws.getRow(3).height = 20;
+  // Header band fill + border box around the 3 title rows.
+  for (const row of [1, 2, 3]) {
+    for (const c of ["A", "B", "C", "D"]) {
+      fill(`${c}${row}`, HEADER_FILL);
+    }
+  }
+  ws.getCell("A1").border = { top: medium, left: medium, right: medium };
+  ws.getCell("D1").border = { top: medium, right: medium };
+  ws.getCell("A3").border = { left: medium, bottom: medium };
+  ws.getCell("D3").border = { right: medium, bottom: medium };
 
-  // Meta block
+  // Meta block — two-column label/value grid (Mfg + Analysis dates included).
   const meta: [string, string][] = [
-    ["Date:", str(record.analysis_date)],
+    ["Manufacturing Date:", str(tr.mfg_date)],
+    ["Analysis Date:", str(record.analysis_date)],
     ["Item:", "SULPHUR POWDER - 99.5%"],
     ["Sr No:", str(tr.sr_no)],
     ["Job No:", str(tr.job_no)],
@@ -251,8 +271,11 @@ async function buildBatchAnalysisWorkbook(
   let r = 5;
   for (const [label, value] of meta) {
     ws.getCell(`A${r}`).value = label; ws.getCell(`A${r}`).font = { bold: true };
+    ws.getCell(`A${r}`).alignment = { vertical: "middle" };
     ws.mergeCells(`B${r}:D${r}`);
     ws.getCell(`B${r}`).value = value;
+    ws.getCell(`B${r}`).alignment = { vertical: "middle" };
+    setBox(`A${r}`); setBox(`B${r}`); setBox(`C${r}`); setBox(`D${r}`);
     r++;
   }
 
@@ -263,8 +286,10 @@ async function buildBatchAnalysisWorkbook(
   ws.getCell(`B${H}`).value = "PARAMETER";
   ws.getCell(`C${H}`).value = "OBSERVATION IN %";
   ws.getCell(`D${H}`).value = "REMARKS";
+  ws.getRow(H).height = 18;
   for (const c of ["A", "B", "C", "D"]) {
     ws.getCell(`${c}${H}`).font = { bold: true };
+    fill(`${c}${H}`, TABLE_HEAD_FILL);
     ws.getCell(`${c}${H}`).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     setBox(`${c}${H}`);
   }
