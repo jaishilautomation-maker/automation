@@ -87,6 +87,11 @@ export default function PulveriserProductionPage() {
   const { showToast } = useToast();
   const supabase = createClient();
 
+  // Which sub-view is showing: the new-job-card form or the rejected queue.
+  const [view, setView] = useState<"new" | "rejected">("new");
+  // Rejected-card count, reported up by TriageQueue so the tab can badge it.
+  const [rejectedCount, setRejectedCount] = useState(0);
+
   // Shared header
   const [machine, setMachine]     = useState<PulveriserMachine>("M1");
   const [jobNumber, setJobNumber] = useState("");
@@ -284,8 +289,33 @@ export default function PulveriserProductionPage() {
 
   return (
     <>
-      <TriageQueue />
+      {/* Sub-tabs: New Job Card | Rejected Job Cards */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button"
+          className={`chip${view === "new" ? " selected" : ""}`}
+          onClick={() => setView("new")}>
+          New Pulveriser Job Card
+        </button>
+        <button type="button"
+          className={`chip${view === "rejected" ? " selected" : ""}`}
+          onClick={() => setView("rejected")}
+          style={rejectedCount > 0 ? { borderColor: "var(--warn)", color: "var(--warn)" } : undefined}>
+          Rejected Job Cards
+          {rejectedCount > 0 && (
+            <span style={{
+              marginLeft: 8, background: "var(--warn)", color: "#fff",
+              borderRadius: 10, padding: "1px 8px", fontSize: 11, fontWeight: 700,
+            }}>{rejectedCount}</span>
+          )}
+        </button>
+      </div>
 
+      {/* Keep TriageQueue mounted so it always reports the live count for the
+          badge, but only show its full UI on the Rejected tab. */}
+      <TriageQueue onCount={setRejectedCount} hidden={view !== "rejected"} />
+
+      {view === "new" && (
+      <>
       <div className="card">
         <h3>New Pulveriser Job Card</h3>
         <div className="field-hint" style={{ marginBottom: 12 }}>
@@ -442,6 +472,8 @@ export default function PulveriserProductionPage() {
             : `Create Job Card${entries.length > 1 ? ` (${entries.length} entries)` : ""}`}
         </button>
       </div>
+      </>
+      )}
     </>
   );
 }
@@ -462,7 +494,10 @@ interface RejectInfo {
   reviewed_at: string;
 }
 
-function TriageQueue() {
+function TriageQueue({ onCount, hidden }: {
+  onCount?: (n: number) => void;
+  hidden?: boolean;
+}) {
   const { user } = useAuth();
   const { activeFactory } = useModule();
   const { showToast } = useToast();
@@ -472,6 +507,9 @@ function TriageQueue() {
   const [loading, setLoading] = useState(true);
   const [rejectInfo, setRejectInfo] = useState<Record<string, RejectInfo>>({});
   const [routingId, setRoutingId]   = useState<string | null>(null);
+
+  // Report the live count up so the parent tab can show a badge.
+  useEffect(() => { onCount?.(cards.length); }, [cards.length, onCount]);
 
   const load = useCallback(async () => {
     if (!activeFactory) { setCards([]); setLoading(false); return; }
@@ -567,17 +605,27 @@ function TriageQueue() {
     }
   };
 
+  // Stay mounted (so the count keeps reporting) but render nothing when the
+  // parent is showing the New Job Card tab.
+  if (hidden) return null;
+
   if (loading) {
     return (
       <div className="card">
-        <h3>Rejected — Awaiting your decision</h3>
+        <h3>Rejected Job Cards</h3>
         <div className="empty">Loading…</div>
       </div>
     );
   }
 
-  // Nothing to triage — render nothing so the New Job Card form is front and centre.
-  if (cards.length === 0) return null;
+  if (cards.length === 0) {
+    return (
+      <div className="card">
+        <h3>Rejected Job Cards</h3>
+        <div className="empty">No rejected job cards right now. 🎉</div>
+      </div>
+    );
+  }
 
   return (
     <div className="card" style={{ borderColor: "var(--warn)" }}>
