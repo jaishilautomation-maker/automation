@@ -18,17 +18,39 @@ import type { ReportFormType } from "@/lib/reports/recipients";
 /** The source event that fired report generation. */
 export type ReportSource =
   | "rm_qc" // → incoming-inspection
-  | "batch_analysis" // → final-inspection (A-20/1 Sulphur Powder, JSCI/QC/16)
+  | "batch_analysis" // → final-inspection OR inprocess-inspection (variant)
   | "product_qc" // → product-final-inspection (A-20 products)
   | "coa"; // → coa
 
-/** Every source maps to exactly one form type. */
+/**
+ * Report variant — only batch_analysis uses it:
+ *   "final"     → Final Inspection (JSCI/QC/16): party fully filled + all pass
+ *   "inprocess" → In-Process / Finish Goods Testing: partial fill, no party,
+ *                 or a spec fail routed to a rework action.
+ */
+export type ReportVariant = "final" | "inprocess";
+
+/**
+ * Default form type per source. batch_analysis defaults to final-inspection
+ * but is overridden by the variant in templateBasename().
+ */
 export const SOURCE_TO_FORM_TYPE: Record<ReportSource, ReportFormType> = {
   rm_qc:          "incoming-inspection",
   batch_analysis: "final-inspection",
   product_qc:     "product-final-inspection",
   coa:            "coa",
 };
+
+/** Resolve the effective form type for a source + optional variant. */
+export function formTypeFor(
+  source: ReportSource,
+  variant?: ReportVariant
+): ReportFormType {
+  if (source === "batch_analysis" && variant === "inprocess") {
+    return "inprocess-inspection";
+  }
+  return SOURCE_TO_FORM_TYPE[source];
+}
 
 /**
  * Field-map JSON shape. `fields` maps a Named Range in the .xlsx to a
@@ -56,9 +78,10 @@ export interface ReportFieldMap {
  */
 export function templateBasename(
   source: ReportSource,
-  productOrMaterialCode: string | null | undefined
+  productOrMaterialCode: string | null | undefined,
+  variant?: ReportVariant
 ): string {
-  const formType = SOURCE_TO_FORM_TYPE[source];
+  const formType = formTypeFor(source, variant);
   const slug = productSlug(productOrMaterialCode);
   return `${slug}_${formType}`;
 }

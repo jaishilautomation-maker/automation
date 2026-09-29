@@ -20,7 +20,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { generateAndEmailReport } from "@/lib/reports/generate-filled-report";
-import type { ReportSource } from "@/lib/reports/template-map";
+import type { ReportSource, ReportVariant } from "@/lib/reports/template-map";
 
 const VALID_SOURCES: ReportSource[] = [
   "rm_qc",
@@ -28,6 +28,8 @@ const VALID_SOURCES: ReportSource[] = [
   "product_qc",
   "coa",
 ];
+
+const VALID_VARIANTS: ReportVariant[] = ["final", "inprocess"];
 
 async function getAuthUser() {
   const cookieStore = await cookies();
@@ -50,20 +52,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { source?: string; recordId?: string };
+  let body: { source?: string; recordId?: string; variant?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const { source, recordId } = body;
+  const { source, recordId, variant } = body;
   if (!source || !VALID_SOURCES.includes(source as ReportSource)) {
     return NextResponse.json({ error: "invalid source" }, { status: 400 });
   }
   if (!recordId) {
     return NextResponse.json({ error: "recordId required" }, { status: 400 });
   }
+  const safeVariant =
+    variant && VALID_VARIANTS.includes(variant as ReportVariant)
+      ? (variant as ReportVariant)
+      : undefined;
 
   // Await internally so the serverless function doesn't tear down mid-send,
   // but always return 200 — the client fires this and forgets.
@@ -71,6 +77,7 @@ export async function POST(req: NextRequest) {
     const result = await generateAndEmailReport({
       source: source as ReportSource,
       recordId,
+      variant: safeVariant,
     });
     if (!result.ok) {
       console.error("[generate-report] skipped:", result.reason);

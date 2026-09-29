@@ -16,7 +16,8 @@ import { AUTOMATION_EMAIL, LAB_QC_EMAIL } from "@/lib/notifications/send-email";
 /** Form types, one per finalization trigger point. */
 export type ReportFormType =
   | "incoming-inspection" // rm_qc finalized (JSCI/QC/03)
-  | "final-inspection" // batch_analysis finalized — A-20/1 Sulphur Powder (JSCI/QC/16)
+  | "final-inspection" // batch_analysis: party fully filled + all pass (JSCI/QC/16)
+  | "inprocess-inspection" // batch_analysis: partial / no party / failed+rework
   | "product-final-inspection" // product_qc finalized — A-20 SC/liquid products
   | "coa"; // COA generation action (JSCI/QC/17)
 
@@ -39,6 +40,9 @@ const FORM_TYPE_ROLES: Record<ReportFormType, RoleKey[]> = {
   "incoming-inspection":       ["lab", "stores"],
   // Final inspection of produced Sulphur Powder (A-20/1 batch analysis).
   "final-inspection":          ["lab", "production", "stores"],
+  // In-process / finish-goods testing (partial, no party, or failed+rework).
+  // Same recipients as final inspection, per requirement.
+  "inprocess-inspection":      ["lab", "production", "stores"],
   // Final product inspection for A-20 SC/liquid products.
   "product-final-inspection":  ["lab", "production", "stores"],
   // Certificate of Analysis — Lab issues it, Stores dispatches against it.

@@ -15,9 +15,19 @@ export type ReportSource =
   | "product_qc"
   | "coa";
 
+/**
+ * Optional report variant. Currently only batch_analysis uses it:
+ *   "final"     → Final Inspection (JSCI/QC/16) — party fully filled + all pass
+ *   "inprocess" → In-Process / Finish Goods Testing — partial fill, no party,
+ *                 or a spec fail routed to a rework action.
+ * Omit for sources with a single report.
+ */
+export type ReportVariant = "final" | "inprocess";
+
 export interface NotifyReportArgs {
   source: ReportSource;
   recordId: string;
+  variant?: ReportVariant;
 }
 
 /** POST to /api/lab-qc/generate-report (fire-and-forget). Safe to `void`. */

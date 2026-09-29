@@ -200,6 +200,19 @@ export default function BatchAnalysisPage() {
     evaluatedRows.length === 0 ? "none" : anyFail ? "fail" : "pass";
 
   // -------------------------------------------------------------------------
+  // Which report gets mailed on save?
+  //   FINAL     → a party is selected AND every parameter in that party's
+  //               spec list has a value AND none of them fail.
+  //   INPROCESS → everything else: no party, partial fill, or any fail
+  //               (the chemist then picks a rework action + reassign party).
+  // -------------------------------------------------------------------------
+  const allPartyParamsFilled =
+    specs.length > 0 &&
+    specs.every(s => (values[s.parameter] ?? "").toString().trim() !== "");
+  const reportVariant: "final" | "inprocess" =
+    partyCode && allPartyParamsFilled && !anyFail ? "final" : "inprocess";
+
+  // -------------------------------------------------------------------------
   // Resolve batch number on blur → find existing batch + analysis
   // -------------------------------------------------------------------------
   const resolveBatch = useCallback(async (bn: string) => {
@@ -385,8 +398,9 @@ export default function BatchAnalysisPage() {
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
-        // Fire-and-forget: generate + email the in-process inspection report.
-        void notifyReport({ source: "batch_analysis", recordId: existingAnalysis.id });
+        // Fire-and-forget: mail Final Inspection (all party params filled + pass)
+        // or In-Process / Finish Goods Testing report otherwise.
+        void notifyReport({ source: "batch_analysis", recordId: existingAnalysis.id, variant: reportVariant });
 
         void notifyQcFinalized({
           sourceTable:   "batch_analysis",
@@ -462,8 +476,9 @@ export default function BatchAnalysisPage() {
         // successful save (existingAnalysis was never populated post-insert).
         setExistingAnalysis(newRow as BatchAnalysis);
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
-        // Fire-and-forget: generate + email the in-process inspection report.
-        void notifyReport({ source: "batch_analysis", recordId: newRow.id });
+        // Fire-and-forget: mail Final Inspection (all party params filled + pass)
+        // or In-Process / Finish Goods Testing report otherwise.
+        void notifyReport({ source: "batch_analysis", recordId: newRow.id, variant: reportVariant });
 
         void notifyQcFinalized({
           sourceTable:   "batch_analysis",

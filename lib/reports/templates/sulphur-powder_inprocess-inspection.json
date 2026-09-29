@@ -1,0 +1,32 @@
+{
+  "template": "sulphur-powder_inprocess-inspection.xlsx",
+  "fields": {
+    "report_date": "batch_analysis.analysis_date",
+    "batch_no": "batch_analysis.batch_no",
+    "lot_no": "batch_analysis.test_results.lot_no",
+    "sample_size": "batch_analysis.test_results.sample_size",
+    "shift": "batch_analysis.test_results.shift",
+    "chemist_name": "batch_analysis.chemist_name",
+
+    "purity_percent": "batch_analysis.test_results.purity_percent",
+    "purity_m1": "batch_analysis.test_results.ash_m1",
+    "purity_m": "batch_analysis.test_results.ash_m",
+
+    "mesh100_pct": "batch_analysis.test_results.mesh100_pct",
+    "mesh200_pct": "batch_analysis.test_results.mesh200_pct",
+    "mesh325_pct": "batch_analysis.test_results.mesh325_pct",
+
+    "ash_percent": "batch_analysis.test_results.ash_percent",
+    "ash_m1": "batch_analysis.test_results.ash_m1",
+    "ash_m": "batch_analysis.test_results.ash_m",
+
+    "acidity_percent": "batch_analysis.test_results.acidity_percent",
+    "acidity_v1": "batch_analysis.test_results.acidity_v1",
+    "acidity_v2": "batch_analysis.test_results.acidity_v2",
+    "acidity_n": "batch_analysis.test_results.acidity_n",
+    "acidity_m": "batch_analysis.test_results.acidity_m",
+
+    "rework_action": "batch_analysis.rework_label",
+    "reasons": "batch_analysis.remarks"
+  }
+}

@@ -34,8 +34,9 @@ import { recipientsFor } from "@/lib/reports/recipients";
 import {
   templateBasename,
   templateFiles,
-  SOURCE_TO_FORM_TYPE,
+  formTypeFor,
   type ReportSource,
+  type ReportVariant,
   type ReportFieldMap,
 } from "@/lib/reports/template-map";
 
@@ -57,6 +58,8 @@ export interface GenerateReportArgs {
   source: ReportSource;
   /** Primary key of the finalized row in the source table. */
   recordId: string;
+  /** batch_analysis only: "final" (JSCI/QC/16) vs "inprocess" (Finish Goods). */
+  variant?: ReportVariant;
   /** For COA reports: the coa_documents.id (source row is coa_documents). */
   factoryId?: string;
 }
@@ -85,7 +88,7 @@ export async function generateAndEmailReport(
   }
 
   const productCode = record.__product_code as string | null;
-  const basename = templateBasename(args.source, productCode);
+  const basename = templateBasename(args.source, productCode, args.variant);
   const { xlsx: xlsxName, json: jsonName } = templateFiles(basename);
 
   // 2) Download the template + field-map in-memory.
@@ -110,9 +113,9 @@ export async function generateAndEmailReport(
 
   // 4) Email (role-routed) + log. sendEmail never throws and writes
   //    notification_log for us.
-  const formType = SOURCE_TO_FORM_TYPE[args.source];
+  const formType = formTypeFor(args.source, args.variant);
   const recipients = recipientsFor(formType);
-  const subject = buildSubject(args.source, record);
+  const subject = buildSubject(args.source, record, args.variant);
 
   await sendEmail({
     eventType: `report_${args.source}`,
@@ -353,7 +356,7 @@ async function loadBatchAnalysis(
   const { data, error } = await supabase
     .from("batch_analysis")
     .select(
-      "id, factory_id, batch_id, chemist_id, party_code, analysis_date, appearance, remarks, test_results"
+      "id, factory_id, batch_id, chemist_id, party_code, rework_action, analysis_date, appearance, remarks, test_results"
     )
     .eq("id", id)
     .maybeSingle();
@@ -368,7 +371,13 @@ async function loadBatchAnalysis(
     ? await getProduct(supabase, batch.product_id as string)
     : null;
   const party = await getPartyName(supabase, d.party_code as string);
+  // Human-readable rework action for the in-process report.
+  const reworkLabel =
+    d.rework_action === "downgrade_grade_b" ? "Downgrade to Grade B"
+    : d.rework_action === "reroute_repackaging" ? "Reroute for repackaging"
+    : null;
   return flatten(d, {
+    rework_label: reworkLabel,
     batch_no: batch?.batch_number ?? null,
     lot_no: batch?.lot_number ?? null,
     chemist_name: await getChemistName(supabase, d.chemist_id as string),
@@ -556,13 +565,19 @@ function safeRef(record: FlatRecord): string {
   return String(raw).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40);
 }
 
-function buildSubject(source: ReportSource, record: FlatRecord): string {
+function buildSubject(
+  source: ReportSource,
+  record: FlatRecord,
+  variant?: ReportVariant
+): string {
   const batch = (record.batch_no as string) ?? (record.id as string) ?? "";
   switch (source) {
     case "rm_qc":
       return `[JSCI A-20/1] Incoming Inspection Report — ${batch}`;
     case "batch_analysis":
-      return `[JSCI A-20/1] Final Inspection Report — ${batch}`;
+      return variant === "inprocess"
+        ? `[JSCI A-20/1] In-Process Inspection Report — ${batch}`
+        : `[JSCI A-20/1] Final Inspection Report — ${batch}`;
     case "product_qc":
       return `[JSCI A-20] Final Inspection Report — ${batch}`;
     case "coa":
