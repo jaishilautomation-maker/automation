@@ -318,9 +318,9 @@ export default function BatchAnalysisPage() {
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
     if (!batchNumber.trim()) { showToast("Batch number is required.", true); return; }
-    if (anyFail && !reworkAction) {
-      showToast("This batch fails spec — select a rework action before saving.", true); return;
-    }
+    // Rework action is optional — chemists often save a partial reading (e.g.
+    // one parameter) just to record/share a result internally, without any
+    // rework decision. They can still pick one when a full batch genuinely fails.
 
     setSubmitting(true);
     try {
@@ -702,13 +702,19 @@ export default function BatchAnalysisPage() {
             </div>
           )}
 
-          {/* Rework action — required when the batch fails spec */}
-          {anyFail && (
+          {/* Rework action — OPTIONAL. Only surfaced when a full batch (all
+              party params filled) genuinely fails spec; a partial reading saved
+              for internal record-keeping does not require any rework choice. */}
+          {anyFail && allPartyParamsFilled && (
             <div className="card" style={{ border: "1px solid #c0392b" }}>
-              <h3 style={{ color: "#c0392b" }}>Batch fails spec — rework required</h3>
-              <label>Rework Action *</label>
+              <h3 style={{ color: "#c0392b" }}>Batch fails spec</h3>
+              <p className="field-hint" style={{ marginBottom: 10 }}>
+                Optionally record a rework action, and note the reassigned party
+                in Remarks. You can also save without one.
+              </p>
+              <label>Rework Action</label>
               <select value={reworkAction} onChange={e => setReworkAction(e.target.value as ReworkAction | "")}>
-                <option value="">— Select rework action —</option>
+                <option value="">— None —</option>
                 <option value="downgrade_grade_b">Downgrade to Grade B</option>
                 <option value="reroute_repackaging">Reroute for repackaging</option>
               </select>
