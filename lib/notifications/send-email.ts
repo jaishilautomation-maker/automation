@@ -63,6 +63,7 @@ const FACTORY_EVENT_TYPES = new Set(["pulveriser_production", "pulveriser_operat
 const TEMP_CC_EMAILS = [
   "chinmaythakker@jaishilsulphur.com",
   "samirthakkar@jaishilsulphur.com",
+  "kamalthakkar@jaishilsulphur.com",
 ];
 
 // The Workspace mailbox the service account impersonates as the sender.
