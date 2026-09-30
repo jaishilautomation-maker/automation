@@ -2501,7 +2501,34 @@ function DailyDispatchSection() {
 //  Qty. issued | TO TRANSFER | Cl. Bal | Status | Remark 
 //
 // Closing Balance formula: H = C + D + E - F - G
+//
+// Qty. Rec auto-fill: when a product + date are selected, the section
+// automatically queries the Received Entry Book for that day and sums the
+// O/WT values for the matching received code, filling Qty. Rec automatically.
 // =============================================================================
+
+// ── Received Code → PM Product mapping ──────────────────────────────────────
+// Maps each RECEIVED_CODES value to the corresponding PM_PRODUCTS string.
+// Used to auto-fill Qty. Rec in the PM form from Received entries.
+const RECEIVED_CODE_TO_PM_PRODUCT: Record<string, string> = {
+ "Ceat108 bag":    "CEAT 108/EXPORT",
+ "M2615 bag":      "MRF-M-2615",
+ "Lanxess bag":    "LANXESS",
+ "R5299 bag":      "CEAT R5299",
+ "Apollo bag":     "APOLLO TYRE - 160108",
+ "W10 bag":        "BRIDGESTONE WE-10",
+ "Rubber bag":     "RUBBER MAKER 50 KG",
+ "JKI bag":        "JKI-108 50 KG",
+ "Jumbo bag":      "JUMBO BAGS 500 KG",
+ "old bag":        "Old Bags",
+ "Export Bag":     "Plain Bags EXPORT 25 kg for Export",
+ "Wooden Pallet":  "WOODEN PALLETS",
+};
+
+// Reverse: PM Product → Received Code (for lookup direction)
+const PM_PRODUCT_TO_RECEIVED_CODE: Record<string, string> = Object.fromEntries(
+ Object.entries(RECEIVED_CODE_TO_PM_PRODUCT).map(([rc, pm]) => [pm, rc])
+);
 
 const PM_PRODUCTS = [
  "CEAT 108/EXPORT",
@@ -2580,6 +2607,11 @@ function PackingMaterialSection() {
  const [filterProduct, setFilterProduct] = useState<PmProduct | "ALL">("ALL");
  const [editId, setEditId]      = useState<string | null>(null);
 
+ // Auto-fill state: tracks if qty_received was auto-filled from Received entries
+ const [autoFillQty, setAutoFillQty]       = useState<number | null>(null);
+ const [autoFillSources, setAutoFillSources] = useState<{ date: string; particular: string; o_wt: string }[]>([]);
+ const [autoFillLoading, setAutoFillLoading] = useState(false);
+
  const clBal = computePmCl(entry);
 
  // Qty Required auto-calc: based on last issued qty as a reference baseline
@@ -2656,6 +2688,66 @@ function PackingMaterialSection() {
    op_bal: latest ? String(latest.cl_bal) : "",
   }));
   setEditId(null);
+  // Trigger auto-fill of qty_received for new product + existing date
+  if (product && entry.date) {
+   void fetchReceivedQty(product as PmProduct, entry.date);
+  } else {
+   setAutoFillQty(null);
+   setAutoFillSources([]);
+  }
+ };
+
+ // Fetch total O/WT from Received entries for a given product + date
+ const fetchReceivedQty = async (product: PmProduct, date: string) => {
+  const receivedCode = PM_PRODUCT_TO_RECEIVED_CODE[product];
+  if (!receivedCode || !date) {
+   setAutoFillQty(null);
+   setAutoFillSources([]);
+   return;
+  }
+  setAutoFillLoading(true);
+  try {
+   const { data } = await supabase
+    .from("stores_stock_ledger")
+    .select("remark")
+    .eq("reference_type", "received_entry")
+    .eq("transaction_date", date);
+
+   let total = 0;
+   const sources: { date: string; particular: string; o_wt: string }[] = [];
+
+   for (const row of (data ?? []) as { remark: string | null }[]) {
+    try {
+     const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry>;
+     if (p.code === receivedCode && p.o_wt) {
+      const n = parseFloat(p.o_wt.replace(/[^\d.]/g, ""));
+      if (!isNaN(n) && n > 0) {
+       total += n;
+       sources.push({
+        date: p.date ?? date,
+        particular: p.particular ?? p.materials ?? "—",
+        o_wt: p.o_wt,
+       });
+      }
+     }
+    } catch { /* skip */ }
+   }
+
+   if (sources.length > 0) {
+    setAutoFillQty(total);
+    setAutoFillSources(sources);
+    // Auto-fill the qty_received field
+    setEntry(prev => {
+     const next = { ...prev, qty_received: String(Math.round(total)) };
+     return { ...next, cl_bal: computePmCl(next) };
+    });
+   } else {
+    setAutoFillQty(null);
+    setAutoFillSources([]);
+   }
+  } finally {
+   setAutoFillLoading(false);
+  }
  };
 
  const handleSave = async () => {
@@ -2762,7 +2854,17 @@ function PackingMaterialSection() {
      <div>
       <label>Date *</label>
       <input type="date" value={entry.date}
-       onChange={e => setField("date", e.target.value)} />
+       onChange={e => {
+        const newDate = e.target.value;
+        setField("date", newDate);
+        // Re-fetch received qty for new date + current product
+        if (entry.product && newDate) {
+         void fetchReceivedQty(entry.product as PmProduct, newDate);
+        } else {
+         setAutoFillQty(null);
+         setAutoFillSources([]);
+        }
+       }} />
      </div>
      <div>
       <label>Name of Product *</label>
@@ -2774,6 +2876,53 @@ function PackingMaterialSection() {
      </div>
     </div>
 
+    {/* Auto-fill banner — shown when Received entries were found */}
+    {autoFillLoading && (
+     <div className="field-hint" style={{ marginBottom: 8 }}>
+      Checking Received entries for {entry.product}...
+     </div>
+    )}
+    {!autoFillLoading && autoFillSources.length > 0 && (
+     <div style={{
+      background: "var(--ok-soft)", border: "1px solid var(--ok)",
+      borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13,
+     }}>
+      <div style={{ fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>
+       ✓ Qty. Rec auto-filled from Received entries ({entry.date})
+      </div>
+      <div style={{ color: "var(--ink-soft)", fontSize: 12 }}>
+       {autoFillSources.map((s, i) => (
+        <span key={i}>
+         {s.particular}: <b>{s.o_wt}</b>
+         {i < autoFillSources.length - 1 ? " + " : ""}
+        </span>
+       ))}
+       {autoFillSources.length > 1 && (
+        <span> = <b>{autoFillQty?.toFixed(0)}</b></span>
+       )}
+      </div>
+      <button type="button" onClick={() => {
+       setAutoFillQty(null); setAutoFillSources([]);
+       setField("qty_received", "");
+      }}
+       style={{
+        marginTop: 6, fontSize: 11, color: "var(--ink-soft)",
+        background: "none", border: "none", cursor: "pointer", padding: 0,
+        textDecoration: "underline",
+       }}>
+       Clear and enter manually
+      </button>
+     </div>
+    )}
+    {!autoFillLoading && entry.product && entry.date
+     && !autoFillSources.length
+     && PM_PRODUCT_TO_RECEIVED_CODE[entry.product] && (
+     <div className="field-hint" style={{ marginBottom: 8 }}>
+      No Received entries found for{" "}
+      <b>{PM_PRODUCT_TO_RECEIVED_CODE[entry.product]}</b> on {entry.date}. Enter Qty. Rec manually.
+     </div>
+    )}
+
     {/* Row 2: Op. Bal | Qty.Rec | By Transfer */}
     <div className="row3">
      <div>
@@ -2783,10 +2932,20 @@ function PackingMaterialSection() {
        onChange={e => setField("op_bal", e.target.value)} />
      </div>
      <div>
-      <label>Qty. Rec</label>
+      <label>Qty. Rec{autoFillSources.length > 0 ? " (auto-filled)" : ""}</label>
       <input type="number" min="0" step="1" placeholder="0"
        value={entry.qty_received}
-       onChange={e => setField("qty_received", e.target.value)} />
+       onChange={e => {
+        setField("qty_received", e.target.value);
+        // Clear auto-fill banner if user manually edits
+        if (autoFillSources.length > 0) {
+         setAutoFillQty(null);
+         setAutoFillSources([]);
+        }
+       }}
+       style={autoFillSources.length > 0 ? {
+        border: "1.5px solid var(--ok)", background: "var(--ok-soft)",
+       } : undefined} />
       {lastIssued !== null && (
        <div className="field-hint" style={{ marginTop: 4, color: "var(--clay)", fontWeight: 600 }}>
         Qty Required (based on last issue): {lastIssued.toFixed(0)} bags
