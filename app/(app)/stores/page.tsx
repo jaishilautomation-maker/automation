@@ -2547,7 +2547,33 @@ const PM_PRODUCTS = [
 ] as const;
 type PmProduct = (typeof PM_PRODUCTS)[number];
 
-const PM_STATUS_OPTIONS = ["GOOD", "LESS", "OUT OF STOCK"] as const;
+/** Threshold (bags) per product. null = no status rule (e.g. Wooden Pallets). */
+const PM_THRESHOLDS: Record<string, number | null> = {
+  "CEAT 108/EXPORT":                       2000,
+  "MRF-M-2615":                            4000,
+  "LANXESS":                               2000,
+  "WOODEN PALLETS":                        null,
+  "CEAT R5299":                            2000,
+  "APOLLO TYRE - 160108":                  1000,
+  "Plain Bags EXPORT 25 kg for Export":    2000,
+  "THREAD CONE":                           1000,
+  "BRIDGESTONE WE-10":                     1000,
+  "RUBBER MAKER 50 KG":                    1000,
+  "JKI-108 50 KG":                         2000,
+  "JUMBO BAGS 500 KG":                     1000,
+  "Old Bags":                              1000,
+};
+
+/**
+ * Derive PM status from closing balance and product threshold.
+ * Returns "GOOD", "LESS", or "" (no rule / not computable).
+ */
+function computePmStatus(product: string, clBal: number | null): string {
+  if (clBal == null) return "";
+  const threshold = PM_THRESHOLDS[product];
+  if (threshold == null) return "";          // WOODEN PALLETS — no rule
+  return clBal >= threshold ? "GOOD" : "LESS";
+}
 
 interface PmEntry {
  date: string;
@@ -2624,7 +2650,13 @@ function PackingMaterialSection() {
  const setField = <K extends keyof PmEntry>(key: K, val: PmEntry[K]) => {
   setEntry(prev => {
    const next = { ...prev, [key]: val };
-   return { ...next, cl_bal: computePmCl(next) };
+   const newCl = computePmCl(next);
+   return {
+    ...next,
+    cl_bal: newCl,
+    // Auto-derive status from closing balance + product threshold
+    status: computePmStatus(next.product, newCl),
+   };
   });
  };
 
@@ -2635,7 +2667,8 @@ function PackingMaterialSection() {
    op_bal: String(row.op_bal), qty_received: String(row.qty_received),
    by_transfer: String(row.by_transfer), qty_issued: String(row.qty_issued),
    to_transfer: String(row.to_transfer), cl_bal: row.cl_bal,
-   status: row.status, remark: row.remark,
+   status: computePmStatus(row.product, row.cl_bal),  // re-derive from rule
+   remark: row.remark,
   });
   setEditId(row.id);
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2681,11 +2714,14 @@ function PackingMaterialSection() {
   const latest = [...history]
    .filter(r => r.product === product)
    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  const newCl = latest ? latest.cl_bal : null;
   setEntry(prev => ({
    ...blankPmEntry(),
    date: prev.date,
    product,
    op_bal: latest ? String(latest.cl_bal) : "",
+   cl_bal: newCl,
+   status: computePmStatus(product, newCl),
   }));
   setEditId(null);
   // Trigger auto-fill of qty_received for new product + existing date
@@ -2985,15 +3021,48 @@ function PackingMaterialSection() {
      </div>
     </div>
 
-    {/* Row 4: Status | Remark */}
+    {/* Row 4: Status (auto-derived) | Remark */}
     <div className="row2">
      <div>
       <label>Status</label>
-      <select value={entry.status}
-       onChange={e => setField("status", e.target.value)}>
-       <option value="">-- Select --</option>
-       {PM_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
+      {entry.product && PM_THRESHOLDS[entry.product] != null ? (
+       // Auto-derived status badge
+       <div style={{
+        padding: "10px 14px", borderRadius: 8, fontWeight: 700, fontSize: 15,
+        textAlign: "center",
+        background: entry.status === "GOOD" ? "var(--ok-soft)"
+         : entry.status === "LESS" ? "var(--warn-soft)"
+         : "var(--line)",
+        color: entry.status === "GOOD" ? "var(--ok)"
+         : entry.status === "LESS" ? "var(--warn)"
+         : "var(--ink-soft)",
+        border: "1.5px solid " + (
+         entry.status === "GOOD" ? "color-mix(in srgb, var(--ok) 30%, transparent)"
+         : entry.status === "LESS" ? "color-mix(in srgb, var(--warn) 30%, transparent)"
+         : "var(--line)"),
+       }}>
+        {entry.status || "—"}
+        {entry.status && (
+         <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, opacity: 0.8 }}>
+          Threshold: {PM_THRESHOLDS[entry.product]?.toLocaleString()} bags
+         </div>
+        )}
+       </div>
+      ) : entry.product === "WOODEN PALLETS" ? (
+       <div style={{
+        padding: "10px 14px", borderRadius: 8, fontSize: 13,
+        background: "var(--line)", color: "var(--ink-soft)", textAlign: "center",
+       }}>
+        No threshold rule
+       </div>
+      ) : (
+       <div style={{
+        padding: "10px 14px", borderRadius: 8, fontSize: 13,
+        background: "var(--line)", color: "var(--ink-soft)", textAlign: "center",
+       }}>
+        Select a product first
+       </div>
+      )}
      </div>
      <div>
       <label>Remark</label>
@@ -3071,20 +3140,27 @@ function PackingMaterialSection() {
              {row.cl_bal.toFixed(0)}
             </td>
             <td>
-             <span style={{
-              fontSize: 11, fontWeight: 700,
-              padding: "2px 6px", borderRadius: 6,
-              background: row.status === "GOOD" ? "var(--ok-soft)"
-               : row.status === "OUT OF STOCK" ? "var(--warn-soft)"
-               : row.status === "LESS" ? "#fff3cd"
-               : "transparent",
-              color: row.status === "GOOD" ? "var(--ok)"
-               : row.status === "OUT OF STOCK" ? "var(--warn)"
-               : row.status === "LESS" ? "#7d6608"
-               : "var(--ink-soft)",
-             }}>
-              {row.status || "N/A"}
-             </span>
+             {(() => {
+              // Always re-derive status from cl_bal + threshold rule
+              const derived = computePmStatus(row.product, row.cl_bal);
+              const display = derived || row.status || "N/A";
+              return (
+               <span style={{
+                fontSize: 11, fontWeight: 700,
+                padding: "2px 6px", borderRadius: 6,
+                background: display === "GOOD" ? "var(--ok-soft)"
+                 : display === "LESS" ? "#fff3cd"
+                 : display === "OUT OF STOCK" ? "var(--warn-soft)"
+                 : "transparent",
+                color: display === "GOOD" ? "var(--ok)"
+                 : display === "LESS" ? "#7d6608"
+                 : display === "OUT OF STOCK" ? "var(--warn)"
+                 : "var(--ink-soft)",
+               }}>
+                {display}
+               </span>
+              );
+             })()}
             </td>
             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>
              {nilText(row.remark)}
