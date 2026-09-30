@@ -2772,10 +2772,11 @@ function PackingMaterialSection() {
    if (sources.length > 0) {
     setAutoFillQty(total);
     setAutoFillSources(sources);
-    // Auto-fill the qty_received field
+    // Auto-fill the qty_received field and recompute cl_bal + status
     setEntry(prev => {
      const next = { ...prev, qty_received: String(Math.round(total)) };
-     return { ...next, cl_bal: computePmCl(next) };
+     const newCl = computePmCl(next);
+     return { ...next, cl_bal: newCl, status: computePmStatus(next.product, newCl) };
     });
    } else {
     setAutoFillQty(null);
