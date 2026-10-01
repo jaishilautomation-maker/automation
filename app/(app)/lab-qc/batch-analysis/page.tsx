@@ -224,22 +224,13 @@ export default function BatchAnalysisPage() {
     parties.find(p => p.party_code === partyCode)?.customer_name || partyCode || null;
   const partyResultKeys = partyCode ? specs.map(s => s.parameter) : [];
 
-  // Which test-definition fields to render. When a party is selected, show only
-  // that party's parameters — each result field plus the raw inputs that feed
-  // it (from the shared catalog) — always keeping appearance/photo. No party →
-  // show every field (full/default set).
-  const visibleTestKeys: Set<string> | null = (() => {
-    if (!partyCode || specs.length === 0) return null; // null = show all
-    const keys = new Set<string>(["colour_appearance", "appearance_photo"]);
-    for (const p of paramsForParty(partyResultKeys)) {
-      keys.add(p.resultKey);
-      for (const raw of p.rawInputs) keys.add(raw);
-    }
-    return keys;
-  })();
-  const visibleDefs = visibleTestKeys
-    ? testDefs.filter(d => visibleTestKeys.has(d.test_key))
-    : testDefs;
+  // Which test-definition fields to render. Always show ALL fields regardless
+  // of whether a party is selected — the party selection only drives the live
+  // pass/fail spec badges, not field visibility.
+  // (Previously hid fields without a spec when a party was selected; changed
+  // so chemists can fill every parameter for Shakti/Rubber/any party even when
+  // only a subset has formal specs.)
+  const visibleDefs = testDefs;
 
   // -------------------------------------------------------------------------
   // Resolve batch number on blur → find existing batch + analysis
