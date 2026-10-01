@@ -6165,7 +6165,7 @@ function StockLedgerSection() {
       {activeItem.min_threshold != null && (
        <div style={{ fontSize: 12, marginTop: 2,
         color: below ? "var(--warn)" : "var(--ink-soft)" }}>
-        {below ? "⚠ Below minimum threshold" : "✓ Above minimum threshold"}
+        {below ? "⚠ Material Required" : "✓ Above minimum threshold"}
         {" — "}Min: {activeItem.min_threshold} {activeItem.unit}
        </div>
       )}
@@ -6394,7 +6394,7 @@ function StockLedgerSection() {
       background: "var(--warn-soft)", fontSize: 13, color: "var(--warn)",
       fontWeight: 600, border: "1px solid var(--warn)",
      }}>
-      ⚠ {itemsBelow.length} item{itemsBelow.length > 1 ? "s" : ""} below minimum threshold:{" "}
+      ⚠ {itemsBelow.length} item{itemsBelow.length > 1 ? "s" : ""} — Material Required:{" "}
       {itemsBelow.map(i => i.item_name).join(", ")}
      </div>
     ) : null;
@@ -6422,7 +6422,7 @@ function StockLedgerSection() {
          Code: {item.item_code}
          {below && (
           <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
-           ⚠ Below min ({item.min_threshold} {item.unit})
+           ⚠ Material Required (min {item.min_threshold} {item.unit})
           </span>
          )}
         </div>
