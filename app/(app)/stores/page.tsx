@@ -756,6 +756,292 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
 // =============================================================================
 
 // =============================================================================
+// SHARED -- Transport names list (used in Received section)
+// =============================================================================
+const TRANSPORT_NAMES = [
+ "Amar Transport",
+ "Balu Transport",
+ "By Hand",
+ "Chandrbhaga",
+ "Dombivali Janseva Transport",
+ "Ganesh Transport Company",
+ "HTC",
+ "Ketan Roadlines",
+ "Krishna Logistics",
+ "Nisha Transport",
+ "Om Sai Ram Container Services",
+ "Palak Roadways",
+ "Party Transport",
+ "Preamchand",
+ "Priy roadlines",
+ "R.H. Bulk Carriers",
+ "Shree Dwarkadhish Enterprise",
+ "Shree Raj Transport",
+ "Siddharth Transport Corp.",
+ "V-Trans",
+] as const;
+
+/** Materials list organized by Material Type — used in Received and Supplied sections. */
+const MATERIALS_BY_TYPE: Record<string, readonly string[]> = {
+ RM: [
+  "Crude Sulphur",
+  "Elasto 541 Oil",
+  "P. Silica",
+  "Chem Grind Oil",
+  "Poweroil Sapphire L3060",
+  "Poweroil Citrine L4070",
+  "Gear Oil 320/PARTHAN",
+  "Magnesium Carbonate in kg",
+  "Power oil Citrine M 4150",
+ ],
+ PM: [
+  "CEAT 108/EXPORT",
+  "MRF- M-2615",
+  "LANXESS",
+  "WOODEN PALLETS",
+  "CEAT R5299",
+  "APOLLO TYRE - 160108",
+  "Plain Bags EXPORT 25 kg for Export",
+  "THREAD CONE",
+  "BRIDGESTONE WE-10",
+  "RUBBER MAKER 50 KG",
+  "JKI-108 50 KG",
+  "JUMBO BAGS 500 KG",
+  "Old Bags",
+ ],
+ FG: [
+  "CEAT-108 / EXPORT",
+  "MRF LIMITED (M-2615)",
+  "EXPORT Plain Bag 25 KG A2052",
+  "LANXESS INDIA PVT LTD",
+  "CEAT HALOL/NAGPUR-R5299 (Halol/Nagpur/Chennai/Ambernath)",
+  "APOLLO TYRE/CLASSIC AUTO 160108",
+  "CODE 2615 w/o Oil (MRF Grade)",
+  "Lanxess 2% Oil",
+  "MRF Ltd 2615 - Rejected",
+  "Lanxess R.M. 25 KG - Rejected",
+  "CEAT R5299 - Rejected",
+  "Apollo 160108 - Rejected",
+  "Jayam Chemicals 0.5% Silica",
+  "EOC POLYMERS",
+  "BRIDGESTONE WE-10 FINISHED",
+  "BRIDGESTONE/Lanxess(Semifinish) PLAIN",
+  "RUBBER MAKER 50 KG",
+  "OLD BAGS (SHAKTI & OTHERS)",
+  "J.K. INDUSTRIES",
+  "FOR PESTICIDE FORMULATION (SC)",
+  "Sulphur Powder(Jumbo Bag-550 KG)",
+  "BRIDGESTONE WE-10(500 KG JUMBO)",
+  "RUBBER MAKER 50 KG - Rejected",
+ ],
+};
+
+/** Returns the materials list for the selected type, or all combined if none selected. */
+function getMaterialsList(materialType: string): readonly string[] {
+ if (materialType && MATERIALS_BY_TYPE[materialType]) {
+  return MATERIALS_BY_TYPE[materialType];
+ }
+ // No type selected — return all combined (deduped)
+ return Array.from(new Set(Object.values(MATERIALS_BY_TYPE).flat())) as string[];
+}
+
+const PARTICULARS_NAMES = [
+ "A.K.ENTERPRISES",
+ "A-20 Jaishil Sulphur Chemical",
+ "Acharya Chemicals",
+ "AD.Pharma chem Pvt.Ltd.",
+ "Amines And Plasticizers Ltd",
+ "Anand Electrical Works",
+ "Aone Lifter",
+ "Apar Industries Ltd.",
+ "Apollo Tyres Ltd. - Baroda",
+ "APS Power Systems PVT Ltd",
+ "APS Solution",
+ "Aquaproof Plastics",
+ "Arihant Enterprise",
+ "Ashapura Trading Company",
+ "ASSOCIATED CEAT (PVT) LTD.",
+ "Avik Polychem",
+ "B P CHEMICALS",
+ "B.K.Rubber Industries Pvt.Ltd",
+ "B/11 Jaishil Sulphur Chemical",
+ "Bharat Petroleum Corporation Ltd",
+ "Bridgestone India Pvt. Ltd. (Pune)",
+ "CEAT Kelani International Tyres (Pvt)",
+ "Ceat Limited, Ambernath",
+ "Ceat Ltd. - Nasik",
+ "Ceat Ltd. Bhandup",
+ "Ceyenar Chemical Pvt. Ltd.",
+ "CHYUAN HARVEST INDUSTRIES CO., LTD.",
+ "DALMIA BHARAT REFRACTORIES LIMITED",
+ "DEEP FINECHEM PRIVATE LIMITED",
+ "Deep Rubber Products",
+ "Delta Finochem Pvt. Ltd.",
+ "Devansh Chemicals",
+ "Domsjo Fabriker AB",
+ "Dossa Chemicals Pvt. Ltd",
+ "ENVIRO SCIENCE",
+ "Fino Lab Chem",
+ "Galaxy Scientific Equipments",
+ "Gandhi Tyers",
+ "Ganesh Rathode (Lab)",
+ "Garware Fulflex India Private Limited.",
+ "Ghanshayam Engineering",
+ "Global Enterprise",
+ "Gobind Kamble",
+ "Godi Seal Kamgar Sahakari Sanstha Ltd",
+ "Greasoil Engineering solutions",
+ "Gualith Industries",
+ "Gulf Fertilizers And Chemicals FZE",
+ "Gurudev Store",
+ "H.M. Traders, Dombivali",
+ "Himanshu Earth Movers",
+ "Hindustan Petroleum Corporation Ltd",
+ "HMSU Rollers India Pvt.Ltd.",
+ "Indigo Chemicals Pvt.Ltd",
+ "Instrumech Engineers Pvt Ltd",
+ "J.K.Tyres & Industries Ltd-Kankroli",
+ "Jai Gurudev",
+ "JAY BHAVANI ENTERPRISES",
+ "JAYAM CHEMICALS LLP",
+ "JK Tyre Industries Ltd.",
+ "Jyotipriyaa INC",
+ "Katleshwari Enterprises ( Swami )",
+ "Kremoint Pharma Pvt.Ltd",
+ "Kuber Specialities.",
+ "Lanxess India Pvt. Ltd. - Gujarat",
+ "Loba Chemie Pvt. Ltd.",
+ "M/s Global Chemicals (India)",
+ "Madan Udyog Pvt. Ltd.",
+ "Magnichem Industries",
+ "Master Pulverisers(India) Pvt Ltd",
+ "Max Spare ltd.",
+ "Meetu-Raj Enterprise",
+ "Mistri Bhagavan Bahi",
+ "Mistri Bhagwan Bhai",
+ "Mitsubishi Belting India Pvt. Ltd",
+ "Mivan Chemicals",
+ "MRF LIMITED - KOTTAYAM",
+ "MRF LIMITED-DAHEJ",
+ "MRF LIMITED-GOA",
+ "MRF LIMITED-MEDAK",
+ "Mujub Scrap",
+ "NX Safety Fire Services",
+ "Om Sai Engineering work",
+ "Om Sai Hydra",
+ "Patni Stationery Stores",
+ "Pream Bhai",
+ "Precise Biopharma Pvt. Ltd.",
+ "Prince Trading",
+ "Qualitech Industrial Products",
+ "Rahul Enterprises",
+ "Rajesh Service center",
+ "Raju auto electrician",
+ "RESEARCH LAB FINE CHEM INDUSTRIES",
+ "Revival Engineers Private Limited",
+ "Row Labels",
+ "S. Engineering",
+ "S.S Services",
+ "Samiear Crak serives",
+ "Sarvoday Press",
+ "Separation Machines FY 26-27",
+ "Setco Trading FZE",
+ "Shakti synergetics Pvt Ltd.Nashik",
+ "Shree Samarth Krupa Automobile",
+ "Shree Shankeshwar traders",
+ "Shushil Scrap",
+ "SK Water Supplier",
+ "SKY Screen International Pvt Ltd",
+ "SUN ENTERPRISES",
+ "Swaminarayan Engineering Works",
+ "Techno Petrol Pump Indian Oil",
+ "Tulsiram Hanumanbagas Gilada",
+ "UPL Limited - Gujarat",
+ "Vidya Electrical Works",
+ "Yes Eng. Work",
+ "Zolfo Impex",
+] as const;
+
+/**
+ * Autocomplete text input.
+ * - Shows matching suggestions from `suggestions` list as the user types.
+ * - Matches from 2+ characters (case-insensitive, any position in the name).
+ * - If the user types something not in the list, it is accepted as a free entry.
+ * - Selecting a suggestion fills the input and closes the dropdown.
+ */
+function AutocompleteInput({
+ value,
+ onChange,
+ suggestions,
+ placeholder,
+}: {
+ value: string;
+ onChange: (v: string) => void;
+ suggestions: readonly string[];
+ placeholder?: string;
+}) {
+ const [open, setOpen] = useState(false);
+
+ const filtered = value.trim().length >= 1
+  ? suggestions.filter(s =>
+    s.toLowerCase().includes(value.trim().toLowerCase())
+   )
+  : [];
+
+ return (
+  <div style={{ position: "relative" }}>
+   <input
+    type="text"
+    placeholder={placeholder ?? "Start typing..."}
+    value={value}
+    onChange={e => { onChange(e.target.value); setOpen(true); }}
+    onFocus={() => setOpen(true)}
+    onBlur={() => setTimeout(() => setOpen(false), 150)}
+    autoComplete="off"
+   />
+   {open && filtered.length > 0 && (
+    <div style={{
+     position: "absolute", top: "100%", left: 0, right: 0, zIndex: 300,
+     background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+     boxShadow: "0 4px 16px rgba(0,0,0,.12)",
+     maxHeight: 220, overflowY: "auto",
+    }}>
+     {filtered.map(s => (
+      <div key={s}
+       onMouseDown={() => { onChange(s); setOpen(false); }}
+       style={{
+        padding: "9px 14px", cursor: "pointer", fontSize: 13,
+        background: s === value ? "var(--clay-soft)" : undefined,
+        color: s === value ? "var(--clay)" : "var(--ink)",
+       }}
+       onMouseEnter={e => (e.currentTarget.style.background = "var(--clay-soft)")}
+       onMouseLeave={e => (e.currentTarget.style.background = s === value ? "var(--clay-soft)" : "")}
+      >
+       {/* Highlight the matching part */}
+       {(() => {
+        const lower = s.toLowerCase();
+        const q     = value.trim().toLowerCase();
+        const idx   = lower.indexOf(q);
+        if (idx < 0 || q.length === 0) return s;
+        return (
+         <>
+          {s.slice(0, idx)}
+          <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+           {s.slice(idx, idx + q.length)}
+          </span>
+          {s.slice(idx + q.length)}
+         </>
+        );
+       })()}
+      </div>
+     ))}
+    </div>
+   )}
+  </div>
+ );
+}
+
+// =============================================================================
 // SHARED -- Searchable Code dropdown (used by both Received and Supplied)
 // =============================================================================
 
@@ -934,6 +1220,8 @@ interface ReceivedEntry {
  code: string;
  remarks: string;
  po_no: string;
+ material_type: "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
+ material_type_other: string;  // free text when material_type === "Other"
 }
 interface SavedReceivedRow extends ReceivedEntry { id: string; }
 
@@ -942,6 +1230,7 @@ function blankReceivedEntry(): ReceivedEntry {
   date: today(), particular: "", transport: "", materials: "",
   vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
   inv_chl_no: "", code: "", remarks: "", po_no: "",
+  material_type: "", material_type_other: "",
  };
 }
 
@@ -982,6 +1271,8 @@ function ReceivedSection() {
      bags_loose: p.bags_loose ?? "", inv_chl_no: p.inv_chl_no ?? "",
      code: p.code ?? (p as Record<string,string>).remark ?? "",
      remarks: p.remarks ?? "", po_no: p.po_no ?? "",
+     material_type: (p.material_type as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "") ?? "",
+     material_type_other: (p.material_type_other as string) ?? "",
     });
    } catch { /* skip */ }
   }
@@ -1016,6 +1307,8 @@ function ReceivedSection() {
     f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
     inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
     remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
+    material_type: entry.material_type,
+    material_type_other: entry.material_type_other.trim(),
    };
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
@@ -1067,21 +1360,55 @@ function ReceivedSection() {
       <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
      </div>
      <div>
-      <label>Particular</label>
-      <input type="text" placeholder="e.g. Aquaproof Plastics"
-       value={entry.particular} onChange={e => setField("particular", e.target.value)} />
+      <label>Material Type *</label>
+      <select value={entry.material_type}
+       onChange={e => {
+        const t = e.target.value as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
+        setField("material_type", t);
+        setField("materials", "");
+       }}>
+       <option value="">-- Select type --</option>
+       <option value="RM">Raw Material (RM)</option>
+       <option value="PM">Packing Material (PM)</option>
+       <option value="FG">Finished Goods (FG)</option>
+       <option value="Maintenance">Maintenance</option>
+       <option value="Other">Others</option>
+      </select>
+      {entry.material_type === "Other" && (
+       <input type="text"
+        placeholder="Enter material type..."
+        value={entry.material_type_other}
+        onChange={e => setField("material_type_other", e.target.value)}
+        style={{ marginTop: 6 }} />
+      )}
      </div>
      <div>
-      <label>Transport</label>
-      <input type="text" placeholder="e.g. Party Transport"
-       value={entry.transport} onChange={e => setField("transport", e.target.value)} />
+      <label>Particular</label>
+      <AutocompleteInput
+       value={entry.particular}
+       onChange={v => setField("particular", v)}
+       suggestions={PARTICULARS_NAMES}
+       placeholder="Type to search or enter manually..." />
      </div>
     </div>
     <div className="row3">
      <div>
-      <label>Materials</label>
-      <input type="text" placeholder="e.g. HDPE/PP bags for Apollo 160108 25 Kg"
-       value={entry.materials} onChange={e => setField("materials", e.target.value)} />
+      <label>Transport</label>
+      <AutocompleteInput
+       value={entry.transport}
+       onChange={v => setField("transport", v)}
+       suggestions={TRANSPORT_NAMES}
+       placeholder="Type to search or enter manually..." />
+     </div>
+     <div>
+      <label>Materials{entry.material_type && MATERIALS_BY_TYPE[entry.material_type] ? ` (${entry.material_type})` : ""}</label>
+      <AutocompleteInput
+       value={entry.materials}
+       onChange={v => setField("materials", v)}
+       suggestions={getMaterialsList(entry.material_type)}
+       placeholder={entry.material_type && MATERIALS_BY_TYPE[entry.material_type]
+        ? "Type to search " + entry.material_type + " materials..."
+        : "Select Material Type first, or type to search all..."} />
      </div>
      <div>
       <label>Vehicle No.</label>
@@ -1167,10 +1494,10 @@ function ReceivedSection() {
      : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
      : (
       <div style={{ overflowX: "auto" }}>
-       <table className="dash" style={{ minWidth: 1100 }}>
+       <table className="dash" style={{ minWidth: 1200 }}>
         <thead>
          <tr>
-          <th>Date</th><th>Particular</th><th>Transport</th>
+          <th>Date</th><th>Type</th><th>Particular</th><th>Transport</th>
           <th>Materials</th><th>Vehicle No.</th>
           <th style={{ textAlign: "right" }}>O/WT</th>
           <th style={{ textAlign: "right" }}>F/Wt</th>
@@ -1182,6 +1509,31 @@ function ReceivedSection() {
          {histFiltered.map(row => (
           <tr key={row.id}>
            <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+           <td>
+            {row.material_type ? (
+             <span style={{
+              fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 8,
+              background:
+               row.material_type === "RM" ? "var(--clay-soft)"
+               : row.material_type === "PM" ? "#e3f2fd"
+               : row.material_type === "FG" ? "var(--ok-soft)"
+               : row.material_type === "Maintenance" ? "#fff8e1"
+               : "#f3e5f5",
+              color:
+               row.material_type === "RM" ? "var(--clay)"
+               : row.material_type === "PM" ? "#1565c0"
+               : row.material_type === "FG" ? "var(--ok)"
+               : row.material_type === "Maintenance" ? "#f57f17"
+               : "#6a1b9a",
+             }}>
+              {row.material_type === "RM" ? "Raw Material"
+               : row.material_type === "PM" ? "Packing Material"
+               : row.material_type === "FG" ? "Finished Goods"
+               : row.material_type === "Maintenance" ? "Maintenance"
+               : row.material_type_other || "Others"}
+             </span>
+            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+           </td>
            <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
            <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
@@ -1244,6 +1596,8 @@ interface SuppliedEntry {
  code: string;
  remarks: string;
  po_no: string;
+ material_type: "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
+ material_type_other: string;
 }
 interface SavedSuppliedRow extends SuppliedEntry { id: string; }
 
@@ -1252,6 +1606,7 @@ function blankSuppliedEntry(): SuppliedEntry {
   date: today(), particular: "", transport: "", materials: "",
   vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
   inv_chl_no: "", code: "", remarks: "", po_no: "",
+  material_type: "", material_type_other: "",
  };
 }
 
@@ -1291,6 +1646,8 @@ function SuppliedSection() {
      o_wt: p.o_wt ?? "", f_wt: p.f_wt ?? "",
      bags_loose: p.bags_loose ?? "", inv_chl_no: p.inv_chl_no ?? "",
      code: p.code ?? "", remarks: p.remarks ?? "", po_no: p.po_no ?? "",
+     material_type: (p.material_type as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "") ?? "",
+     material_type_other: (p.material_type_other as string) ?? "",
     });
    } catch { /* skip */ }
   }
@@ -1325,6 +1682,8 @@ function SuppliedSection() {
     f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
     inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
     remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
+    material_type: entry.material_type,
+    material_type_other: entry.material_type_other.trim(),
    };
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
@@ -1376,21 +1735,55 @@ function SuppliedSection() {
       <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
      </div>
      <div>
-      <label>Particular</label>
-      <input type="text" placeholder="e.g. Aquaproof Plastics"
-       value={entry.particular} onChange={e => setField("particular", e.target.value)} />
+      <label>Material Type *</label>
+      <select value={entry.material_type}
+       onChange={e => {
+        const t = e.target.value as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
+        setField("material_type", t);
+        setField("materials", "");
+       }}>
+       <option value="">-- Select type --</option>
+       <option value="RM">Raw Material (RM)</option>
+       <option value="PM">Packing Material (PM)</option>
+       <option value="FG">Finished Goods (FG)</option>
+       <option value="Maintenance">Maintenance</option>
+       <option value="Other">Others</option>
+      </select>
+      {entry.material_type === "Other" && (
+       <input type="text"
+        placeholder="Enter material type..."
+        value={entry.material_type_other}
+        onChange={e => setField("material_type_other", e.target.value)}
+        style={{ marginTop: 6 }} />
+      )}
      </div>
      <div>
-      <label>Transport</label>
-      <input type="text" placeholder="e.g. Party Transport"
-       value={entry.transport} onChange={e => setField("transport", e.target.value)} />
+      <label>Particular</label>
+      <AutocompleteInput
+       value={entry.particular}
+       onChange={v => setField("particular", v)}
+       suggestions={PARTICULARS_NAMES}
+       placeholder="Type to search or enter manually..." />
      </div>
     </div>
     <div className="row3">
      <div>
-      <label>Materials</label>
-      <input type="text" placeholder="e.g. HDPE/PP bags 25 Kg"
-       value={entry.materials} onChange={e => setField("materials", e.target.value)} />
+      <label>Transport</label>
+      <AutocompleteInput
+       value={entry.transport}
+       onChange={v => setField("transport", v)}
+       suggestions={TRANSPORT_NAMES}
+       placeholder="Type to search or enter manually..." />
+     </div>
+     <div>
+      <label>Materials{entry.material_type && MATERIALS_BY_TYPE[entry.material_type] ? ` (${entry.material_type})` : ""}</label>
+      <AutocompleteInput
+       value={entry.materials}
+       onChange={v => setField("materials", v)}
+       suggestions={getMaterialsList(entry.material_type)}
+       placeholder={entry.material_type && MATERIALS_BY_TYPE[entry.material_type]
+        ? "Type to search " + entry.material_type + " materials..."
+        : "Select Material Type first, or type to search all..."} />
      </div>
      <div>
       <label>Vehicle No.</label>
@@ -1476,10 +1869,10 @@ function SuppliedSection() {
      : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
      : (
       <div style={{ overflowX: "auto" }}>
-       <table className="dash" style={{ minWidth: 1100 }}>
+       <table className="dash" style={{ minWidth: 1200 }}>
         <thead>
          <tr>
-          <th>Date</th><th>Particular</th><th>Transport</th>
+          <th>Date</th><th>Type</th><th>Particular</th><th>Transport</th>
           <th>Materials</th><th>Vehicle No.</th>
           <th style={{ textAlign: "right" }}>O/WT</th>
           <th style={{ textAlign: "right" }}>F/Wt</th>
@@ -1491,6 +1884,31 @@ function SuppliedSection() {
          {histFiltered.map(row => (
           <tr key={row.id}>
            <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+           <td>
+            {row.material_type ? (
+             <span style={{
+              fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 8,
+              background:
+               row.material_type === "RM" ? "var(--clay-soft)"
+               : row.material_type === "PM" ? "#e3f2fd"
+               : row.material_type === "FG" ? "var(--ok-soft)"
+               : row.material_type === "Maintenance" ? "#fff8e1"
+               : "#f3e5f5",
+              color:
+               row.material_type === "RM" ? "var(--clay)"
+               : row.material_type === "PM" ? "#1565c0"
+               : row.material_type === "FG" ? "var(--ok)"
+               : row.material_type === "Maintenance" ? "#f57f17"
+               : "#6a1b9a",
+             }}>
+              {row.material_type === "RM" ? "Raw Material"
+               : row.material_type === "PM" ? "Packing Material"
+               : row.material_type === "FG" ? "Finished Goods"
+               : row.material_type === "Maintenance" ? "Maintenance"
+               : row.material_type_other || "Others"}
+             </span>
+            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+           </td>
            <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
            <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
@@ -2635,7 +3053,7 @@ function PackingMaterialSection() {
 
  // Auto-fill state: tracks if qty_received was auto-filled from Received entries
  const [autoFillQty, setAutoFillQty]       = useState<number | null>(null);
- const [autoFillSources, setAutoFillSources] = useState<{ date: string; particular: string; o_wt: string }[]>([]);
+ const [autoFillSources, setAutoFillSources] = useState<{ date: string; particular: string; o_wt: string; qty: number }[]>([]);
  const [autoFillLoading, setAutoFillLoading] = useState(false);
 
  const clBal = computePmCl(entry);
@@ -2709,6 +3127,14 @@ function PackingMaterialSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
+ // Re-fetch from Received whenever product or date change (covers switching back to tab)
+ useEffect(() => {
+  if (entry.product && entry.date && !editId) {
+   void fetchReceivedQty(entry.product as PmProduct, entry.date);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [entry.product, entry.date]);
+
  // Auto-fill op_bal from most recent closing balance for this product (sorted by date)
  const handleProductChange = (product: PmProduct | "") => {
   const latest = [...history]
@@ -2743,26 +3169,28 @@ function PackingMaterialSection() {
   }
   setAutoFillLoading(true);
   try {
+   // Fetch all received entries for this code on this date, ordered newest first
    const { data } = await supabase
     .from("stores_stock_ledger")
-    .select("remark")
+    .select("remark, created_at")
     .eq("reference_type", "received_entry")
-    .eq("transaction_date", date);
+    .eq("transaction_date", date)
+    .order("created_at", { ascending: false });
 
-   let total = 0;
-   const sources: { date: string; particular: string; o_wt: string }[] = [];
+   // Find all entries matching the received code, keeping insertion order (newest first)
+   const sources: { date: string; particular: string; o_wt: string; qty: number }[] = [];
 
-   for (const row of (data ?? []) as { remark: string | null }[]) {
+   for (const row of (data ?? []) as { remark: string | null; created_at: string }[]) {
     try {
      const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry>;
      if (p.code === receivedCode && p.o_wt) {
       const n = parseFloat(p.o_wt.replace(/[^\d.]/g, ""));
       if (!isNaN(n) && n > 0) {
-       total += n;
        sources.push({
         date: p.date ?? date,
         particular: p.particular ?? p.materials ?? "—",
         o_wt: p.o_wt,
+        qty: n,
        });
       }
      }
@@ -2770,11 +3198,15 @@ function PackingMaterialSection() {
    }
 
    if (sources.length > 0) {
-    setAutoFillQty(total);
-    setAutoFillSources(sources);
-    // Auto-fill the qty_received field and recompute cl_bal + status
+    // Use the LATEST (most recently saved) entry's O/WT value
+    const latestEntry = sources[0]; // already ordered newest first
+    const latestQty   = latestEntry.qty;
+
+    setAutoFillQty(latestQty);
+    setAutoFillSources(sources); // keep all for display in banner
+    // Auto-fill with latest entry's O/WT and recompute cl_bal + status
     setEntry(prev => {
-     const next = { ...prev, qty_received: String(Math.round(total)) };
+     const next = { ...prev, qty_received: String(Math.round(latestQty)) };
      const newCl = computePmCl(next);
      return { ...next, cl_bal: newCl, status: computePmStatus(next.product, newCl) };
     });
@@ -2925,30 +3357,53 @@ function PackingMaterialSection() {
       borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13,
      }}>
       <div style={{ fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>
-       ✓ Qty. Rec auto-filled from Received entries ({entry.date})
+       ✓ Qty. Rec auto-filled from latest Received entry ({entry.date})
       </div>
-      <div style={{ color: "var(--ink-soft)", fontSize: 12 }}>
+      <div style={{ fontSize: 12, marginBottom: 6 }}>
        {autoFillSources.map((s, i) => (
-        <span key={i}>
-         {s.particular}: <b>{s.o_wt}</b>
-         {i < autoFillSources.length - 1 ? " + " : ""}
-        </span>
+        <div key={i} style={{
+         padding: "3px 8px", borderRadius: 4, marginBottom: 2,
+         background: i === 0 ? "rgba(27,94,32,.08)" : undefined,
+         fontWeight: i === 0 ? 700 : 400,
+         color: i === 0 ? "var(--ok)" : "var(--ink-soft)",
+        }}>
+         {i === 0 && <span style={{ marginRight: 6 }}>★ Latest:</span>}
+         {s.particular} — O/WT: <b>{s.o_wt}</b>
+         {i > 0 && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--ink-soft)" }}>(earlier entry)</span>}
+        </div>
        ))}
-       {autoFillSources.length > 1 && (
-        <span> = <b>{autoFillQty?.toFixed(0)}</b></span>
-       )}
       </div>
-      <button type="button" onClick={() => {
-       setAutoFillQty(null); setAutoFillSources([]);
-       setField("qty_received", "");
-      }}
-       style={{
-        marginTop: 6, fontSize: 11, color: "var(--ink-soft)",
-        background: "none", border: "none", cursor: "pointer", padding: 0,
-        textDecoration: "underline",
-       }}>
-       Clear and enter manually
-      </button>
+      <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 6 }}>
+       Using latest entry: <b>{autoFillQty?.toFixed(0)}</b> bags
+       {autoFillSources.length > 1 && <span> · {autoFillSources.length} entries found for this code today</span>}
+      </div>
+      <div style={{ display: "flex", gap: 12 }}>
+       <button type="button" onClick={() => {
+        setAutoFillQty(null); setAutoFillSources([]);
+        setField("qty_received", "");
+       }}
+        style={{
+         fontSize: 11, color: "var(--ink-soft)",
+         background: "none", border: "none", cursor: "pointer", padding: 0,
+         textDecoration: "underline",
+        }}>
+        Clear and enter manually
+       </button>
+       <button type="button"
+        disabled={autoFillLoading}
+        onClick={() => {
+         if (entry.product && entry.date) {
+          void fetchReceivedQty(entry.product as PmProduct, entry.date);
+         }
+        }}
+        style={{
+         fontSize: 11, color: "var(--ok)",
+         background: "none", border: "none", cursor: "pointer", padding: 0,
+         textDecoration: "underline",
+        }}>
+        {autoFillLoading ? "Refreshing..." : "↻ Refresh (new entry added?)"}
+       </button>
+      </div>
      </div>
     )}
     {!autoFillLoading && entry.product && entry.date
@@ -2956,7 +3411,15 @@ function PackingMaterialSection() {
      && PM_PRODUCT_TO_RECEIVED_CODE[entry.product] && (
      <div className="field-hint" style={{ marginBottom: 8 }}>
       No Received entries found for{" "}
-      <b>{PM_PRODUCT_TO_RECEIVED_CODE[entry.product]}</b> on {entry.date}. Enter Qty. Rec manually.
+      <b>{PM_PRODUCT_TO_RECEIVED_CODE[entry.product]}</b> on {entry.date}. Enter Qty. Rec manually or{" "}
+      <button type="button"
+       onClick={() => void fetchReceivedQty(entry.product as PmProduct, entry.date)}
+       style={{
+        fontSize: 11, color: "var(--clay)", background: "none",
+        border: "none", cursor: "pointer", padding: 0, textDecoration: "underline",
+       }}>
+       refresh to check again
+      </button>.
      </div>
     )}
 
