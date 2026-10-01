@@ -125,6 +125,7 @@ export default function BatchAnalysisPage() {
       .from("parties")
       .select("party_code, customer_name")
       .eq("is_active", true)
+      .not("party_code", "in", '("SULPHUR_A_GRADE","SULPHUR_B_GRADE")')
       .order("party_code")
       .then(({ data }) => setParties((data ?? []) as PartyOption[]));
   }, [supabase]);
