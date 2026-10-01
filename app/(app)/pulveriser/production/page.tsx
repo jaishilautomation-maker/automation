@@ -104,15 +104,22 @@ export default function PulveriserProductionPage() {
 
   // Mill-type VFD rows drive the Party/CODE dropdown + oil standard lookup.
   const [millParams, setMillParams] = useState<VfdParameter[]>([]);
+  // Customer names keyed by party_code — loaded from the parties table so the
+  // production dropdown shows the same "code · name" label as batch analysis.
+  const [partyNames, setPartyNames] = useState<Record<string, string>>({});
 
   const loadParams = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("vfd_parameters")
-      .select("*")
-      .eq("machine_type", "mill")
-      .order("party_code");
+    const [{ data, error }, { data: pData }] = await Promise.all([
+      supabase.from("vfd_parameters").select("*").eq("machine_type", "mill").order("party_code"),
+      supabase.from("parties").select("party_code, customer_name").eq("is_active", true),
+    ]);
     if (error) { showToast("VFD codes load nahi hue: " + error.message, true); return; }
     setMillParams((data ?? []) as VfdParameter[]);
+    const names: Record<string, string> = {};
+    for (const p of (pData ?? []) as { party_code: string; customer_name: string | null }[]) {
+      if (p.customer_name && p.customer_name !== p.party_code) names[p.party_code] = p.customer_name;
+    }
+    setPartyNames(names);
   }, [supabase, showToast]);
 
   useEffect(() => { loadParams(); }, [loadParams]);
@@ -387,7 +394,9 @@ export default function PulveriserProductionPage() {
                       return ra !== rb ? ra - rb : a.party_code.localeCompare(b.party_code);
                     })
                     .map(p => (
-                      <option key={p.id} value={p.party_code}>{p.party_code}</option>
+                      <option key={p.id} value={p.party_code}>
+                        {p.party_code}{partyNames[p.party_code] ? ` · ${partyNames[p.party_code]}` : ""}
+                      </option>
                     ))}
                 </select>
               </div>
