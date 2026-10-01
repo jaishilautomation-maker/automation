@@ -347,135 +347,343 @@ function str(v: unknown): string {
 
 // ---------------------------------------------------------------------------
 // Pulveriser Job Card workbook — code-generated on Lab QC OK finalization.
-// Sections: Production, Stores & Oil, Operator, Hourly Readings, QC sign-off.
+// Layout mirrors the physical JSCI/PROD/02 form:
+//   • Company header (merged, centred)
+//   • Production header grid (2×2 pairs across the row)
+//   • Batch details + sulphur/oil in a grid
+//   • Hourly readings table (with Low Prod Reason column)
+//   • Daily checkpoint checkboxes
+//   • Stores & Oil consumption summary
+//   • Four-column signature block
+//   • QC sign-off
 // ---------------------------------------------------------------------------
 async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   const d = record;
   const wb = new ExcelJS.Workbook();
   wb.creator = "JSCI Automation";
   const ws = wb.addWorksheet("Job Card");
-  ws.columns = [{ width: 34 }, { width: 30 }, { width: 30 }];
 
-  const thin = { style: "thin" as const };
-  const centre = (cell: string) => {
-    ws.getCell(cell).alignment = { horizontal: "center", vertical: "middle" };
+  // 8 columns to support the wide table.
+  // A   B      C        D       E       F       G       H
+  // col widths
+  ws.columns = [
+    { width: 5  },  // A – Sr. No.
+    { width: 20 },  // B – माल का कोड नंबर / label
+    { width: 22 },  // C – Sulphur details / value
+    { width: 22 },  // D – Oil details / value
+    { width: 14 },  // E – Classifier VFD / value
+    { width: 14 },  // F – Blower In / Blower Out
+    { width: 14 },  // G – FG Bag / Packing
+    { width: 16 },  // H – Work details / notes
+  ];
+
+  const thin   = { style: "thin"   as const };
+  const medium = { style: "medium" as const };
+  const box    = { top: thin, left: thin, bottom: thin, right: thin };
+  const mbox   = { top: medium, left: medium, bottom: medium, right: medium };
+
+  const setBox  = (cell: string) => { ws.getCell(cell).border = box; };
+  const setMBox = (cell: string) => { ws.getCell(cell).border = mbox; };
+  const centre  = (cell: string) => {
+    ws.getCell(cell).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   };
+  const wrap = (cell: string) => {
+    ws.getCell(cell).alignment = { vertical: "middle", wrapText: true };
+  };
+
+  const HEADER_FILL  = "FFEFE7DA";
+  const SECTION_FILL = "FFE8F5E9";
+  const TABLE_H_FILL = "FFE4EFE3";
+  const fillCell = (cell: string, argb: string) => {
+    ws.getCell(cell).fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+  };
+
+  // Production values stored in MT; display as kg (×1000).
+  const mtToKg = (v: unknown): string =>
+    typeof v === "number" ? String(v * 1000) : v == null ? "" : String(v);
 
   let r = 1;
-  ws.mergeCells(`A${r}:C${r}`);
+
+  // ── Company header ────────────────────────────────────────────────────────
+  ws.mergeCells(`A${r}:H${r}`);
   ws.getCell(`A${r}`).value = "M/s JAISHIL SULPHUR & CHEMICAL INDUSTRIES";
-  ws.getCell(`A${r}`).font = { bold: true, size: 14 }; centre(`A${r}`); r++;
-  ws.mergeCells(`A${r}:C${r}`);
-  ws.getCell(`A${r}`).value = "Plot No-A-20/1 MIDC, Phase-I, DOMBIVALI"; centre(`A${r}`); r++;
-  ws.mergeCells(`A${r}:C${r}`);
+  ws.getCell(`A${r}`).font  = { bold: true, size: 14 };
+  ws.getRow(r).height = 22; centre(`A${r}`);
+  for (const c of ["A","B","C","D","E","F","G","H"]) fillCell(`${c}${r}`, HEADER_FILL);
+  r++;
+
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = "Plot No-A-20/1 MIDC, Phase-I, DOMBIVALI";
+  centre(`A${r}`);
+  for (const c of ["A","B","C","D","E","F","G","H"]) fillCell(`${c}${r}`, HEADER_FILL);
+  r++;
+
+  ws.mergeCells(`A${r}:H${r}`);
   ws.getCell(`A${r}`).value = "PULVERISER JOB CARD (Form JSCI/PROD/02)";
-  ws.getCell(`A${r}`).font = { bold: true, underline: true, size: 12 }; centre(`A${r}`); r++;
+  ws.getCell(`A${r}`).font  = { bold: true, underline: true, size: 12 };
+  ws.getRow(r).height = 20; centre(`A${r}`);
+  for (const c of ["A","B","C","D","E","F","G","H"]) fillCell(`${c}${r}`, HEADER_FILL);
+  r++;
+  r++; // blank spacer
+
+  // ── Production header grid (4 label-value pairs across 2 rows) ────────────
+  // Row 1: Machine | Job Number | Shift | Job Date
+  const hdrLabels1 = ["Machine Number", "Job Number", "Shift", "Job Date"];
+  const hdrVals1   = [str(d.machine_number), str(d.job_number), str(d.shift), str(d.job_date)];
+  // Columns A–B = Machine, C–D = Job Number, E–F = Shift, G–H = Job Date
+  const hdrCols = [["A","B"],["C","D"],["E","F"],["G","H"]];
+  for (let i = 0; i < 4; i++) {
+    const [lc, vc] = hdrCols[i];
+    ws.getCell(`${lc}${r}`).value = hdrLabels1[i];
+    ws.getCell(`${lc}${r}`).font  = { bold: true };
+    ws.getCell(`${lc}${r}`).border = box; fillCell(`${lc}${r}`, SECTION_FILL);
+    ws.getCell(`${vc}${r}`).value = hdrVals1[i];
+    ws.getCell(`${vc}${r}`).border = box; centre(`${vc}${r}`);
+  }
+  ws.getRow(r).height = 18; r++;
+
+  // Row 2: Batch/Material Code | Party/CODE | Planned Production | Oil Required
+  const hdrLabels2 = ["Batch / Material Code", "Party / CODE", "Planned Prod. (kg)", "Oil Required (kg)"];
+  const hdrVals2   = [
+    str(d.material_code), str(d.party_code),
+    mtToKg(d.planned_production_mt), str(d.oil_required_kg),
+  ];
+  for (let i = 0; i < 4; i++) {
+    const [lc, vc] = hdrCols[i];
+    ws.getCell(`${lc}${r}`).value = hdrLabels2[i];
+    ws.getCell(`${lc}${r}`).font  = { bold: true };
+    ws.getCell(`${lc}${r}`).border = box; fillCell(`${lc}${r}`, SECTION_FILL);
+    ws.getCell(`${vc}${r}`).value = hdrVals2[i];
+    ws.getCell(`${vc}${r}`).border = box; centre(`${vc}${r}`);
+  }
+  ws.getRow(r).height = 18; r++;
   r++;
 
-  const section = (title: string) => {
-    ws.mergeCells(`A${r}:C${r}`);
-    ws.getCell(`A${r}`).value = title;
-    ws.getCell(`A${r}`).font = { bold: true, size: 12, color: { argb: "FF1B5E20" } };
+  // ── Sulphur & Oil side-by-side block ─────────────────────────────────────
+  // Section headings
+  ws.mergeCells(`A${r}:D${r}`);
+  ws.getCell(`A${r}`).value = "Sulphur Details";
+  ws.getCell(`A${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL);
+  ws.mergeCells(`E${r}:H${r}`);
+  ws.getCell(`E${r}`).value = "Oil Details";
+  ws.getCell(`E${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
+  fillCell(`E${r}`, SECTION_FILL); r++;
+
+  const sulRows = [
+    ["Supplier",   str(d.sulphur_supplier)],
+    ["Lot Number", str(d.sulphur_lot_number)],
+    ["Date RM Received", str(d.sulphur_empty_date)],
+  ];
+  const oilRows = [
+    ["Supplier",     str(d.oil_supplier)],
+    ["Batch Number", str(d.oil_batch_number)],
+    ["Quantity (kg)", str(d.oil_quantity ?? "")],
+  ];
+  for (let i = 0; i < 3; i++) {
+    ws.getCell(`A${r}`).value = sulRows[i][0]; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = sulRows[i][1];
+    ws.getCell(`E${r}`).value = oilRows[i][0]; ws.getCell(`E${r}`).font = { bold: true };
+    ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = oilRows[i][1];
+    for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
     r++;
-  };
-  const kv = (label: string, value: unknown) => {
-    ws.getCell(`A${r}`).value = label; ws.getCell(`A${r}`).font = { bold: true };
-    ws.mergeCells(`B${r}:C${r}`);
-    ws.getCell(`B${r}`).value = str(value);
-    ws.getCell(`A${r}`).border = { bottom: thin };
-    ws.getCell(`B${r}`).border = { bottom: thin };
-    r++;
-  };
-  // Production values store MT; the UI shows kg (×1000). Match the UI.
-  const mtToKg = (v: unknown) =>
-    typeof v === "number" ? v * 1000 : v == null ? "" : v;
-
-  section("Production Details");
-  kv("Machine Number", d.machine_number);
-  kv("Job Number", d.job_number);
-  kv("Shift", d.shift);
-  kv("Job Date", d.job_date);
-  kv("Batch / Material Code", d.material_code);
-  kv("Party / CODE", d.party_code);
-  kv("Sulphur Supplier", d.sulphur_supplier);
-  kv("Sulphur Lot Number", d.sulphur_lot_number);
-  kv("Sulphur Empty Date", d.sulphur_empty_date);
-  kv("Oil Supplier", d.oil_supplier);
-  kv("Oil Batch Number", d.oil_batch_number);
-  kv("Oil Quantity (kg)", d.oil_quantity);
-  kv("Planned Production (kg)", mtToKg(d.planned_production_mt));
-  kv("Oil Required (kg)", d.oil_required_kg);
+  }
   r++;
 
-  section("Stores & Oil Consumption");
-  kv("Oil Issued (kg)", d.oil_issued_kg);
-  kv("Actual Production (kg)", mtToKg(d.actual_production_mt));
-  kv("Expected Oil (kg)", d.expected_oil_kg);
-  kv("Actual Oil Consumption (kg)", d.actual_oil_consumption_kg);
-  kv("Oil Variance (kg)", d.oil_variance_kg);
-  kv("Extra / Leftover Balance (kg)", d.oil_extra_leftover_balance_kg);
-  kv(
-    "Oil Consumption %",
-    typeof d.oil_consumption_percent === "number"
-      ? `${(d.oil_consumption_percent as number).toFixed(2)}%`
-      : d.oil_consumption_percent
-  );
+  // ── Operator details table ────────────────────────────────────────────────
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = "Operator Details";
+  ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  // Table header row (Hindi labels matching physical form)
+  const opHeaders = [
+    "#",
+    "माल का कोड नंबर",
+    "सल्फर सप्लायर / लॉट / तारीख",
+    "तेल सप्लायर / बैच",
+    "Classifier VFD",
+    "Blower In / Out",
+    "FG Bag / Packing",
+    "काम का विवरण",
+  ];
+  ws.getRow(r).height = 32;
+  opHeaders.forEach((h, i) => {
+    const cell = ws.getCell(r, i + 1);
+    cell.value = h;
+    cell.font  = { bold: true, size: 9 };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = box;
+    cell.fill   = { type: "pattern", pattern: "solid", fgColor: { argb: TABLE_H_FILL } };
+  });
   r++;
 
-  section("Operator Details");
-  kv("Classifier VFD", d.classifier_vfd);
-  kv("Blower Inlet Valve", d.blower_inlet_valve);
-  kv("Blower Outlet Valve", d.blower_outlet_valve);
-  kv("Finished Goods Bag", d.finished_goods_bag);
-  kv("Packing Size", d.packing_size);
-  kv("QC Incharge Note", d.qc_incharge_note);
-  kv("Stores Incharge Note", d.stores_incharge_note);
-  kv("Work Details", d.work_details);
-  kv("Machine Cleaning", d.checkpoint_machine_cleaning ? "✓" : "✗");
-  kv("Roller Check", d.checkpoint_roller_check ? "✓" : "✗");
-  kv("Mesh Cloth Check", d.checkpoint_mesh_cloth_check ? "✓" : "✗");
+  // One data row (single job card entry)
+  ws.getRow(r).height = 28;
+  const opValues = [
+    "1",
+    str(d.material_code),
+    [str(d.sulphur_supplier), str(d.sulphur_lot_number), str(d.sulphur_empty_date)].filter(Boolean).join(" / "),
+    [str(d.oil_supplier), str(d.oil_batch_number)].filter(Boolean).join(" / "),
+    str(d.classifier_vfd),
+    [str(d.blower_inlet_valve), str(d.blower_outlet_valve)].filter(Boolean).join(" / "),
+    [str(d.finished_goods_bag) ? `${str(d.finished_goods_bag)} bags` : "", str(d.packing_size) ? `${str(d.packing_size)} kg` : ""].filter(Boolean).join(", "),
+    str(d.work_details),
+  ];
+  opValues.forEach((v, i) => {
+    const cell = ws.getCell(r, i + 1);
+    cell.value = v;
+    cell.alignment = { vertical: "middle", wrapText: true, horizontal: "center" };
+    cell.border = box;
+  });
+  r++;
   r++;
 
-  // Hourly readings table
+  // ── Daily checkpoints ─────────────────────────────────────────────────────
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = "दैनिक जाँच बिंदु (Daily Checkpoints)";
+  ws.getCell(`A${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  const checks = [
+    ["1. मशीन की सफाई (Machine Cleaning)", d.checkpoint_machine_cleaning],
+    ["2. रोलर की जाँच (Roller Check)",     d.checkpoint_roller_check],
+    ["3. जाली के कपड़े की जाँच (Mesh Cloth Check)", d.checkpoint_mesh_cloth_check],
+  ];
+  checks.forEach(([label, val], i) => {
+    const col = ["A","C","F"][i];
+    const vcol= ["B","D","G"][i];
+    ws.getCell(`${col}${r}`).value = String(label);
+    ws.getCell(`${col}${r}`).font  = { bold: false, size: 10 };
+    ws.getCell(`${vcol}${r}`).value = val ? "✓" : "✗";
+    ws.getCell(`${vcol}${r}`).font  = { bold: true, size: 13, color: { argb: val ? "FF1B5E20" : "FFCC0000" } };
+    ws.getCell(`${vcol}${r}`).alignment = { horizontal: "center" };
+    setBox(`${col}${r}`); setBox(`${vcol}${r}`);
+  });
+  ws.getRow(r).height = 20; r++;
+  r++;
+
+  // ── Hourly readings table ──────────────────────────────────────────────────
   const readings = (d.__readings as Record<string, unknown>[]) ?? [];
-  section(`Hourly Readings (${readings.length})`);
-  if (readings.length > 0) {
-    const hdr = ["Date", "Machine", "Start", "Stop", "Hours", "Planned", "Batch", "Bags"];
-    hdr.forEach((h, i) => {
-      const cell = ws.getCell(r, i + 1);
-      cell.value = h; cell.font = { bold: true };
-      cell.border = { top: thin, left: thin, bottom: thin, right: thin };
-    });
-    // widen to 8 cols for the readings block
-    if (ws.columnCount < 8) {
-      for (let c = 4; c <= 8; c++) ws.getColumn(c).width = 12;
-    }
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = `तास रिडींग / Hourly Readings (${readings.length})`;
+  ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  const rdHdrs = ["Date", "Machine", "Start", "Stop", "Hours", "Planned", "Batch No", "Bags"];
+  ws.getRow(r).height = 18;
+  rdHdrs.forEach((h, i) => {
+    const cell = ws.getCell(r, i + 1);
+    cell.value = h; cell.font = { bold: true };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = box;
+    cell.fill   = { type: "pattern", pattern: "solid", fgColor: { argb: TABLE_H_FILL } };
+  });
+  r++;
+
+  if (readings.length === 0) {
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value = "No readings recorded.";
+    ws.getCell(`A${r}`).alignment = { horizontal: "center" };
     r++;
+  } else {
     for (const rd of readings) {
       const row = [
-        str(rd.reading_date), str(rd.machine), str(rd.start_time), str(rd.stop_time),
-        str(rd.total_hours), str(rd.planned_production), str(rd.batch_no), str(rd.bags),
+        str(rd.reading_date), str(rd.machine),
+        str(rd.start_time), str(rd.stop_time), str(rd.total_hours),
+        str(rd.planned_production), str(rd.batch_no), str(rd.bags),
       ];
       row.forEach((v, i) => {
         const cell = ws.getCell(r, i + 1);
         cell.value = v;
-        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = box;
       });
+      // Low production reason as a sub-row if present
+      if (rd.low_production_reason) {
+        r++;
+        ws.mergeCells(`A${r}:H${r}`);
+        ws.getCell(`A${r}`).value = `  ↳ Low prod. reason: ${str(rd.low_production_reason)}`;
+        ws.getCell(`A${r}`).font  = { italic: true, color: { argb: "FFCC6600" }, size: 9 };
+      }
       r++;
     }
-  } else {
-    kv("Readings", "None recorded");
   }
   r++;
 
-  section("QC Sign-off");
-  kv("Lab Result", d.__lab_result === "ok" ? "OK — Finalized" : str(d.__lab_result));
-  kv("Lab Remark", d.__lab_remark);
-  kv("Reviewed By", d.__lab_by);
-  kv("Reviewed At", d.__lab_at);
+  // ── Stores & Oil consumption summary ──────────────────────────────────────
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = "Stores & Oil Consumption";
+  ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  const oilSumRows: [string, string][] = [
+    ["Oil Issued (kg)",               str(d.oil_issued_kg)],
+    ["Actual Production (kg)",        mtToKg(d.actual_production_mt)],
+    ["Expected Oil (kg)",             str(d.expected_oil_kg)],
+    ["Actual Oil Consumption (kg)",   str(d.actual_oil_consumption_kg)],
+    ["Oil Variance (kg)",             str(d.oil_variance_kg)],
+    ["Extra / Leftover Balance (kg)", str(d.oil_extra_leftover_balance_kg)],
+    ["Oil Consumption %",             typeof d.oil_consumption_percent === "number" ? `${(d.oil_consumption_percent as number).toFixed(2)}%` : str(d.oil_consumption_percent)],
+    ["QC Incharge Note",              str(d.qc_incharge_note)],
+    ["Stores Incharge Note",          str(d.stores_incharge_note)],
+  ];
+  // Two pairs per row (4 columns each)
+  for (let i = 0; i < oilSumRows.length; i += 2) {
+    const [l1, v1] = oilSumRows[i];
+    const [l2, v2] = oilSumRows[i + 1] ?? ["", ""];
+    ws.getCell(`A${r}`).value = l1; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = v1;
+    ws.getCell(`E${r}`).value = l2; ws.getCell(`E${r}`).font = { bold: true };
+    ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = v2;
+    for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
+    r++;
+  }
   r++;
-  ws.getCell(`A${r}`).value = "Form JSCI/PROD/02 · Rev 02";
-  ws.getCell(`C${r}`).value = "Authorised Sign.";
+
+  // ── QC Sign-off ────────────────────────────────────────────────────────────
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = "QC Sign-off";
+  ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  const labResult = d.__lab_result === "ok" ? "OK — Finalized ✓" : str(d.__lab_result);
+  const qcRows: [string, string][] = [
+    ["Lab Result",   labResult],
+    ["Lab Remark",   str(d.__lab_remark)],
+    ["Reviewed By",  str(d.__lab_by)],
+    ["Reviewed At",  str(d.__lab_at)],
+  ];
+  for (const [lbl, val] of qcRows) {
+    ws.getCell(`A${r}`).value = lbl; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:H${r}`); ws.getCell(`B${r}`).value = val;
+    setBox(`A${r}`); setBox(`B${r}`);
+    r++;
+  }
+  r++;
+
+  // ── Signature block ────────────────────────────────────────────────────────
+  ws.getRow(r).height = 40;
+  const sigLabels = ["Operator", "Maintenance\nIncharge", "Production\nIncharge", "QC Incharge"];
+  const sigCols   = [["A","B"],["C","D"],["E","F"],["G","H"]];
+  sigLabels.forEach((lbl, i) => {
+    const [lc, vc] = sigCols[i];
+    ws.mergeCells(`${lc}${r}:${vc}${r}`);
+    ws.getCell(`${lc}${r}`).value = lbl;
+    ws.getCell(`${lc}${r}`).font  = { bold: true, size: 9 };
+    ws.getCell(`${lc}${r}`).alignment = { horizontal: "center", vertical: "bottom", wrapText: true };
+    setMBox(`${lc}${r}`);
+  });
+  r++;
+
+  // ── Footer ─────────────────────────────────────────────────────────────────
+  ws.mergeCells(`A${r}:D${r}`);
+  ws.getCell(`A${r}`).value = "DOC NO- JSCI/PROD/02    REV: 02    Date: 01/01/2024";
+  ws.getCell(`A${r}`).font  = { size: 8, italic: true };
+  ws.mergeCells(`E${r}:H${r}`);
+  ws.getCell(`E${r}`).value = "Authorised Sign.";
+  ws.getCell(`E${r}`).alignment = { horizontal: "right" };
+  ws.getCell(`E${r}`).font  = { bold: true };
 
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out as ArrayBuffer);
