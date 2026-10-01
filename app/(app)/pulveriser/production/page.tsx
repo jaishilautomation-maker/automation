@@ -30,6 +30,19 @@ import {
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
+// Crude sulphur vendor list for the RM Source dropdown (per 29-09-26 follow-up).
+const SULPHUR_VENDORS = [
+  "Bharat Petroleum Corporation Ltd.",
+  "Devansh Chemicals",
+  "Dossa Chemicals Pvt. Ltd",
+  "Gulf Fertilizers and Chemicals FZE",
+  "Hindustan Petroleum Corporation Ltd.",
+  "Jaishil Sulphur & Chemical Inds.-A/20/1",
+  "M/S SETCO TRADING FZE",
+  "SUPERFORM CHEMISTRIES LIMITED (CR.)",
+  "Zolfo Impex",
+] as const;
+
 const MAX_ENTRIES = 6;
 
 // Preferred display order for the Party/CODE dropdown (matches vfd_parameters
@@ -435,9 +448,20 @@ export default function PulveriserProductionPage() {
             <div className="row2">
               <div>
                 <label>Source</label>
-                <input type="text" placeholder="e.g. Reliance, HPCL"
-                  value={e.sulSupplier}
-                  onChange={ev => updateEntry(e.key, { sulSupplier: ev.target.value })} />
+                <select value={e.sulSupplier}
+                  onChange={ev => {
+                    const vendor = ev.target.value;
+                    // Auto-fill "Date RM was received" to today when a vendor
+                    // is selected and the date hasn't been set yet.
+                    const patch: Partial<Entry> = { sulSupplier: vendor };
+                    if (vendor && !e.sulEmptyDate) patch.sulEmptyDate = todayISO();
+                    updateEntry(e.key, patch);
+                  }}>
+                  <option value="">-- Select vendor --</option>
+                  {SULPHUR_VENDORS.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label>Lot Number</label>
