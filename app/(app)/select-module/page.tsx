@@ -291,6 +291,18 @@ export default function SelectModulePage() {
               <div className="module-desc">{desc}</div>
             </button>
           ))}
+
+          {/* Admin-only: User Management */}
+          <button
+            className="module-tile"
+            type="button"
+            onClick={() => router.push("/admin")}
+            style={{ borderColor: "#1565c0", background: "#e3f2fd" }}
+          >
+            <div className="module-icon">👥</div>
+            <div className="module-title" style={{ color: "#1565c0" }}>Manage Users</div>
+            <div className="module-desc">Add, edit, or remove system users and their roles</div>
+          </button>
         </div>
 
         <div className="small-note" style={{ marginTop: 20, textAlign: "center" }}>
@@ -372,6 +384,20 @@ export default function SelectModulePage() {
               </button>
             );
           })}
+
+          {/* Manage Users — visible to admins on all paths */}
+          {isAdmin && (
+            <button
+              className="module-tile"
+              type="button"
+              onClick={() => router.push("/admin")}
+              style={{ borderColor: "#1565c0", background: "#e3f2fd" }}
+            >
+              <div className="module-icon">👥</div>
+              <div className="module-title" style={{ color: "#1565c0" }}>Manage Users</div>
+              <div className="module-desc">Add, edit, or remove system users and their roles</div>
+            </button>
+          )}
         </div>
       </div>
     );
