@@ -150,7 +150,10 @@ export default function RmReceiptPage() {
 
       const selectedVendor = csVendors.find(v => v.id === csVendorId);
 
-      await supabase.from("rm_receipts").insert({
+      // Build receipt payload. vendor_id requires migration 060 to be applied;
+      // if the column doesn't exist yet the insert would fail silently, so we
+      // catch the error and retry without it so the receipt still saves.
+      const receiptPayload: Record<string, unknown> = {
         batch_id:      batch.id,
         factory_id:    activeFactory.id,
         supplier_name: selectedVendor?.vendor_name ?? "Crude Sulphur",
@@ -160,7 +163,21 @@ export default function RmReceiptPage() {
         quantity:      qty,
         unit:          "MT",
         remarks:       [appearance.trim(), csTruckNumber.trim() ? `Truck: ${csTruckNumber.trim()}` : ""].filter(Boolean).join(" | ") || null,
-      });
+      };
+
+      let { error: receiptErr } = await supabase.from("rm_receipts").insert(receiptPayload);
+
+      // If insert failed (likely vendor_id column not yet added — migration 060
+      // not applied), retry without vendor_id so the receipt still saves.
+      if (receiptErr) {
+        delete receiptPayload.vendor_id;
+        const retry = await supabase.from("rm_receipts").insert(receiptPayload);
+        receiptErr = retry.error;
+      }
+
+      if (receiptErr) {
+        showToast("Receipt row could not be saved: " + receiptErr.message, true); return;
+      }
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
 

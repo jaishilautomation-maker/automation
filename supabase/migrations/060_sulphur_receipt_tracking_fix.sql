@@ -37,9 +37,10 @@ CREATE INDEX IF NOT EXISTS idx_rm_receipts_vendor
 
 -- ---------------------------------------------------------------------------
 -- 2. Drop the three 059 columns from rm_qc
---    These were incorrectly placed there. Drop safely (IF EXISTS guards).
---    Also drop the index from 059 that references them.
+--    v_sulphur_lot_remaining (from 059) depends on vendor_id — drop it first.
+--    The corrected view v_sulphur_receipt_remaining is created in step 5.
 -- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS public.v_sulphur_lot_remaining CASCADE;
 DROP INDEX IF EXISTS public.idx_rm_qc_vendor_date;
 
 ALTER TABLE public.rm_qc
@@ -105,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_pulv_jc_sulphur_receipt
 --   sulphur_draw  = planned_production_mt × sulphur_ratio (vfd_parameters)
 --   remaining_mt  = receipt.quantity − SUM(planned draws)
 -- ---------------------------------------------------------------------------
-DROP VIEW IF EXISTS public.v_sulphur_lot_remaining;
+-- v_sulphur_lot_remaining already dropped with CASCADE in step 2 above.
 
 CREATE OR REPLACE VIEW public.v_sulphur_receipt_remaining AS
 SELECT
