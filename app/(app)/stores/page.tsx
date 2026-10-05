@@ -2973,6 +2973,44 @@ const PM_PRODUCTS = [
 ] as const;
 type PmProduct = (typeof PM_PRODUCTS)[number];
 
+/**
+ * Fallback threshold map for Stock Ledger items, keyed by item_name fragment
+ * (case-insensitive partial match). Used when stores_stock_items.min_threshold
+ * has not been set yet in the DB (before migration 056/057 is run).
+ * null = no threshold rule for that item.
+ */
+const STOCK_THRESHOLD_FALLBACK: { fragment: string; threshold: number | null; category: string }[] = [
+ // Raw Materials (migration 056)
+ { fragment: "chem grind oil",           threshold: 200,  category: "raw_material" },
+ { fragment: "gear oil 320",             threshold: 200,  category: "raw_material" },
+ { fragment: "magnesium carbonate",      threshold: 50,   category: "raw_material" },
+ { fragment: "power oil citrine m 4150", threshold: 1000, category: "raw_material" },
+ // Packing Materials (migration 057)
+ { fragment: "ceat 108/export",          threshold: 2000, category: "packaging_material" },
+ { fragment: "mrf-m-2615",               threshold: 4000, category: "packaging_material" },
+ { fragment: "lanxess",                  threshold: 2000, category: "packaging_material" },
+ { fragment: "wooden pallets",           threshold: null, category: "packaging_material" },
+ { fragment: "ceat r5299",               threshold: 2000, category: "packaging_material" },
+ { fragment: "apollo tyre",              threshold: 1000, category: "packaging_material" },
+ { fragment: "plain bags export 25 kg",  threshold: 2000, category: "packaging_material" },
+ { fragment: "thread cone",              threshold: 1000, category: "packaging_material" },
+ { fragment: "bridgestone we-10",        threshold: 1000, category: "packaging_material" },
+ { fragment: "rubber maker 50 kg",       threshold: 1000, category: "packaging_material" },
+ { fragment: "jki-108 50 kg",            threshold: 2000, category: "packaging_material" },
+ { fragment: "jumbo bags 500 kg",        threshold: 1000, category: "packaging_material" },
+ { fragment: "old bags",                 threshold: 1000, category: "packaging_material" },
+];
+
+/** Get effective threshold for a stock item — DB value takes priority, fallback map second. */
+function getEffectiveThreshold(item: StoresStockItem): number | null {
+ if (item.min_threshold !== null && item.min_threshold !== undefined) return item.min_threshold;
+ const nameLower = item.item_name.toLowerCase();
+ const match = STOCK_THRESHOLD_FALLBACK.find(
+  f => f.category === item.category && nameLower.includes(f.fragment)
+ );
+ return match ? match.threshold : null;
+}
+
 /** Threshold (bags) per product. null = no status rule (e.g. Wooden Pallets). */
 const PM_THRESHOLDS: Record<string, number | null> = {
   "CEAT 108/EXPORT":                       2000,
@@ -6148,9 +6186,10 @@ function StockLedgerSection() {
  };
 
  if (activeItem) {
-  const bal   = balances[activeItem.id] ?? 0;
-  const below = activeItem.min_threshold != null && bal < activeItem.min_threshold;
-  const sources = mode === "add" ? ADD_SOURCES : DEDUCT_SOURCES;
+  const bal       = balances[activeItem.id] ?? 0;
+  const threshold = getEffectiveThreshold(activeItem);
+  const below     = threshold != null && bal < threshold;
+  const sources   = mode === "add" ? ADD_SOURCES : DEDUCT_SOURCES;
 
   return (
    <>
@@ -6170,11 +6209,11 @@ function StockLedgerSection() {
         ({activeItem.item_code}) · {CATEGORY_LABEL[activeItem.category]}
        </span>
       </div>
-      {activeItem.min_threshold != null && (
+      {threshold != null && (
        <div style={{ fontSize: 12, marginTop: 2,
         color: below ? "var(--warn)" : "var(--ink-soft)" }}>
         {below ? "⚠ Material Required" : "✓ Above minimum threshold"}
-        {" — "}Min: {activeItem.min_threshold} {activeItem.unit}
+        {" — "}Min: {threshold} {activeItem.unit}
        </div>
       )}
      </div>
@@ -6393,9 +6432,10 @@ function StockLedgerSection() {
 
    {/* Below-threshold warning banner */}
    {(() => {
-    const itemsBelow = items.filter(i =>
-     i.min_threshold != null && (balances[i.id] ?? 0) < i.min_threshold
-    );
+    const itemsBelow = items.filter(i => {
+     const t = getEffectiveThreshold(i);
+     return t != null && (balances[i.id] ?? 0) < t;
+    });
     return itemsBelow.length > 0 ? (
      <div style={{
       padding: "10px 14px", borderRadius: 8, marginBottom: 14,
@@ -6413,8 +6453,9 @@ function StockLedgerSection() {
     : filtered.length === 0
      ? <div className="empty">No items found.</div>
      : filtered.map(item => {
-      const bal   = balances[item.id] ?? null;
-      const below = bal != null && item.min_threshold != null && bal < item.min_threshold;
+      const bal       = balances[item.id] ?? null;
+      const threshold = getEffectiveThreshold(item);
+      const below     = bal != null && threshold != null && bal < threshold;
       return (
        <div key={item.id} className="pending-item" onClick={() => openItem(item)}>
         <div className="pi-top">
@@ -6430,7 +6471,7 @@ function StockLedgerSection() {
          Code: {item.item_code}
          {below && (
           <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
-           ⚠ Material Required (min {item.min_threshold} {item.unit})
+           ⚠ Material Required (min {threshold} {item.unit})
           </span>
          )}
         </div>
