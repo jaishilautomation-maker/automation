@@ -655,6 +655,7 @@ export default function RmQcPage() {
             newRow.id,
             selectedMaterial?.name ?? "Raw Material",
             selectedBatch?.batch_number ?? null,
+            linkedReceipt?.id ?? null,
             testDate,
             chemistName.trim() || null,
             isCrudeSulphur ? (crudeGrade ?? "") : "",

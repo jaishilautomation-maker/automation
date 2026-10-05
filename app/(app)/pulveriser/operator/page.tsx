@@ -472,7 +472,9 @@ export default function PulveriserOperatorPage() {
               job_number:                   active.job_number ?? active.id,
               party_code:                   active.party_code ?? null,
               status:                       "submitted_for_qc",
-              actual_production_mt:         updatedCard?.actual_production_mt ?? actualMtValue,
+              actual_production_kg:         updatedCard?.actual_production_mt != null
+                ? updatedCard.actual_production_mt * 1000
+                : (actualMtValue != null ? actualMtValue * 1000 : null),
               expected_oil_kg:              updatedCard?.expected_oil_kg ?? null,
               actual_oil_consumption_kg:    updatedCard?.actual_oil_consumption_kg ?? null,
               oil_variance_kg:              updatedCard?.oil_variance_kg ?? null,

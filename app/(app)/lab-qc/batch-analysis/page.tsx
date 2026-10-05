@@ -463,6 +463,7 @@ export default function BatchAnalysisPage() {
             values: [
               existingAnalysis.id,
               batchNumber.trim(),
+              mfgDate,
               analysisDate,
               appearanceVal || null,
               JSON.stringify(testResults),
@@ -543,6 +544,7 @@ export default function BatchAnalysisPage() {
             values: [
               newRow.id,
               batchNumber.trim(),
+              mfgDate,
               analysisDate,
               appearanceVal || null,
               JSON.stringify(testResults),

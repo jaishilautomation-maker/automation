@@ -68,11 +68,12 @@ export interface JobCardSheetRow {
   machine_number?:                string | null;
   material_code?:                 string | null;
   status?:                        string | null;
-  planned_production_mt?:         number | null;
+  planned_production_kg?:         number | null;  // entered/displayed in kg (was MT)
   oil_required_kg?:               number | null;
-  sulphur_supplier?:              string | null;
+  sulphur_vendor?:                string | null;  // vendor name (was sulphur_supplier)
   sulphur_lot_number?:            string | null;
-  sulphur_empty_date?:            string | null;
+  date_rm_received?:              string | null;  // was sulphur_empty_date
+  sulphur_source_receipt_id?:     string | null;  // FK → rm_receipts.id
   oil_supplier?:                  string | null;
   oil_batch_number?:              string | null;
   oil_quantity?:                  number | null;
@@ -83,7 +84,7 @@ export interface JobCardSheetRow {
   stores_by?:                     string | null;
   stores_at?:                     string | null;
   // Operator stage
-  actual_production_mt?:          number | null;
+  actual_production_kg?:          number | null;  // entered/displayed in kg (was MT)
   expected_oil_kg?:               number | null;
   actual_oil_consumption_kg?:     number | null;
   oil_variance_kg?:               number | null;
@@ -115,11 +116,12 @@ const JOB_CARD_COLUMNS: (keyof JobCardSheetRow)[] = [
   "machine_number",
   "material_code",
   "status",
-  "planned_production_mt",
+  "planned_production_kg",
   "oil_required_kg",
-  "sulphur_supplier",
+  "sulphur_vendor",
   "sulphur_lot_number",
-  "sulphur_empty_date",
+  "date_rm_received",
+  "sulphur_source_receipt_id",
   "oil_supplier",
   "oil_batch_number",
   "oil_quantity",
@@ -128,7 +130,7 @@ const JOB_CARD_COLUMNS: (keyof JobCardSheetRow)[] = [
   "oil_issued_kg",
   "stores_by",
   "stores_at",
-  "actual_production_mt",
+  "actual_production_kg",
   "expected_oil_kg",
   "actual_oil_consumption_kg",
   "oil_variance_kg",
@@ -158,11 +160,12 @@ export const JOB_CARD_HEADERS: string[] = [
   "Machine Number",
   "Material / Batch Code",
   "Status",
-  "Planned Production (MT)",
+  "Planned Production (kg)",
   "Oil Required (kg)",
-  "Sulphur Supplier",
+  "Sulphur Vendor",
   "Sulphur Lot Number",
-  "Sulphur Empty Date",
+  "Date RM Received",
+  "Sulphur Source Receipt ID",
   "Oil Supplier",
   "Oil Batch Number",
   "Oil Quantity (kg)",
@@ -171,7 +174,7 @@ export const JOB_CARD_HEADERS: string[] = [
   "Oil Issued (kg)",
   "Stores By",
   "Stores At",
-  "Actual Production (MT)",
+  "Actual Production (kg)",
   "Expected Oil (kg)",
   "Actual Oil Consumed (kg)",
   "Oil Variance (kg)",
@@ -253,7 +256,7 @@ const SHEET_TABS: Record<SheetTarget, Record<string, string[]>> = {
       "Lanxess", "CEAT R5299", "Plain WE10 SA", "JKI 108",
       "Old Bags Shakti", "Rubber Maker 50kg", "Sulphur Gain",
       "Jumbo Bag", "Export Plan 25kg", "Total (MT)",
-      "Entered By", "Entered At",
+      "Actual Production (kg)", "Entered By", "Entered At",
     ],
     "Daily Dispatch": [
       "Date", "CEAT 108 Export", "M2615", "Plain 2615", "Apollo 160108",
@@ -308,22 +311,23 @@ const SHEET_TABS: Record<SheetTarget, Record<string, string[]>> = {
   // -------------------------------------------------------------------------
   lab: {
     "RM Receipt": [
-      "ID", "Material Type", "Batch Number", "Supplier Name", "Quantity",
-      "Unit", "Received Date", "Truck Number", "Appearance",
+      "ID", "Material Type", "Batch Number", "Vendor", "Supplier Name",
+      "Quantity", "Unit", "Received Date", "Truck Number", "Appearance",
       "Submitted By", "Submitted At", "Factory ID",
     ],
     "RM QC": [
-      "ID", "Material Name", "Batch Number", "Test Date", "Chemist", "Grade",
-      "Test Results (JSON)", "Remarks", "Submitted By", "Submitted At", "Factory ID",
+      "ID", "Material Name", "Batch Number", "Receipt ID", "Test Date",
+      "Chemist", "Grade", "Test Results (JSON)", "Remarks",
+      "Submitted By", "Submitted At", "Factory ID",
     ],
     "Hourly Reading": [
       "ID", "Batch Number", "Reading Time", "Test Results (JSON)",
       "Remarks", "Submitted By", "Submitted At", "Factory ID",
     ],
     "Batch Analysis": [
-      "ID", "Batch Number", "Analysis Date", "Appearance",
-      "Test Results (JSON)", "Remarks", "Submitted By", "Submitted At",
-      "Is Update", "Factory ID",
+      "ID", "Batch Number", "Manufacturing Date", "Analysis Date",
+      "Appearance", "Test Results (JSON)", "Remarks",
+      "Submitted By", "Submitted At", "Is Update", "Factory ID",
     ],
     "Product QC": [
       "ID", "Product Name", "Batch Number", "Phase", "Test Date",
