@@ -444,7 +444,7 @@ export default function PulveriserProductionPage() {
             </div>
 
             {/* Sulphur */}
-            <div style={{ marginTop: 14, fontWeight: 700, fontSize: 13 }}>Sulphur</div>
+            <div style={{ marginTop: 14, fontWeight: 700, fontSize: 13 }}>Crude Sulphur</div>
             <div className="row2">
               <div>
                 <label>Source</label>
