@@ -288,8 +288,8 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
  const handleIssue = async () => {
   if (!selected || !user) return;
   const n = Number(oilIssued);
-  if (!Number.isFinite(n) || n <= 0) {
-   showToast("Enter a valid oil quantity (greater than 0).", true); return;
+  if (!Number.isFinite(n) || n < 0) {
+   showToast("Enter a valid oil quantity (0 or more).", true); return;
   }
   setSubmitting(true);
   try {
@@ -309,8 +309,8 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
     showToast("Save blocked -- check factory access or card status.", true); return;
    }
 
-   // Deduct issued oil from stock ledger (if an oil item was selected)
-   if (selectedOilItemId) {
+   // Deduct issued oil from stock ledger (only if oil item selected AND qty > 0)
+   if (selectedOilItemId && n > 0) {
     const selectedOilItem = oilItems.find(i => i.id === selectedOilItemId);
     const prevBal = oilItemBalance ?? 0;
     const newBal  = prevBal - n;
@@ -361,9 +361,11 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
    });
    const isRework = rejectionHistory.some(r => r.result === "not_ok");
    showToast(
-    (isRework ? "Rework oil re-issued" : "Oil issued") +
-    (selectedOilItem ? " from " + selectedOilItem.item_name : "") +
-    " -- operator can now run the batch."
+    n === 0
+     ? "Confirmed — no oil required. Operator can now run the batch."
+     : (isRework ? "Rework oil re-issued" : "Oil issued") +
+       (selectedOilItem ? " from " + selectedOilItem.item_name : "") +
+       " -- operator can now run the batch."
    );
    closeCard();
    loadCards();
@@ -511,9 +513,14 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
       </h3>
       <div className="field-hint" style={{ marginBottom: 12 }}>
        Select the oil type and enter the quantity to issue.
-       {jc.oil_required_kg != null && (
+       {jc.oil_required_kg != null && jc.oil_required_kg > 0 && (
         <span style={{ fontWeight: 700, color: "var(--clay)" }}>
          {" "}Required: {jc.oil_required_kg} kg
+        </span>
+       )}
+       {(jc.oil_required_kg == null || jc.oil_required_kg === 0) && (
+        <span style={{ fontWeight: 700, color: "var(--ok)" }}>
+         {" "}No oil required for this batch — enter 0 to proceed.
         </span>
        )}
       </div>
@@ -567,7 +574,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
        </div>
       )}
 
-      <label>Oil Issued (kg) *</label>
+      <label>Oil Issued (kg) — enter 0 if no oil required</label>
       <input type="number" min="0" step="0.001" placeholder="0"
        value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
       <label style={{ marginTop: 12 }}>Stores Incharge Note</label>
@@ -580,14 +587,15 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
        {isReworkCard
         ? "This note + the rejection reason will be shown to the operator."
         : "This note will be visible to the operator."}
-       {selectedOilItemId && " The issued quantity will be deducted from the selected oil stock."}
+       {selectedOilItemId && Number(oilIssued) > 0 && " The issued quantity will be deducted from the selected oil stock."}
       </div>
       <button className="btn btn-primary" type="button"
-       disabled={submitting || !oilIssued.trim()}
+       disabled={submitting || oilIssued.trim() === ""}
        onClick={handleIssue}
        style={{ marginTop: 16, ...(isReworkCard ? { background: "var(--warn)" } : {}) }}>
        {submitting ? "Saving..."
         : isReworkCard ? "Re-Issue Oil for Rework Batch"
+        : Number(oilIssued) === 0 ? "Confirm No Oil — Send to Operator"
         : "Issue Oil and Send to Operator"}
       </button>
      </div>
