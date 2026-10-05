@@ -947,15 +947,19 @@ export interface Vendor {
 }
 
 /**
- * Row from v_sulphur_lot_remaining (migration 059 view).
- * One row per rm_qc receipt that has quantity_received_mt set.
+ * Row from v_sulphur_receipt_remaining (migration 060 view).
+ * One row per rm_receipts delivery that has quantity set.
  */
 export interface SulphurLotRemaining {
-  rm_qc_id: string;
+  receipt_id: string;            // pk of rm_receipts row
+  batch_id: string | null;
+  invoice_number: string | null; // from batches.batch_number
   vendor_id: string | null;
   vendor_name: string | null;
-  receipt_date: string | null;          // ISO date
+  received_date: string | null;  // ISO date (was receipt_date)
   quantity_received_mt: number | null;
+  unit: string | null;
+  supplier_name: string | null;
   total_planned_draw_mt: number;
   quantity_remaining_mt: number | null;
   linked_job_card_count: number;
@@ -1017,7 +1021,7 @@ export interface PulveriserJobCard {
   sulphur_supplier: string | null;
   sulphur_lot_number: string | null;
   sulphur_empty_date: string | null;    // ISO date — खाली करने की तारीख
-  sulphur_source_rm_qc_id: string | null; // FK → rm_qc.id (migration 059) — links to the specific receipt lot
+  sulphur_source_receipt_id: string | null; // FK → rm_receipts.id (migration 060) — links to the specific receipt lot
   oil_supplier: string | null;
   oil_batch_number: string | null;
   oil_quantity: number | null;

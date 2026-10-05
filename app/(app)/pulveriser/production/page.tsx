@@ -70,7 +70,7 @@ interface Entry {
   batchNumber: string;      // was माल का कोड नंबर — stored in material_code
   plannedKg: string;        // entered in KG; converted to MT (÷1000) on save
   sulVendorId: string;      // selected vendor id (from vendors table)
-  sulSourceRmQcId: string;  // selected rm_qc receipt id (from v_sulphur_lot_remaining)
+  sulSourceReceiptId: string; // selected rm_receipts.id (from v_sulphur_receipt_remaining)
   sulLot: string;
   sulEmptyDate: string;
   oilSupplier: string;
@@ -82,7 +82,7 @@ function blankEntry(): Entry {
   return {
     key: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     partyCode: "", batchNumber: "", plannedKg: "",
-    sulVendorId: "", sulSourceRmQcId: "", sulLot: "", sulEmptyDate: "",
+    sulVendorId: "", sulSourceReceiptId: "", sulLot: "", sulEmptyDate: "",
     oilSupplier: "", oilBatch: "", oilQty: "",
   };
 }
@@ -125,7 +125,7 @@ export default function PulveriserProductionPage() {
       supabase.from("vfd_parameters").select("*").eq("machine_type", "mill").order("party_code"),
       supabase.from("parties").select("party_code, customer_name").eq("is_active", true),
       supabase.from("vendors").select("*").eq("vendor_type", "crude_sulphur").eq("is_active", true).order("vendor_name"),
-      supabase.from("v_sulphur_lot_remaining").select("*").order("receipt_date", { ascending: false }),
+      supabase.from("v_sulphur_receipt_remaining").select("*").order("received_date", { ascending: false }),
     ]);
     if (error) { showToast("VFD codes load nahi hue: " + error.message, true); return; }
     setMillParams((data ?? []) as VfdParameter[]);
@@ -232,11 +232,11 @@ export default function PulveriserProductionPage() {
           })(),
           sulphur_lot_number:    e.sulLot.trim() || null,
           sulphur_empty_date:    (() => {
-            const lot = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId);
-            return lot?.receipt_date ?? (e.sulEmptyDate || null);
+            const lot = sulLots.find(l => l.receipt_id === e.sulSourceReceiptId);
+            return lot?.received_date ?? (e.sulEmptyDate || null);
           })(),
-          // New receipt link (migration 059)
-          sulphur_source_rm_qc_id: e.sulSourceRmQcId || null,
+          // Receipt link (migration 060)
+          sulphur_source_receipt_id: e.sulSourceReceiptId || null,
           oil_supplier:          e.oilSupplier.trim() || null,
           oil_batch_number:      e.oilBatch.trim() || null,
           oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
@@ -263,7 +263,7 @@ export default function PulveriserProductionPage() {
         const e  = entries[i];
         // Derive backward-compat sulphur fields from the receipt selection.
         const sulVendorName = sulVendors.find(v => v.id === e.sulVendorId)?.vendor_name ?? null;
-        const sulReceiptDate = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId)?.receipt_date ?? (e.sulEmptyDate || null);
+        const sulReceiptDate = sulLots.find(l => l.receipt_id === e.sulSourceReceiptId)?.received_date ?? (e.sulEmptyDate || null);
         const { subject, html } = buildProductionEmail({
           jobNumber:           jobNumber.trim() || null,
           machineNumber:       machine,
@@ -466,7 +466,7 @@ export default function PulveriserProductionPage() {
             <select value={e.sulVendorId}
               onChange={ev => {
                 // Switching vendor clears the receipt selection.
-                updateEntry(e.key, { sulVendorId: ev.target.value, sulSourceRmQcId: "", sulEmptyDate: "" });
+                updateEntry(e.key, { sulVendorId: ev.target.value, sulSourceReceiptId: "", sulEmptyDate: "" });
               }}>
               <option value="">-- Select vendor --</option>
               {sulVendors.map(v => (
@@ -479,7 +479,7 @@ export default function PulveriserProductionPage() {
               const vendorLots = sulLots.filter(l => l.vendor_id === e.sulVendorId);
               const availableLots = vendorLots.filter(l => (l.quantity_remaining_mt ?? 0) > 0);
               const depletedLots  = vendorLots.filter(l => (l.quantity_remaining_mt ?? 0) <= 0);
-              const selectedLot   = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId);
+              const selectedLot   = sulLots.find(l => l.receipt_id === e.sulSourceReceiptId);
 
               return (
                 <>
@@ -491,26 +491,26 @@ export default function PulveriserProductionPage() {
                   ) : (
                     <>
                       <label style={{ marginTop: 10 }}>Receipt Date</label>
-                      <select value={e.sulSourceRmQcId}
+                      <select value={e.sulSourceReceiptId}
                         onChange={ev => {
-                          const lot = sulLots.find(l => l.rm_qc_id === ev.target.value);
+                          const lot = sulLots.find(l => l.receipt_id === ev.target.value);
                           updateEntry(e.key, {
-                            sulSourceRmQcId: ev.target.value,
-                            sulEmptyDate: lot?.receipt_date ?? "",
+                            sulSourceReceiptId: ev.target.value,
+                            sulEmptyDate: lot?.received_date ?? "",
                           });
                         }}>
                         <option value="">-- Select receipt --</option>
                         {availableLots.map(l => (
-                          <option key={l.rm_qc_id} value={l.rm_qc_id}>
-                            {l.receipt_date} — {l.quantity_remaining_mt?.toFixed(3)} MT remaining
+                          <option key={l.receipt_id} value={l.receipt_id}>
+                            {l.received_date} — {l.quantity_remaining_mt?.toFixed(3)} MT remaining
                             {l.has_null_ratio_cards ? " ⚠ estimate (ratio not set)" : ""}
                           </option>
                         ))}
                         {depletedLots.length > 0 && (
                           <optgroup label="— Depleted / over-allocated —">
                             {depletedLots.map(l => (
-                              <option key={l.rm_qc_id} value={l.rm_qc_id} disabled>
-                                {l.receipt_date} — {l.quantity_remaining_mt?.toFixed(3)} MT (depleted)
+                              <option key={l.receipt_id} value={l.receipt_id} disabled>
+                                {l.received_date} — {l.quantity_remaining_mt?.toFixed(3)} MT (depleted)
                               </option>
                             ))}
                           </optgroup>

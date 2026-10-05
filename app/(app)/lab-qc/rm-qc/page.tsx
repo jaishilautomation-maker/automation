@@ -22,7 +22,7 @@ import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
-import type { Material, QcTestDefinition, Vendor } from "@/lib/types";
+import type { Material, QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
@@ -130,14 +130,20 @@ export default function RmQcPage() {
   const [batchId, setBatchId]         = useState("");
   const [batches, setBatches]         = useState<BatchOption[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
-  // A-20/1 Crude Sulphur: invoice number as direct text input (find-or-create batch)
+  // A-20/1 Crude Sulphur: invoice number resolved against rm_receipts.
+  // No auto-create — the chemist must enter an invoice that was already
+  // registered in the RM Receipt activity.
   const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
   const [resolvingInvoice, setResolvingInvoice]     = useState(false);
-  // Crude Sulphur receipt header fields (new — migration 059)
-  const [vendors, setVendors]                   = useState<Vendor[]>([]);
-  const [vendorId, setVendorId]                 = useState("");
-  const [receiptDate, setReceiptDate]           = useState(new Date().toISOString().slice(0, 10));
-  const [quantityReceivedMt, setQuantityReceivedMt] = useState("");
+  const [receiptLinkError, setReceiptLinkError]     = useState<string | null>(null);
+  // Pulled read-only from the matched rm_receipts row on successful link.
+  const [linkedReceipt, setLinkedReceipt] = useState<{
+    id: string;
+    supplier_name: string;
+    received_date: string;
+    quantity: number;
+    unit: string;
+  } | null>(null);
   // Crude Sulphur A-grade specs — auto-loaded (no grade selector). Drives the
   // inline per-parameter spec + pass/fail badge and the auto-determined grade.
   const [crudeSpecs, setCrudeSpecs] = useState<SpecRow[]>([]);
@@ -208,13 +214,6 @@ export default function RmQcPage() {
           if (data) { setMaterials([data as Material]); setMaterialId((data as Material).id); }
           setLoadingMats(false);
         });
-      // Load crude sulphur vendors for the receipt header
-      sb.from("vendors")
-        .select("*")
-        .eq("vendor_type", "crude_sulphur")
-        .eq("is_active", true)
-        .order("vendor_name")
-        .then(({ data }) => setVendors((data ?? []) as Vendor[]));
     } else {
       sb.from("materials").select("*").in("code", A20_RM_CODES).eq("is_active", true)
         .then(({ data }) => {
@@ -497,49 +496,70 @@ export default function RmQcPage() {
   })();
 
   // ---------------------------------------------------------------------------
-  // Crude Sulphur: resolve the typed invoice number to a batch (find-or-create)
-  // on blur, so the shared batchId-based submit flow keeps working with a
-  // direct text input instead of a dropdown of existing receipts.
+  // Crude Sulphur: resolve invoice number against an EXISTING rm_receipts row.
+  //
+  // Flow:
+  //   1. Look up batches.batch_number = invoice (A-20/1 RM Receipt stores the
+  //      invoice number as the batch number, not in rm_receipts.invoice_number).
+  //   2. If no batch found → show error, keep test fields locked.
+  //   3. If batch found but no rm_receipts row for that batch_id → same error.
+  //   4. If rm_receipts row found → pull supplier/date/qty read-only, set
+  //      batchId and linkedReceipt. Never auto-create a batch here.
   // ---------------------------------------------------------------------------
   const resolveCrudeInvoice = useCallback(async () => {
     const inv = crudeInvoiceNumber.trim();
-    if (!inv || !activeFactory || !user || !materialId) { setBatchId(""); return; }
+    if (!inv) { setBatchId(""); setLinkedReceipt(null); setReceiptLinkError(null); return; }
+    if (!activeFactory || !user || !materialId) { setBatchId(""); return; }
     setResolvingInvoice(true);
+    setReceiptLinkError(null);
+    setLinkedReceipt(null);
+    setBatchId("");
     try {
-      const { data: existing } = await supabase
+      // Step 1: find the batch by invoice number (stored as batch_number).
+      const { data: batchRow } = await supabase
         .from("batches")
         .select("id")
         .eq("factory_id", activeFactory.id)
         .eq("batch_number", inv)
         .maybeSingle();
 
-      if (existing) { setBatchId(existing.id); return; }
+      if (!batchRow) {
+        setReceiptLinkError(
+          `No receipt found for invoice "${inv}" — create it in Raw Material Receipt first.`
+        );
+        return;
+      }
 
-      const { data: nb, error } = await supabase
-        .from("batches")
-        .insert({
-          batch_number:    inv,
-          factory_id:      activeFactory.id,
-          material_id:     materialId,
-          product_id:      null,
-          batch_type:      "rm",
-          production_date: new Date().toISOString().slice(0, 10),
-          quantity:        null,
-          unit:            null,
-          source_batch_id: null,
-          created_by:      user.id,
-        })
-        .select("id")
-        .single();
+      // Step 2: require an rm_receipts row for this batch.
+      const { data: receiptRow } = await supabase
+        .from("rm_receipts")
+        .select("id, supplier_name, received_date, quantity, unit")
+        .eq("batch_id", batchRow.id)
+        .eq("factory_id", activeFactory.id)
+        .maybeSingle();
 
-      if (error || !nb) { showToast("Could not register invoice: " + (error?.message ?? "unknown"), true); return; }
-      setBatchId(nb.id);
+      if (!receiptRow) {
+        setReceiptLinkError(
+          `Invoice "${inv}" has no receipt record — create it in Raw Material Receipt first.`
+        );
+        return;
+      }
+
+      // Success — lock the form to this receipt.
+      setBatchId(batchRow.id);
+      setLinkedReceipt({
+        id:            receiptRow.id,
+        supplier_name: receiptRow.supplier_name,
+        received_date: receiptRow.received_date,
+        quantity:      receiptRow.quantity,
+        unit:          receiptRow.unit,
+      });
     } catch {
-      showToast("Network error resolving invoice.", true);
+      setReceiptLinkError("Network error resolving invoice — try again.");
     } finally {
       setResolvingInvoice(false);
     }
-  }, [crudeInvoiceNumber, activeFactory, user, materialId, supabase, showToast]);
+  }, [crudeInvoiceNumber, activeFactory, user, materialId, supabase]);
 
   // ---------------------------------------------------------------------------
   // Submit (non-Sulphur Powder materials)
@@ -581,10 +601,8 @@ export default function RmQcPage() {
         appearance_ok:        null,
         test_results:         testResults,
         remarks:              remarks.trim() || null,
-        // Receipt header fields (migration 059)
-        vendor_id:            vendorId || null,
-        receipt_date:         receiptDate || null,
-        quantity_received_mt: quantityReceivedMt.trim() ? Number(quantityReceivedMt) : null,
+        // Receipt link (migration 060) — authoritative link to the rm_receipts row.
+        receipt_id:           linkedReceipt?.id ?? null,
       }).select("id").single();
 
       if (error || !newRow) {
@@ -651,6 +669,9 @@ export default function RmQcPage() {
 
       showToast("QC results saved ✓");
       setBatchId("");
+      setLinkedReceipt(null);
+      setReceiptLinkError(null);
+      setCrudeInvoiceNumber("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
     } catch {
@@ -712,48 +733,18 @@ export default function RmQcPage() {
       {/* ── A-20/1 Crude Sulphur QC (batch selector + dynamic test form) ── */}
       {isA20_1 && qcRmType === "crude_sulphur" && (
         <>
-          {/* ── Receipt header (JSCI/QC/03 §1): Vendor, Date, Quantity ── */}
-          <div className="card">
-            <h3>Receipt Details</h3>
-            <p className="field-hint" style={{ marginBottom: 12 }}>
-              Fill in the supplier and receipt details from the delivery note /
-              JSCI/QC/03 header before entering test results.
-            </p>
-
-            <label>Crude Sulphur Vendor *</label>
-            {vendors.length === 0 ? (
-              <div className="field-hint">Loading vendors…</div>
-            ) : (
-              <select value={vendorId} onChange={e => setVendorId(e.target.value)}>
-                <option value="">— Select vendor —</option>
-                {vendors.map(v => (
-                  <option key={v.id} value={v.id}>{v.vendor_name}</option>
-                ))}
-              </select>
-            )}
-
-            <div className="row2" style={{ marginTop: 12 }}>
-              <div>
-                <label>Receipt Date *</label>
-                <input type="date" value={receiptDate}
-                  onChange={e => setReceiptDate(e.target.value)} />
-              </div>
-              <div>
-                <label>Quantity Received (MT) *</label>
-                <input type="number" min="0" step="0.001" placeholder="e.g. 25.000"
-                  value={quantityReceivedMt}
-                  onChange={e => setQuantityReceivedMt(e.target.value)} />
-              </div>
-            </div>
-          </div>
-
           <div className="card">
             <label>Invoice Number *</label>
             <input
               type="text"
               placeholder="Enter invoice number"
               value={crudeInvoiceNumber}
-              onChange={e => { setCrudeInvoiceNumber(e.target.value); setBatchId(""); }}
+              onChange={e => {
+                setCrudeInvoiceNumber(e.target.value);
+                setBatchId("");
+                setLinkedReceipt(null);
+                setReceiptLinkError(null);
+              }}
               onKeyDown={e => {
                 if (e.key === "Enter") {
                   // Link on Enter (not just Tab/blur). Prevent an accidental
@@ -765,16 +756,36 @@ export default function RmQcPage() {
               }}
               onBlur={resolveCrudeInvoice}
             />
-            {resolvingInvoice && <div className="field-hint">Linking invoice…</div>}
-            {!resolvingInvoice && crudeInvoiceNumber.trim() && batchId && (
-              <div className="field-hint" style={{ color: "var(--ok)" }}>
-                ✓ Invoice linked — enter test details below.
+            {resolvingInvoice && <div className="field-hint">Looking up receipt…</div>}
+            {!resolvingInvoice && receiptLinkError && (
+              <div className="field-hint" style={{ color: "var(--warn)", fontWeight: 600, marginTop: 6 }}>
+                ✗ {receiptLinkError}
               </div>
             )}
-            {!resolvingInvoice && crudeInvoiceNumber.trim() && !batchId && (
-              <div className="field-hint">Press Enter to link this invoice.</div>
+            {!resolvingInvoice && batchId && linkedReceipt && (
+              <div className="field-hint" style={{ color: "var(--ok)" }}>
+                ✓ Receipt found — enter test details below.
+              </div>
+            )}
+            {!resolvingInvoice && crudeInvoiceNumber.trim() && !batchId && !receiptLinkError && (
+              <div className="field-hint">Press Enter or tab out to look up this invoice.</div>
             )}
           </div>
+
+          {/* Read-only receipt details — pulled from rm_receipts on successful link */}
+          {batchId && linkedReceipt && (
+            <div className="card" style={{ background: "var(--ok-soft)", border: "1px solid var(--ok)" }}>
+              <h3 style={{ color: "var(--ok)", marginBottom: 8 }}>Receipt Details (read-only)</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 13 }}>
+                <div><b>Supplier:</b> {linkedReceipt.supplier_name}</div>
+                <div><b>Received Date:</b> {linkedReceipt.received_date}</div>
+                <div><b>Quantity:</b> {linkedReceipt.quantity} {linkedReceipt.unit}</div>
+              </div>
+              <div className="field-hint" style={{ marginTop: 8 }}>
+                These details are from the RM Receipt record — edit them there if incorrect.
+              </div>
+            </div>
+          )}
 
           {batchId && (
             <>
