@@ -932,6 +932,36 @@ export interface PackingBreakdownReport {
 //   → Lab reviews OK (finalized) / NOT OK (back to pending, rework loop).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Vendors (migration 058) — supplier master for crude sulphur, oil, etc.
+// ---------------------------------------------------------------------------
+
+export type VendorType = "crude_sulphur" | "oil" | "other";
+
+export interface Vendor {
+  id: string;
+  vendor_name: string;
+  vendor_type: VendorType;
+  is_active: boolean;
+  created_at: string;  // timestamptz ISO
+}
+
+/**
+ * Row from v_sulphur_lot_remaining (migration 059 view).
+ * One row per rm_qc receipt that has quantity_received_mt set.
+ */
+export interface SulphurLotRemaining {
+  rm_qc_id: string;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  receipt_date: string | null;          // ISO date
+  quantity_received_mt: number | null;
+  total_planned_draw_mt: number;
+  quantity_remaining_mt: number | null;
+  linked_job_card_count: number;
+  has_null_ratio_cards: boolean;
+}
+
 /**
  * Pulveriser job card lifecycle status (Postgres enum pulveriser_status).
  * 'pending_stores' (migration 016b): Production filled the card; awaiting Stores
@@ -987,6 +1017,7 @@ export interface PulveriserJobCard {
   sulphur_supplier: string | null;
   sulphur_lot_number: string | null;
   sulphur_empty_date: string | null;    // ISO date — खाली करने की तारीख
+  sulphur_source_rm_qc_id: string | null; // FK → rm_qc.id (migration 059) — links to the specific receipt lot
   oil_supplier: string | null;
   oil_batch_number: string | null;
   oil_quantity: number | null;

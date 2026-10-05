@@ -26,22 +26,14 @@ import {
   type PulveriserMachine,
   type VfdParameter,
   type PulveriserJobCard,
+  type Vendor,
+  type SulphurLotRemaining,
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
 
-// Crude sulphur vendor list for the RM Source dropdown (per 29-09-26 follow-up).
-const SULPHUR_VENDORS = [
-  "Bharat Petroleum Corporation Ltd.",
-  "Devansh Chemicals",
-  "Dossa Chemicals Pvt. Ltd",
-  "Gulf Fertilizers and Chemicals FZE",
-  "Hindustan Petroleum Corporation Ltd.",
-  "Jaishil Sulphur & Chemical Inds.-A/20/1",
-  "M/S SETCO TRADING FZE",
-  "SUPERFORM CHEMISTRIES LIMITED (CR.)",
-  "Zolfo Impex",
-] as const;
+// Crude sulphur vendor list is loaded from the vendors table (migration 058).
+// The static SULPHUR_VENDORS array has been replaced by a DB query on mount.
 
 const MAX_ENTRIES = 6;
 
@@ -77,7 +69,8 @@ interface Entry {
   partyCode: string;
   batchNumber: string;      // was माल का कोड नंबर — stored in material_code
   plannedKg: string;        // entered in KG; converted to MT (÷1000) on save
-  sulSupplier: string;
+  sulVendorId: string;      // selected vendor id (from vendors table)
+  sulSourceRmQcId: string;  // selected rm_qc receipt id (from v_sulphur_lot_remaining)
   sulLot: string;
   sulEmptyDate: string;
   oilSupplier: string;
@@ -89,7 +82,7 @@ function blankEntry(): Entry {
   return {
     key: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     partyCode: "", batchNumber: "", plannedKg: "",
-    sulSupplier: "", sulLot: "", sulEmptyDate: "",
+    sulVendorId: "", sulSourceRmQcId: "", sulLot: "", sulEmptyDate: "",
     oilSupplier: "", oilBatch: "", oilQty: "",
   };
 }
@@ -120,11 +113,19 @@ export default function PulveriserProductionPage() {
   // Customer names keyed by party_code — loaded from the parties table so the
   // production dropdown shows the same "code · name" label as batch analysis.
   const [partyNames, setPartyNames] = useState<Record<string, string>>({});
+  // Crude sulphur vendors (from vendors table, migration 058).
+  const [sulVendors, setSulVendors] = useState<Vendor[]>([]);
+  // Available receipt lots keyed by vendor_id (from v_sulphur_lot_remaining).
+  // Only lots with quantity_remaining_mt > 0 are shown; depleted ones are
+  // listed separately so Production can see but is warned.
+  const [sulLots, setSulLots] = useState<SulphurLotRemaining[]>([]);
 
   const loadParams = useCallback(async () => {
-    const [{ data, error }, { data: pData }] = await Promise.all([
+    const [{ data, error }, { data: pData }, { data: vData }, { data: lData }] = await Promise.all([
       supabase.from("vfd_parameters").select("*").eq("machine_type", "mill").order("party_code"),
       supabase.from("parties").select("party_code, customer_name").eq("is_active", true),
+      supabase.from("vendors").select("*").eq("vendor_type", "crude_sulphur").eq("is_active", true).order("vendor_name"),
+      supabase.from("v_sulphur_lot_remaining").select("*").order("receipt_date", { ascending: false }),
     ]);
     if (error) { showToast("VFD codes load nahi hue: " + error.message, true); return; }
     setMillParams((data ?? []) as VfdParameter[]);
@@ -133,6 +134,8 @@ export default function PulveriserProductionPage() {
       if (p.customer_name && p.customer_name !== p.party_code) names[p.party_code] = p.customer_name;
     }
     setPartyNames(names);
+    setSulVendors((vData ?? []) as Vendor[]);
+    setSulLots((lData ?? []) as SulphurLotRemaining[]);
   }, [supabase, showToast]);
 
   useEffect(() => { loadParams(); }, [loadParams]);
@@ -221,9 +224,19 @@ export default function PulveriserProductionPage() {
           party_code:            e.partyCode,
           planned_production_mt: mt,
           oil_required_kg:       oilRequiredFor(e),
-          sulphur_supplier:      e.sulSupplier.trim() || null,
+          // Backward-compat: populate legacy text fields from the selected receipt
+          // so downstream pages (operator, lab, stores, reports) still read them.
+          sulphur_supplier:      (() => {
+            const v = sulVendors.find(v => v.id === e.sulVendorId);
+            return v ? v.vendor_name : (e.sulLot.trim() || null);
+          })(),
           sulphur_lot_number:    e.sulLot.trim() || null,
-          sulphur_empty_date:    e.sulEmptyDate || null,
+          sulphur_empty_date:    (() => {
+            const lot = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId);
+            return lot?.receipt_date ?? (e.sulEmptyDate || null);
+          })(),
+          // New receipt link (migration 059)
+          sulphur_source_rm_qc_id: e.sulSourceRmQcId || null,
           oil_supplier:          e.oilSupplier.trim() || null,
           oil_batch_number:      e.oilBatch.trim() || null,
           oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
@@ -248,6 +261,9 @@ export default function PulveriserProductionPage() {
       // Fire-and-forget email for each created job card entry (reuses nowISO from above)
       for (let i = 0; i < entries.length; i++) {
         const e  = entries[i];
+        // Derive backward-compat sulphur fields from the receipt selection.
+        const sulVendorName = sulVendors.find(v => v.id === e.sulVendorId)?.vendor_name ?? null;
+        const sulReceiptDate = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId)?.receipt_date ?? (e.sulEmptyDate || null);
         const { subject, html } = buildProductionEmail({
           jobNumber:           jobNumber.trim() || null,
           machineNumber:       machine,
@@ -255,9 +271,9 @@ export default function PulveriserProductionPage() {
           partyCode:           e.partyCode,
           plannedProductionMt: plannedMtFor(e),
           oilRequiredKg:       oilRequiredFor(e),
-          sulphurSupplier:     e.sulSupplier.trim()  || null,
-          sulphurLotNumber:    e.sulLot.trim()       || null,
-          sulphurEmptyDate:    e.sulEmptyDate        || null,
+          sulphurSupplier:     sulVendorName,
+          sulphurLotNumber:    e.sulLot.trim()  || null,
+          sulphurEmptyDate:    sulReceiptDate,
           oilSupplier:         e.oilSupplier.trim()  || null,
           oilBatchNumber:      e.oilBatch.trim()     || null,
           oilQuantity:         e.oilQty.trim() === "" ? null : Number(e.oilQty),
@@ -282,9 +298,9 @@ export default function PulveriserProductionPage() {
               status:                "pending_stores",
               planned_production_mt: plannedMtFor(e),
               oil_required_kg:       oilRequiredFor(e),
-              sulphur_supplier:      e.sulSupplier.trim()  || null,
-              sulphur_lot_number:    e.sulLot.trim()       || null,
-              sulphur_empty_date:    e.sulEmptyDate        || null,
+              sulphur_supplier:      sulVendorName,
+              sulphur_lot_number:    e.sulLot.trim()  || null,
+              sulphur_empty_date:    sulReceiptDate,
               oil_supplier:          e.oilSupplier.trim()  || null,
               oil_batch_number:      e.oilBatch.trim()     || null,
               oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
@@ -443,35 +459,113 @@ export default function PulveriserProductionPage() {
               )}
             </div>
 
-            {/* Sulphur */}
+            {/* Crude Sulphur */}
             <div style={{ marginTop: 14, fontWeight: 700, fontSize: 13 }}>Crude Sulphur</div>
-            <div className="row2">
-              <div>
-                <label>Source</label>
-                <select value={e.sulSupplier}
-                  onChange={ev => {
-                    const vendor = ev.target.value;
-                    // Auto-fill "Date RM was received" to today when a vendor
-                    // is selected and the date hasn't been set yet.
-                    const patch: Partial<Entry> = { sulSupplier: vendor };
-                    if (vendor && !e.sulEmptyDate) patch.sulEmptyDate = todayISO();
-                    updateEntry(e.key, patch);
-                  }}>
-                  <option value="">-- Select vendor --</option>
-                  {SULPHUR_VENDORS.map(v => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
-              </div>
+            {/* Step 1 — Vendor */}
+            <label>Vendor</label>
+            <select value={e.sulVendorId}
+              onChange={ev => {
+                // Switching vendor clears the receipt selection.
+                updateEntry(e.key, { sulVendorId: ev.target.value, sulSourceRmQcId: "", sulEmptyDate: "" });
+              }}>
+              <option value="">-- Select vendor --</option>
+              {sulVendors.map(v => (
+                <option key={v.id} value={v.id}>{v.vendor_name}</option>
+              ))}
+            </select>
+
+            {/* Step 2 — Receipt date (filtered to this vendor's available lots) */}
+            {e.sulVendorId && (() => {
+              const vendorLots = sulLots.filter(l => l.vendor_id === e.sulVendorId);
+              const availableLots = vendorLots.filter(l => (l.quantity_remaining_mt ?? 0) > 0);
+              const depletedLots  = vendorLots.filter(l => (l.quantity_remaining_mt ?? 0) <= 0);
+              const selectedLot   = sulLots.find(l => l.rm_qc_id === e.sulSourceRmQcId);
+
+              return (
+                <>
+                  {vendorLots.length === 0 ? (
+                    <div className="field-hint" style={{ marginTop: 6, color: "var(--warn)" }}>
+                      No receipts recorded for this vendor yet. Ask Lab to enter
+                      the incoming inspection (RM QC) for this delivery first.
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ marginTop: 10 }}>Receipt Date</label>
+                      <select value={e.sulSourceRmQcId}
+                        onChange={ev => {
+                          const lot = sulLots.find(l => l.rm_qc_id === ev.target.value);
+                          updateEntry(e.key, {
+                            sulSourceRmQcId: ev.target.value,
+                            sulEmptyDate: lot?.receipt_date ?? "",
+                          });
+                        }}>
+                        <option value="">-- Select receipt --</option>
+                        {availableLots.map(l => (
+                          <option key={l.rm_qc_id} value={l.rm_qc_id}>
+                            {l.receipt_date} — {l.quantity_remaining_mt?.toFixed(3)} MT remaining
+                            {l.has_null_ratio_cards ? " ⚠ estimate (ratio not set)" : ""}
+                          </option>
+                        ))}
+                        {depletedLots.length > 0 && (
+                          <optgroup label="— Depleted / over-allocated —">
+                            {depletedLots.map(l => (
+                              <option key={l.rm_qc_id} value={l.rm_qc_id} disabled>
+                                {l.receipt_date} — {l.quantity_remaining_mt?.toFixed(3)} MT (depleted)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+
+                      {/* Stock display for selected lot */}
+                      {selectedLot && (
+                        <div style={{
+                          marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 13,
+                          background: (selectedLot.quantity_remaining_mt ?? 0) <= 0
+                            ? "var(--warn-soft)"
+                            : (selectedLot.quantity_remaining_mt ?? 0) < 5
+                              ? "#fff8e1"
+                              : "var(--ok-soft)",
+                        }}>
+                          <div>
+                            <b>Received:</b> {selectedLot.quantity_received_mt?.toFixed(3)} MT
+                            {" · "}
+                            <b>Drawn (planned):</b> {selectedLot.total_planned_draw_mt.toFixed(3)} MT
+                            {" · "}
+                            <b style={{ color: (selectedLot.quantity_remaining_mt ?? 0) <= 0 ? "var(--warn)" : "var(--ok)" }}>
+                              Remaining: {selectedLot.quantity_remaining_mt?.toFixed(3)} MT
+                            </b>
+                          </div>
+                          {selectedLot.has_null_ratio_cards && (
+                            <div style={{ marginTop: 4, color: "var(--warn)", fontSize: 12 }}>
+                              ⚠ Some linked job cards have no sulphur_ratio set — remaining is an underestimate.
+                            </div>
+                          )}
+                          {(selectedLot.quantity_remaining_mt ?? 0) <= 0 && (
+                            <div style={{ marginTop: 4, color: "var(--warn)", fontWeight: 700 }}>
+                              ⚠ This lot is depleted. Select a different receipt or ask Lab to record a new delivery.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
+
+            <div className="row2" style={{ marginTop: 12 }}>
               <div>
                 <label>Lot Number</label>
                 <input type="text" value={e.sulLot}
                   onChange={ev => updateEntry(e.key, { sulLot: ev.target.value })} />
               </div>
+              <div>
+                <label>Date RM was received</label>
+                <input type="date" value={e.sulEmptyDate}
+                  onChange={ev => updateEntry(e.key, { sulEmptyDate: ev.target.value })} />
+              </div>
             </div>
-            <label>Date RM was received</label>
-            <input type="date" value={e.sulEmptyDate}
-              onChange={ev => updateEntry(e.key, { sulEmptyDate: ev.target.value })} />
 
             {/* Oil */}
             <div style={{ marginTop: 14, fontWeight: 700, fontSize: 13 }}>Oil</div>

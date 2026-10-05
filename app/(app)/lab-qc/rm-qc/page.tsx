@@ -22,7 +22,7 @@ import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
-import type { Material, QcTestDefinition } from "@/lib/types";
+import type { Material, QcTestDefinition, Vendor } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
@@ -133,6 +133,11 @@ export default function RmQcPage() {
   // A-20/1 Crude Sulphur: invoice number as direct text input (find-or-create batch)
   const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
   const [resolvingInvoice, setResolvingInvoice]     = useState(false);
+  // Crude Sulphur receipt header fields (new — migration 059)
+  const [vendors, setVendors]                   = useState<Vendor[]>([]);
+  const [vendorId, setVendorId]                 = useState("");
+  const [receiptDate, setReceiptDate]           = useState(new Date().toISOString().slice(0, 10));
+  const [quantityReceivedMt, setQuantityReceivedMt] = useState("");
   // Crude Sulphur A-grade specs — auto-loaded (no grade selector). Drives the
   // inline per-parameter spec + pass/fail badge and the auto-determined grade.
   const [crudeSpecs, setCrudeSpecs] = useState<SpecRow[]>([]);
@@ -203,6 +208,13 @@ export default function RmQcPage() {
           if (data) { setMaterials([data as Material]); setMaterialId((data as Material).id); }
           setLoadingMats(false);
         });
+      // Load crude sulphur vendors for the receipt header
+      sb.from("vendors")
+        .select("*")
+        .eq("vendor_type", "crude_sulphur")
+        .eq("is_active", true)
+        .order("vendor_name")
+        .then(({ data }) => setVendors((data ?? []) as Vendor[]));
     } else {
       sb.from("materials").select("*").in("code", A20_RM_CODES).eq("is_active", true)
         .then(({ data }) => {
@@ -560,15 +572,19 @@ export default function RmQcPage() {
       }
 
       const { data: newRow, error } = await supabase.from("rm_qc").insert({
-        batch_id:      batchId,
-        factory_id:    activeFactory.id,
-        material_id:   materialId,
-        chemist_id:    user.id,
-        test_date:     testDate,
-        appearance:    values["appearance"] ?? null,
-        appearance_ok: null,
-        test_results:  testResults,
-        remarks:       remarks.trim() || null,
+        batch_id:             batchId,
+        factory_id:           activeFactory.id,
+        material_id:          materialId,
+        chemist_id:           user.id,
+        test_date:            testDate,
+        appearance:           values["appearance"] ?? null,
+        appearance_ok:        null,
+        test_results:         testResults,
+        remarks:              remarks.trim() || null,
+        // Receipt header fields (migration 059)
+        vendor_id:            vendorId || null,
+        receipt_date:         receiptDate || null,
+        quantity_received_mt: quantityReceivedMt.trim() ? Number(quantityReceivedMt) : null,
       }).select("id").single();
 
       if (error || !newRow) {
@@ -696,6 +712,41 @@ export default function RmQcPage() {
       {/* ── A-20/1 Crude Sulphur QC (batch selector + dynamic test form) ── */}
       {isA20_1 && qcRmType === "crude_sulphur" && (
         <>
+          {/* ── Receipt header (JSCI/QC/03 §1): Vendor, Date, Quantity ── */}
+          <div className="card">
+            <h3>Receipt Details</h3>
+            <p className="field-hint" style={{ marginBottom: 12 }}>
+              Fill in the supplier and receipt details from the delivery note /
+              JSCI/QC/03 header before entering test results.
+            </p>
+
+            <label>Crude Sulphur Vendor *</label>
+            {vendors.length === 0 ? (
+              <div className="field-hint">Loading vendors…</div>
+            ) : (
+              <select value={vendorId} onChange={e => setVendorId(e.target.value)}>
+                <option value="">— Select vendor —</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>{v.vendor_name}</option>
+                ))}
+              </select>
+            )}
+
+            <div className="row2" style={{ marginTop: 12 }}>
+              <div>
+                <label>Receipt Date *</label>
+                <input type="date" value={receiptDate}
+                  onChange={e => setReceiptDate(e.target.value)} />
+              </div>
+              <div>
+                <label>Quantity Received (MT) *</label>
+                <input type="number" min="0" step="0.001" placeholder="e.g. 25.000"
+                  value={quantityReceivedMt}
+                  onChange={e => setQuantityReceivedMt(e.target.value)} />
+              </div>
+            </div>
+          </div>
+
           <div className="card">
             <label>Invoice Number *</label>
             <input
