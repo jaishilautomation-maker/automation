@@ -205,7 +205,7 @@ export default function RmReceiptPage() {
         sheetData: {
           type: "append",
           target: "lab",
-          tab: "RM Receipt",
+          tab: "RM Receipts",
           values: [
             batch.id,
             "Crude Sulphur",
@@ -301,7 +301,7 @@ export default function RmReceiptPage() {
         sheetData: {
           type: "append",
           target: "lab",
-          tab: "RM Receipt",
+          tab: "RM Receipts",
           values: [
             batch.id,
             "Oil",

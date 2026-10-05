@@ -305,7 +305,7 @@ const SHEET_TABS: Record<SheetTarget, Record<string, string[]>> = {
 
   // -------------------------------------------------------------------------
   lab: {
-    "RM Receipt": [
+    "RM Receipts": [
       "ID", "Material Type", "Batch Number", "Vendor", "Supplier Name",
       "Quantity", "Unit", "Received Date", "Truck Number", "Appearance",
       "Submitted By", "Submitted At", "Factory ID",
