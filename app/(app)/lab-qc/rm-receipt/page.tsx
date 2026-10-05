@@ -16,7 +16,7 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
-import type { Material } from "@/lib/types";
+import type { Material, Vendor } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildRmReceiptEmail } from "@/lib/notifications/lab-qc-emails";
 
@@ -62,6 +62,9 @@ export default function RmReceiptPage() {
   const [appearance, setAppearance]     = useState("");
   const [receivedDate, setReceivedDate] = useState(todayISO());
   const [csTruckNumber, setCsTruckNumber] = useState("");
+  // Crude sulphur vendor — loaded from vendors table (migration 058).
+  const [csVendors, setCsVendors]       = useState<Vendor[]>([]);
+  const [csVendorId, setCsVendorId]     = useState("");
 
   // Oil fields
   const [supplierName, setSupplierName] = useState("");
@@ -75,9 +78,19 @@ export default function RmReceiptPage() {
 
   const selectedMaterial = materials.find(m => m.id === materialId);
 
-  // Load materials for A-20
+  // Load materials for A-20; load crude sulphur vendors for A-20/1.
   useEffect(() => {
-    if (isA20_1) { setLoadingMats(false); return; }
+    if (isA20_1) {
+      setLoadingMats(false);
+      const sb = createClient();
+      sb.from("vendors")
+        .select("*")
+        .eq("vendor_type", "crude_sulphur")
+        .eq("is_active", true)
+        .order("vendor_name")
+        .then(({ data }) => setCsVendors((data ?? []) as Vendor[]));
+      return;
+    }
     const sb = createClient();
     sb.from("materials").select("*")
       .in("code", A20_RM_CODES)
@@ -96,7 +109,7 @@ export default function RmReceiptPage() {
   // newly selected material and only reset the dependent fields.
   const reset = (clearMaterial = true) => {
     setInvoiceNumber(""); setQuantityMt(""); setAppearance("");
-    setReceivedDate(todayISO()); setCsTruckNumber("");
+    setReceivedDate(todayISO()); setCsTruckNumber(""); setCsVendorId("");
     setSupplierName(""); setOilDatetime(nowLocalDatetime());
     setOilQuantity(""); setTruckNumber(""); setOilBatchNumber("");
     if (!isA20_1 && clearMaterial) setMaterialId("");
@@ -135,10 +148,13 @@ export default function RmReceiptPage() {
         showToast("Could not save: " + (batchErr?.message ?? "unknown"), true); return;
       }
 
+      const selectedVendor = csVendors.find(v => v.id === csVendorId);
+
       await supabase.from("rm_receipts").insert({
         batch_id:      batch.id,
         factory_id:    activeFactory.id,
-        supplier_name: "Crude Sulphur",
+        supplier_name: selectedVendor?.vendor_name ?? "Crude Sulphur",
+        vendor_id:     csVendorId || null,
         received_date: receivedDate,
         received_by:   user.id,
         quantity:      qty,
@@ -153,7 +169,7 @@ export default function RmReceiptPage() {
       const { subject, html } = buildRmReceiptEmail({
         materialType:    "Crude Sulphur",
         batchNumber:     invoiceNumber.trim(),
-        supplierName:    "Crude Sulphur",
+        supplierName:    selectedVendor?.vendor_name ?? "Crude Sulphur",
         quantity:        parseFloat(quantityMt),
         unit:            "MT",
         receivedDate:    receivedDate,
@@ -400,7 +416,19 @@ export default function RmReceiptPage() {
         <div className="card">
           <h3>Crude Sulphur Receipt</h3>
 
-          <label>Invoice Number *</label>
+          <label>Vendor / Supplier *</label>
+          {csVendors.length === 0 ? (
+            <div className="field-hint">Loading vendors…</div>
+          ) : (
+            <select value={csVendorId} onChange={e => setCsVendorId(e.target.value)}>
+              <option value="">— Select vendor —</option>
+              {csVendors.map(v => (
+                <option key={v.id} value={v.id}>{v.vendor_name}</option>
+              ))}
+            </select>
+          )}
+
+          <label style={{ marginTop: 12 }}>Invoice Number *</label>
           <input type="text" placeholder="e.g. INV-2024-001"
             value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
 
