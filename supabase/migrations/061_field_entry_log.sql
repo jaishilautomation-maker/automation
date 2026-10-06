@@ -66,6 +66,10 @@ CREATE POLICY "fel_select" ON public.field_entry_log
 
 GRANT SELECT, INSERT ON public.field_entry_log TO authenticated;
 
+-- Service-role client (used by the daily digest cron) needs SELECT too.
+-- service_role bypasses RLS but still needs table-level GRANT.
+GRANT SELECT ON public.field_entry_log TO service_role;
+
 -- =============================================================================
 -- END OF MIGRATION 061
 -- =============================================================================
