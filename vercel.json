@@ -3,6 +3,10 @@
     {
       "path": "/api/qc-exchange/retry-pending",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/field-audit-digest",
+      "schedule": "30 6 * * *"
     }
   ]
 }

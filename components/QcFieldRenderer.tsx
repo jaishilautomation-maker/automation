@@ -36,6 +36,7 @@ interface Props {
   def: QcTestDefinition;
   value: string;
   onChange: (key: string, val: string) => void;
+  onBlur?: (key: string, val: string) => void;
   photoUploadProps?: PhotoUploadProps;
   /**
    * Optional inline indicator rendered to the RIGHT of this field
@@ -49,7 +50,7 @@ interface Props {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function QcFieldRenderer({ def, value, onChange, photoUploadProps, specBadge }: Props) {
+export default function QcFieldRenderer({ def, value, onChange, onBlur, photoUploadProps, specBadge }: Props) {
   const localRef = useRef<PhotoUploaderHandle | null>(null);
 
   // When a spec badge is supplied, wrap the field so the input column takes the
@@ -125,7 +126,9 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
     return withBadge(
       <div>
         {labelEl}
-        <select value={value} onChange={e => onChange(def.test_key, e.target.value)}>
+        <select value={value}
+          onChange={e => onChange(def.test_key, e.target.value)}
+          onBlur={e => onBlur?.(def.test_key, e.target.value)}>
           <option value="">— Select —</option>
           <option value="true">Yes / Pass</option>
           <option value="false">No / Fail</option>
@@ -139,7 +142,9 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
     return withBadge(
       <div>
         {labelEl}
-        <select value={value} onChange={e => onChange(def.test_key, e.target.value)}>
+        <select value={value}
+          onChange={e => onChange(def.test_key, e.target.value)}
+          onBlur={e => onBlur?.(def.test_key, e.target.value)}>
           <option value="">— Select —</option>
           {def.options.map(opt => (
             <option key={opt} value={opt}>{opt}</option>
@@ -158,6 +163,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
           type="date"
           value={value}
           onChange={e => onChange(def.test_key, e.target.value)}
+          onBlur={e => onBlur?.(def.test_key, e.target.value)}
         />
       </div>
     );
@@ -173,6 +179,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
           value={value}
           placeholder={def.label}
           onChange={e => onChange(def.test_key, e.target.value)}
+          onBlur={e => onBlur?.(def.test_key, e.target.value)}
         />
       </div>
     );
@@ -189,6 +196,7 @@ export default function QcFieldRenderer({ def, value, onChange, photoUploadProps
         placeholder={def.is_calculated ? "auto" : "0"}
         disabled={def.is_calculated}
         onChange={e => onChange(def.test_key, e.target.value)}
+        onBlur={e => onBlur?.(def.test_key, e.target.value)}
         style={
           def.is_calculated
             ? { background: "var(--ok-soft)", color: "var(--ok)" }

@@ -26,6 +26,7 @@ import type { Material, QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -198,6 +199,7 @@ export default function RmQcPage() {
   const [spImportedBatchId, setSpImportedBatchId] = useState<string | null>(null);
 
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+  const audit = useFieldAudit();
 
   const selectedMaterial = materials.find(m => m.id === materialId);
   const isSulphurPowder  = selectedMaterial?.code === "SULPHUR_POWDER";
@@ -612,6 +614,8 @@ export default function RmQcPage() {
       const flushPromises = Object.values(uploaderRefs.current)
         .filter(Boolean).map(ref => ref!.flush(newRow.id));
       await Promise.all(flushPromises);
+      // Flush field-level audit log (one batched INSERT)
+      await audit.flush(supabase, user.id, "rm_qc", newRow.id);
 
       // Fire-and-forget: generate + email the filled incoming-inspection report.
       void notifyReport({ source: "rm_qc", recordId: newRow.id });
@@ -675,6 +679,7 @@ export default function RmQcPage() {
       setCrudeInvoiceNumber("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
+      audit.reset();
     } catch {
       showToast("Network error — try again.", true);
     } finally {
@@ -827,6 +832,7 @@ export default function RmQcPage() {
                       def={def}
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
+                      onBlur={(key, val) => audit.record(key, val)}
                       specBadge={crudeSpecs.length > 0 ? buildCrudeSpecBadge(def.test_key) : null}
                       photoUploadProps={photoProps}
                     />
@@ -1275,6 +1281,7 @@ export default function RmQcPage() {
                       def={def}
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
+                      onBlur={(key, val) => audit.record(key, val)}
                       photoUploadProps={photoProps}
                     />
                   ))}

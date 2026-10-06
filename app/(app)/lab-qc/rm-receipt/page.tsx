@@ -19,6 +19,7 @@ import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploa
 import type { Material, Vendor } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildRmReceiptEmail } from "@/lib/notifications/lab-qc-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -75,6 +76,7 @@ export default function RmReceiptPage() {
 
   const [submitting, setSubmitting]     = useState(false);
   const photoRef = useRef<PhotoUploaderHandle | null>(null);
+  const audit = useFieldAudit();
 
   const selectedMaterial = materials.find(m => m.id === materialId);
 
@@ -113,6 +115,7 @@ export default function RmReceiptPage() {
     setSupplierName(""); setOilDatetime(nowLocalDatetime());
     setOilQuantity(""); setTruckNumber(""); setOilBatchNumber("");
     if (!isA20_1 && clearMaterial) setMaterialId("");
+    audit.reset();
   };
 
   // ── Crude Sulphur submit ──
@@ -180,6 +183,8 @@ export default function RmReceiptPage() {
       }
 
       if (photoRef.current?.hasPending) await photoRef.current.flush(batch.id);
+      // Flush field-level audit log (one batched INSERT, using batch.id as record_id)
+      await audit.flush(supabase, user.id, "rm_receipt", batch.id);
 
       // Fire-and-forget email
       const nowISO = new Date().toISOString();
@@ -448,22 +453,27 @@ export default function RmReceiptPage() {
 
           <label style={{ marginTop: 12 }}>Invoice Number *</label>
           <input type="text" placeholder="e.g. INV-2024-001"
-            value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
+            value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+            onBlur={() => audit.record("invoice_number", invoiceNumber)} />
 
           <label>Quantity Received (MT) *</label>
           <input type="number" min="0" step="0.001" placeholder="0.000"
-            value={quantityMt} onChange={e => setQuantityMt(e.target.value)} />
+            value={quantityMt} onChange={e => setQuantityMt(e.target.value)}
+            onBlur={() => audit.record("quantity_mt", quantityMt)} />
 
           <label>Appearance / Physical State</label>
           <input type="text" placeholder="e.g. Yellow powder, free flowing"
-            value={appearance} onChange={e => setAppearance(e.target.value)} />
+            value={appearance} onChange={e => setAppearance(e.target.value)}
+            onBlur={() => audit.record("appearance", appearance)} />
 
           <label>Date Received</label>
-          <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)} />
+          <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)}
+            onBlur={() => audit.record("received_date", receivedDate)} />
 
           <label>Truck Number</label>
           <input type="text" placeholder="e.g. MH-12-AB-1234"
-            value={csTruckNumber} onChange={e => setCsTruckNumber(e.target.value)} />
+            value={csTruckNumber} onChange={e => setCsTruckNumber(e.target.value)}
+            onBlur={() => audit.record("truck_number", csTruckNumber)} />
 
           {user && activeFactory && (
             <div style={{ marginTop: 12 }}>

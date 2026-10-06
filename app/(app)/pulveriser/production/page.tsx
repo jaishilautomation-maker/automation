@@ -31,6 +31,7 @@ import {
 } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildProductionEmail } from "@/lib/notifications/pulveriser-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 // Crude sulphur vendor list is loaded from the vendors table (migration 058).
 // The static SULPHUR_VENDORS array has been replaced by a DB query on mount.
@@ -95,8 +96,8 @@ export default function PulveriserProductionPage() {
 
   // Which sub-view is showing: the new-job-card form or the rejected queue.
   const [view, setView] = useState<"new" | "rejected">("new");
-  // Rejected-card count, reported up by TriageQueue so the tab can badge it.
   const [rejectedCount, setRejectedCount] = useState(0);
+  const audit = useFieldAudit();
 
   // Shared header
   const [machine, setMachine]     = useState<PulveriserMachine>("M1");
@@ -189,6 +190,7 @@ export default function PulveriserProductionPage() {
   const reset = () => {
     setJobNumber(""); setShift(""); setJobDate(todayISO());
     setEntries([blankEntry()]);
+    audit.reset();
   };
 
   const handleCreate = async () => {
@@ -316,6 +318,12 @@ export default function PulveriserProductionPage() {
         `${data.length} ${data.length === 1 ? "entry" : "entries"} created ✓ — ` +
         "Stores will issue oil, then the operator fills their part.",
       );
+      // Flush field-level audit log — one INSERT per job card entry
+      for (let i = 0; i < data.length; i++) {
+        if (data[i]?.id) {
+          void audit.flush(supabase, user.id, "job_card", data[i].id);
+        }
+      }
       reset();
     } catch {
       showToast("Network error — try again.", true);
@@ -363,21 +371,23 @@ export default function PulveriserProductionPage() {
         <div className="row2">
           <div>
             <label>Machine Number *</label>
-            <select value={machine} onChange={e => setMachine(e.target.value as PulveriserMachine)}>
+            <select value={machine} onChange={e => { setMachine(e.target.value as PulveriserMachine); audit.record("machine_number", e.target.value); }}>
               {PULVERISER_MACHINES.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div>
             <label>Job Number</label>
             <input type="text" placeholder="e.g. JB-0451" value={jobNumber}
-              onChange={e => setJobNumber(e.target.value)} />
+              onChange={e => setJobNumber(e.target.value)}
+              onBlur={() => audit.record("job_number", jobNumber)} />
           </div>
         </div>
 
         <div className="row2">
           <div>
             <label>Job Date</label>
-            <input type="date" value={jobDate} onChange={e => setJobDate(e.target.value)} />
+            <input type="date" value={jobDate} onChange={e => setJobDate(e.target.value)}
+              onBlur={() => audit.record("job_date", jobDate)} />
           </div>
           <div>
             <label>Shift</label>
@@ -433,7 +443,8 @@ export default function PulveriserProductionPage() {
               <div>
                 <label>Batch Number *</label>
                 <input type="text" placeholder="e.g. B-1024" value={e.batchNumber}
-                  onChange={ev => updateEntry(e.key, { batchNumber: ev.target.value })} />
+                  onChange={ev => updateEntry(e.key, { batchNumber: ev.target.value })}
+                  onBlur={() => audit.record(`entry_${idx}_batch_number`, e.batchNumber)} />
               </div>
             </div>
             {e.partyCode && param && (
@@ -448,7 +459,8 @@ export default function PulveriserProductionPage() {
             <label style={{ marginTop: 12 }}>Planned Production (kg)</label>
             <input type="number" min="0" step="1" placeholder="0"
               value={e.plannedKg}
-              onChange={ev => updateEntry(e.key, { plannedKg: ev.target.value })} />
+              onChange={ev => updateEntry(e.key, { plannedKg: ev.target.value })}
+              onBlur={() => audit.record(`entry_${idx}_planned_kg`, e.plannedKg)} />
             <div className="field-hint" style={{ marginTop: 8 }}>
               Oil required (auto):{" "}
               {oilReq !== null ? (

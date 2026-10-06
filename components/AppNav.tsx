@@ -56,10 +56,11 @@ export default function AppNav() {
     ];
     if (role === "lab_manager" || role === "factory_admin" || role === "company_admin") {
       links = [
-        { href: "/lab-qc",              label: "Activities" },
-        { href: "/lab-qc/records",      label: "Records" },
-        { href: "/lab-qc/search",       label: "Search" },
-        { href: "/dashboard",           label: "Dashboard" },
+        { href: "/lab-qc",         label: "Activities" },
+        { href: "/lab-qc/records", label: "Records" },
+        { href: "/lab-qc/search",  label: "Search" },
+        { href: "/activity",       label: "Activity" },
+        { href: "/dashboard",      label: "Dashboard" },
       ];
     }
   } else if (isA20) {
@@ -108,7 +109,8 @@ export default function AppNav() {
     } else if (role === "factory_admin" || role === "company_admin") {
       links = [
         { href: "/pulveriser/records", label: "Pulveriser Job Cards" },
-        { href: "/dashboard", label: "Dashboard" },
+        { href: "/activity",           label: "Activity" },
+        { href: "/dashboard",          label: "Dashboard" },
       ];
     }
   }

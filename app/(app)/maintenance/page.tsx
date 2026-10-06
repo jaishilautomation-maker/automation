@@ -25,6 +25,7 @@ import { useToast } from "@/lib/toast-context";
 import type { PmScheduleItem, PmCompletion, PmItemWithStatus } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildPmEmail } from "@/lib/notifications/pulveriser-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 // ---------------------------------------------------------------------------
 // Due-status computation
@@ -93,6 +94,7 @@ export default function MaintenancePage() {
   const [markingId, setMarkingId]             = useState<string | null>(null);
   // Per-row remark text — keyed by schedule_item_id
   const [remarks, setRemarks]                 = useState<Record<string, string>>({});
+  const audit = useFieldAudit();
 
   // Filter controls
   const [filterMachine, setFilterMachine]   = useState<string>("All");
@@ -156,16 +158,25 @@ export default function MaintenancePage() {
     setMarkingId(itemId);
     try {
       const completedAt = new Date().toISOString();
-      const { error } = await supabase
+      const { data: newCompletion, error } = await supabase
         .from("pm_completions")
         .insert({
           schedule_item_id: itemId,
           completed_at:     completedAt,
           completed_by:     user.id,
           notes:            remarks[itemId]?.trim() || null,
-        });
+        })
+        .select("id")
+        .single();
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Flush field-level audit log using the completion row id
+      if (newCompletion?.id) {
+        audit.record("schedule_item_id", itemId);
+        audit.record("notes", remarks[itemId] ?? null);
+        await audit.flush(supabase, user.id, "pm", newCompletion.id);
+      }
 
       // Fire-and-forget email notification — look up the item from current state
       const itemWithStatus = itemsWithStatus.find(i => i.item.id === itemId);
@@ -395,6 +406,7 @@ export default function MaintenancePage() {
                           placeholder="Add remark…"
                           value={remarks[i.item.id] ?? ""}
                           onChange={e => setRemarks(prev => ({ ...prev, [i.item.id]: e.target.value }))}
+                          onBlur={e => audit.record("notes", e.target.value)}
                           style={{
                             width: "100%", fontSize: 12,
                             padding: "4px 8px", borderRadius: 6,

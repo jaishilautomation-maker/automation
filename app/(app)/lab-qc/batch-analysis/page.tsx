@@ -26,6 +26,7 @@ import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 import { paramsForParty } from "@/lib/reports/batch-analysis-params";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 interface PartyOption {
   party_code: string;
@@ -84,6 +85,7 @@ export default function BatchAnalysisPage() {
   const [reworkAction, setReworkAction] = useState<ReworkAction | "">("");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+  const audit = useFieldAudit();
 
 
   // -------------------------------------------------------------------------
@@ -311,6 +313,7 @@ export default function BatchAnalysisPage() {
     setMfgDate(new Date().toISOString().slice(0, 10));
     setShift("");
     setLotNo("");
+    audit.reset();
   };
 
   const handleBatchBlur = () => { resolveBatch(batchNumber); };
@@ -419,8 +422,10 @@ export default function BatchAnalysisPage() {
           })
           .eq("id", existingAnalysis.id);
 
-        if (error) { showToast("Update failed: " + error.message, true); return; }
+    if (error) { showToast("Update failed: " + error.message, true); return; }
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
+        // Flush field-level audit log (one batched INSERT)
+        await audit.flush(supabase, user.id, "batch_analysis", existingAnalysis.id);
         // Fire-and-forget: mail Final Inspection (all party params filled + pass)
         // or In-Process / Finish Goods Testing report otherwise.
         void notifyReport({ source: "batch_analysis", recordId: existingAnalysis.id, variant: reportVariant });
@@ -502,6 +507,8 @@ export default function BatchAnalysisPage() {
         // successful save (existingAnalysis was never populated post-insert).
         setExistingAnalysis(newRow as BatchAnalysis);
         await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        // Flush field-level audit log (one batched INSERT)
+        await audit.flush(supabase, user.id, "batch_analysis", newRow.id);
         // Fire-and-forget: mail Final Inspection (all party params filled + pass)
         // or In-Process / Finish Goods Testing report otherwise.
         void notifyReport({ source: "batch_analysis", recordId: newRow.id, variant: reportVariant });
@@ -621,6 +628,7 @@ export default function BatchAnalysisPage() {
                   placeholder="e.g. 393"
                   value={srNo}
                   onChange={e => setSrNo(e.target.value)}
+                  onBlur={() => audit.record("sr_no", srNo)}
                 />
               </div>
               <div>
@@ -630,13 +638,14 @@ export default function BatchAnalysisPage() {
                   placeholder="e.g. P-324"
                   value={jobNo}
                   onChange={e => setJobNo(e.target.value)}
+                  onBlur={() => audit.record("job_no", jobNo)}
                 />
               </div>
             </div>
             <div className="row2">
               <div>
                 <label>Shift</label>
-                <select value={shift} onChange={e => setShift(e.target.value)}>
+                <select value={shift} onChange={e => { setShift(e.target.value); audit.record("shift", e.target.value); }}>
                   <option value="">— Select shift —</option>
                   <option value="day">Day</option>
                   <option value="night">Night</option>
@@ -649,6 +658,7 @@ export default function BatchAnalysisPage() {
                   placeholder="e.g. A"
                   value={lotNo}
                   onChange={e => setLotNo(e.target.value)}
+                  onBlur={() => audit.record("lot_no", lotNo)}
                 />
               </div>
             </div>
@@ -659,6 +669,7 @@ export default function BatchAnalysisPage() {
                   type="date"
                   value={mfgDate}
                   onChange={e => setMfgDate(e.target.value)}
+                  onBlur={() => audit.record("mfg_date", mfgDate)}
                 />
               </div>
               <div>
@@ -667,6 +678,7 @@ export default function BatchAnalysisPage() {
                   type="date"
                   value={analysisDate}
                   onChange={e => setAnalysisDate(e.target.value)}
+                  onBlur={() => audit.record("analysis_date", analysisDate)}
                 />
               </div>
             </div>
@@ -706,6 +718,7 @@ export default function BatchAnalysisPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  onBlur={(key, val) => audit.record(key, val)}
                   specBadge={partyCode ? buildSpecBadge(def.test_key) : null}
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
@@ -752,7 +765,9 @@ export default function BatchAnalysisPage() {
                 in Remarks. You can also save without one.
               </p>
               <label>Rework Action</label>
-              <select value={reworkAction} onChange={e => setReworkAction(e.target.value as ReworkAction | "")}>
+              <select value={reworkAction}
+                onChange={e => setReworkAction(e.target.value as ReworkAction | "")}
+                onBlur={e => audit.record("rework_action", e.target.value)}>
                 <option value="">— None —</option>
                 <option value="downgrade_grade_b">Downgrade to Grade B</option>
                 <option value="reroute_repackaging">Reroute for repackaging</option>
@@ -766,6 +781,7 @@ export default function BatchAnalysisPage() {
               placeholder="Any additional observations…"
               value={remarks}
               onChange={e => setRemarks(e.target.value)}
+              onBlur={e => audit.record("remarks", e.target.value)}
               rows={3}
             />
           </div>

@@ -25,6 +25,7 @@ import { BREAKDOWN_MACHINES } from "@/lib/types";
 import type { BreakdownMachine, BreakdownEntry } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildBreakdownEmail } from "@/lib/notifications/pulveriser-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,6 +70,7 @@ export default function BreakdownPage() {
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const audit = useFieldAudit();
 
   // Form state
   const [startAt, setStartAt]                   = useState(localNow());
@@ -123,12 +125,11 @@ export default function BreakdownPage() {
 
     setSubmitting(true);
     try {
-      const { error } = await supabase
+      const { data: newBreakdown, error } = await supabase
         .from("breakdown_register")
         .insert({
           factory_id:           activeFactory.id,
           machine_name:         selectedMachine,
-          // sr_no set by DB trigger — do not supply it
           start_at:             new Date(startAt).toISOString(),
           finish_at:            finishAt ? new Date(finishAt).toISOString() : null,
           nature_of_breakdown:  natureOfBreakdown.trim(),
@@ -137,9 +138,16 @@ export default function BreakdownPage() {
           corrective_action:    correctiveAction.trim()  || null,
           remarks:              remarks.trim()            || null,
           created_by:           user.id,
-        });
+        })
+        .select("id")
+        .single();
 
       if (error) { showToast("Could not save: " + error.message, true); return; }
+
+      // Flush field-level audit log (one batched INSERT)
+      if (newBreakdown?.id) {
+        await audit.flush(supabase, user.id, "breakdown", newBreakdown.id);
+      }
 
       // Fire-and-forget email notification
       const nowISO = new Date().toISOString();
@@ -165,7 +173,7 @@ export default function BreakdownPage() {
           target: "production",
           tab:    "Breakdown Register",
           values: [
-            null,                               // ID — not available client-side pre-insert
+            newBreakdown?.id ?? null,           // ID — now captured
             null,                               // SR No — set by DB trigger
             selectedMachine,
             new Date(startAt).toISOString(),
@@ -185,6 +193,7 @@ export default function BreakdownPage() {
       showToast("Breakdown entry saved ✓");
       setShowForm(false);
       resetForm();
+      audit.reset();
       loadEntries();
     } catch {
       showToast("Network error — try again.", true);
@@ -263,6 +272,7 @@ export default function BreakdownPage() {
                 type="datetime-local"
                 value={startAt}
                 onChange={e => setStartAt(e.target.value)}
+                onBlur={() => audit.record("start_at", startAt)}
               />
             </div>
             <div>
@@ -271,6 +281,7 @@ export default function BreakdownPage() {
                 type="datetime-local"
                 value={finishAt}
                 onChange={e => setFinishAt(e.target.value)}
+                onBlur={() => audit.record("finish_at", finishAt)}
               />
             </div>
           </div>
@@ -281,6 +292,7 @@ export default function BreakdownPage() {
             placeholder="Describe what failed / what was the issue"
             value={natureOfBreakdown}
             onChange={e => setNatureOfBreakdown(e.target.value)}
+            onBlur={() => audit.record("nature_of_breakdown", natureOfBreakdown)}
           />
 
           <label>Repair carried out</label>
@@ -289,6 +301,7 @@ export default function BreakdownPage() {
             placeholder="What was done to fix it"
             value={repairCarriedOut}
             onChange={e => setRepairCarriedOut(e.target.value)}
+            onBlur={() => audit.record("repair_carried_out", repairCarriedOut)}
           />
 
           <div className="row2">
@@ -299,6 +312,7 @@ export default function BreakdownPage() {
                 placeholder="Part names / part numbers"
                 value={partsReplaced}
                 onChange={e => setPartsReplaced(e.target.value)}
+                onBlur={() => audit.record("parts_replaced", partsReplaced)}
               />
             </div>
             <div>
@@ -308,6 +322,7 @@ export default function BreakdownPage() {
                 placeholder="Action to prevent recurrence"
                 value={correctiveAction}
                 onChange={e => setCorrectiveAction(e.target.value)}
+                onBlur={() => audit.record("corrective_action", correctiveAction)}
               />
             </div>
           </div>
@@ -318,6 +333,7 @@ export default function BreakdownPage() {
             placeholder="Additional remarks or production incharge name"
             value={remarks}
             onChange={e => setRemarks(e.target.value)}
+            onBlur={() => audit.record("remarks", remarks)}
           />
 
           <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
