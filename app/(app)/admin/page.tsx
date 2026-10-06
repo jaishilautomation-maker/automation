@@ -206,7 +206,7 @@ export default function AdminPage() {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? "";
-      const res = await fetch("/api/admin/users", {
+      const res = await fetch(`/api/admin/users?userId=${encodeURIComponent(u.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({ userId: u.id }),
