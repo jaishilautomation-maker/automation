@@ -1,8 +1,9 @@
 "use client";
 
 // =============================================================================
-// Activity — field-level audit drill-down (admin / lab_manager only)
+// Activity — field-level audit drill-down (factory_admin / company_admin only)
 //
+// Accessible from the select-module page (beside Manage Users tile).
 // Lets a manager pick a user + date, then see a timeline of every individual
 // field entry for records saved that day — field name, value, when the user
 // says they filled it (entered_at), and when the server received it (recorded_at).

@@ -59,7 +59,6 @@ export default function AppNav() {
         { href: "/lab-qc",         label: "Activities" },
         { href: "/lab-qc/records", label: "Records" },
         { href: "/lab-qc/search",  label: "Search" },
-        { href: "/activity",       label: "Activity" },
         { href: "/dashboard",      label: "Dashboard" },
       ];
     }
@@ -109,7 +108,6 @@ export default function AppNav() {
     } else if (role === "factory_admin" || role === "company_admin") {
       links = [
         { href: "/pulveriser/records", label: "Pulveriser Job Cards" },
-        { href: "/activity",           label: "Activity" },
         { href: "/dashboard",          label: "Dashboard" },
       ];
     }

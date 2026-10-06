@@ -303,6 +303,18 @@ export default function SelectModulePage() {
             <div className="module-title" style={{ color: "#1565c0" }}>Manage Users</div>
             <div className="module-desc">Add, edit, or remove system users and their roles</div>
           </button>
+
+          {/* Admin-only: Activity audit drill-down */}
+          <button
+            className="module-tile"
+            type="button"
+            onClick={() => router.push("/activity")}
+            style={{ borderColor: "#6a1b9a", background: "#f3e5f5" }}
+          >
+            <div className="module-icon">📊</div>
+            <div className="module-title" style={{ color: "#6a1b9a" }}>Activity</div>
+            <div className="module-desc">Field-level audit — see exactly when each entry was made</div>
+          </button>
         </div>
 
         <div className="small-note" style={{ marginTop: 20, textAlign: "center" }}>
@@ -396,6 +408,18 @@ export default function SelectModulePage() {
               <div className="module-icon">👥</div>
               <div className="module-title" style={{ color: "#1565c0" }}>Manage Users</div>
               <div className="module-desc">Add, edit, or remove system users and their roles</div>
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              className="module-tile"
+              type="button"
+              onClick={() => router.push("/activity")}
+              style={{ borderColor: "#6a1b9a", background: "#f3e5f5" }}
+            >
+              <div className="module-icon">📊</div>
+              <div className="module-title" style={{ color: "#6a1b9a" }}>Activity</div>
+              <div className="module-desc">Field-level audit — see exactly when each entry was made</div>
             </button>
           )}
         </div>
