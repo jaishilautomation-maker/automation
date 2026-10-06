@@ -19,7 +19,7 @@
 // Cron schedule: 0 30 6 * * *  (06:30 UTC daily, after the 06:00 qc-exchange retry)
 // =============================================================================
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/lib/notifications/send-email";
 
@@ -71,8 +71,16 @@ function escapeCSV(v: unknown): string {
 // ---------------------------------------------------------------------------
 // Main handler
 // ---------------------------------------------------------------------------
-export async function GET() {
-  const { start, end, label } = previousDayRange();
+export async function GET(req: NextRequest) {
+  // Optional ?date=YYYY-MM-DD for manual testing (defaults to yesterday UTC).
+  const dateParam = req.nextUrl.searchParams.get("date");
+  const { start, end, label } = dateParam
+    ? (() => {
+        const d = new Date(dateParam + "T00:00:00.000Z");
+        const next = new Date(d.getTime() + 86400000);
+        return { start: d.toISOString(), end: next.toISOString(), label: dateParam };
+      })()
+    : previousDayRange();
   const admin = getAdmin();
 
   // 1. Fetch all field_entry_log rows for the previous day.
