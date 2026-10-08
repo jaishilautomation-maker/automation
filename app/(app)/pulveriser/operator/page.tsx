@@ -825,6 +825,23 @@ export default function PulveriserOperatorPage() {
         )}
       </div>
 
+      {/* Checkpoints — at the top */}
+      <div className="card">
+        <h3>जाँच बिंदु</h3>
+        <div className="checkline">
+          <input type="checkbox" checked={chkClean} onChange={e => setChkClean(e.target.checked)} />
+          <span>मशीन की सफाई</span>
+        </div>
+        <div className="checkline">
+          <input type="checkbox" checked={chkRoller} onChange={e => setChkRoller(e.target.checked)} />
+          <span>रोलर की जाँच</span>
+        </div>
+        <div className="checkline">
+          <input type="checkbox" checked={chkMesh} onChange={e => setChkMesh(e.target.checked)} />
+          <span>जाली के कपड़े की जाँच</span>
+        </div>
+      </div>
+
       {/* 1. Operator machine settings */}
       <div className="card">
         <h3>मशीन सेटिंग्स</h3>
@@ -988,23 +1005,6 @@ export default function PulveriserOperatorPage() {
         </div>
       </div>
 
-      {/* Checkpoints */}
-      <div className="card">
-        <h3>जाँच बिंदु</h3>
-        <div className="checkline">
-          <input type="checkbox" checked={chkClean} onChange={e => setChkClean(e.target.checked)} />
-          <span>मशीन की सफाई</span>
-        </div>
-        <div className="checkline">
-          <input type="checkbox" checked={chkRoller} onChange={e => setChkRoller(e.target.checked)} />
-          <span>रोलर की जाँच</span>
-        </div>
-        <div className="checkline">
-          <input type="checkbox" checked={chkMesh} onChange={e => setChkMesh(e.target.checked)} />
-          <span>जाली के कपड़े की जाँच</span>
-        </div>
-      </div>
-
       {/* तास रीडिंग — JOB-LEVEL, single reading for the whole job number */}
       <div className="card">
         <h3 style={{ marginTop: 0 }}>तास रीडिंग</h3>
@@ -1044,23 +1044,6 @@ export default function PulveriserOperatorPage() {
                   <label>कुल घंटे</label>
                   <input type="text" disabled
                     value={diff !== null ? formatCodedHM(diff) : ""} placeholder="0 घं 0 मि" />
-                </div>
-              </div>
-              <div className="row3">
-                <div>
-                  <label>नियोजित उत्पादन</label>
-                  <input type="number" min="0" step="0.001" value={r.planned_production}
-                    onChange={e => updateRow(r.id, "planned_production", e.target.value)} />
-                </div>
-                <div>
-                  <label>बैच नं.</label>
-                  <input type="text" value={r.batch_no}
-                    onChange={e => updateRow(r.id, "batch_no", e.target.value)} />
-                </div>
-                <div>
-                  <label>बैग</label>
-                  <input type="number" min="0" value={r.bags}
-                    onChange={e => updateRow(r.id, "bags", e.target.value)} />
                 </div>
               </div>
               <label>कम उत्पादन का कारण (यदि कोई हो — एक से अधिक चुन सकते हैं)</label>
