@@ -135,11 +135,27 @@ export default function PulveriserLabPage() {
         },
       });
 
-      // On OK the card is finalized — generate + email the job-card Excel report
-      // (automation@ + factory@). Fire-and-forget; NOT OK sends it to rework so
-      // no report is issued.
+      // On OK the card is finalized. The Excel report now covers EVERY entry of
+      // the job number, so only issue it once — when ALL entries of this job
+      // are finalized. (If entries finalize at different times, the report
+      // fires on the last one.) NOT OK sends it to rework, so no report.
       if (result === "ok") {
-        void notifyReport({ source: "job_card", recordId: active.id });
+        let allFinalized = true;
+        if (active.job_number && active.job_number.trim() !== "") {
+          const { data: siblings } = await supabase
+            .from("pulveriser_job_cards")
+            .select("id, status")
+            .eq("factory_id", active.factory_id)
+            .eq("job_number", active.job_number);
+          // This card just became finalized; treat its own row as finalized
+          // regardless of the (possibly stale) status read.
+          allFinalized = (siblings ?? []).every(
+            (s: { id: string; status: string }) => s.id === active.id || s.status === "finalized",
+          );
+        }
+        if (allFinalized) {
+          void notifyReport({ source: "job_card", recordId: active.id });
+        }
       }
 
       showToast(result === "ok"

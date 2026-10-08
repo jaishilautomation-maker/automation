@@ -366,6 +366,9 @@ function str(v: unknown): string {
 // ---------------------------------------------------------------------------
 async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   const d = record;
+  // All entries of this job number (set by loadJobCard). Falls back to the one
+  // finalized card when the job has a single entry / null job_number.
+  const entries = ((d.__entries as Record<string, unknown>[]) ?? [d]);
   const wb = new ExcelJS.Workbook();
   wb.creator = "JSCI Automation";
   const ws = wb.addWorksheet("Job Card");
@@ -450,11 +453,25 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   ws.getRow(r).height = 18; r++;
 
   // Row 2: Batch/Material Code | Party/CODE | Planned Production | Oil Required
+  // For a multi-entry job these differ per entry, so the header shows a job
+  // summary (count + totals) and the per-entry values appear in the table below.
+  const multi = entries.length > 1;
+  const sumPlannedKg = entries.reduce((s, e) =>
+    s + (typeof e.planned_production_mt === "number" ? (e.planned_production_mt as number) * 1000 : 0), 0);
+  const sumOilReq = entries.reduce((s, e) =>
+    s + (typeof e.oil_required_kg === "number" ? (e.oil_required_kg as number) : 0), 0);
   const hdrLabels2 = ["Batch / Material Code", "Party / CODE", "Planned Prod. (kg)", "Oil Required (kg)"];
-  const hdrVals2   = [
-    str(d.material_code), str(d.party_code),
-    mtToKg(d.planned_production_mt), str(d.oil_required_kg),
-  ];
+  const hdrVals2   = multi
+    ? [
+        `${entries.length} entries (see below)`,
+        `${entries.length} entries (see below)`,
+        `${Math.round(sumPlannedKg)} (total)`,
+        `${Math.round(sumOilReq)} (total)`,
+      ]
+    : [
+        str(d.material_code), str(d.party_code),
+        mtToKg(d.planned_production_mt), str(d.oil_required_kg),
+      ];
   for (let i = 0; i < 4; i++) {
     const [lc, vc] = hdrCols[i];
     ws.getCell(`${lc}${r}`).value = hdrLabels2[i];
@@ -467,36 +484,40 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   r++;
 
   // ── Sulphur & Oil side-by-side block ─────────────────────────────────────
-  // Section headings
-  ws.mergeCells(`A${r}:D${r}`);
-  ws.getCell(`A${r}`).value = "Sulphur Details";
-  ws.getCell(`A${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
-  fillCell(`A${r}`, SECTION_FILL);
-  ws.mergeCells(`E${r}:H${r}`);
-  ws.getCell(`E${r}`).value = "Oil Details";
-  ws.getCell(`E${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
-  fillCell(`E${r}`, SECTION_FILL); r++;
+  // Only for a single-entry job; for multi-entry jobs each entry's sulphur/oil
+  // appears in the per-entry Operator Details table below (avoids showing just
+  // the first entry's values as if they were the whole job's).
+  if (entries.length <= 1) {
+    ws.mergeCells(`A${r}:D${r}`);
+    ws.getCell(`A${r}`).value = "Sulphur Details";
+    ws.getCell(`A${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
+    fillCell(`A${r}`, SECTION_FILL);
+    ws.mergeCells(`E${r}:H${r}`);
+    ws.getCell(`E${r}`).value = "Oil Details";
+    ws.getCell(`E${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
+    fillCell(`E${r}`, SECTION_FILL); r++;
 
-  const sulRows = [
-    ["Supplier",   str(d.sulphur_supplier)],
-    ["Lot Number", str(d.sulphur_lot_number)],
-    ["Date RM Received", str(d.sulphur_empty_date)],
-  ];
-  const oilRows = [
-    ["Supplier",       str(d.oil_supplier)],
-    // oil_batch_number column now holds the Oil Received Date (ISO).
-    ["Received Date",  fmtIsoDate(d.oil_batch_number)],
-    ["Quantity (kg)",  str(d.oil_quantity ?? "")],
-  ];
-  for (let i = 0; i < 3; i++) {
-    ws.getCell(`A${r}`).value = sulRows[i][0]; ws.getCell(`A${r}`).font = { bold: true };
-    ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = sulRows[i][1];
-    ws.getCell(`E${r}`).value = oilRows[i][0]; ws.getCell(`E${r}`).font = { bold: true };
-    ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = oilRows[i][1];
-    for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
+    const sulRows = [
+      ["Supplier",   str(d.sulphur_supplier)],
+      ["Lot Number", str(d.sulphur_lot_number)],
+      ["Date RM Received", str(d.sulphur_empty_date)],
+    ];
+    const oilRows = [
+      ["Supplier",       str(d.oil_supplier)],
+      // oil_batch_number column now holds the Oil Received Date (ISO).
+      ["Received Date",  fmtIsoDate(d.oil_batch_number)],
+      ["Quantity (kg)",  str(d.oil_quantity ?? "")],
+    ];
+    for (let i = 0; i < 3; i++) {
+      ws.getCell(`A${r}`).value = sulRows[i][0]; ws.getCell(`A${r}`).font = { bold: true };
+      ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = sulRows[i][1];
+      ws.getCell(`E${r}`).value = oilRows[i][0]; ws.getCell(`E${r}`).font = { bold: true };
+      ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = oilRows[i][1];
+      for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
+      r++;
+    }
     r++;
   }
-  r++;
 
   // ── Operator details table ────────────────────────────────────────────────
   ws.mergeCells(`A${r}:H${r}`);
@@ -526,25 +547,27 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   });
   r++;
 
-  // One data row (single job card entry)
-  ws.getRow(r).height = 28;
-  const opValues = [
-    "1",
-    str(d.material_code),
-    [str(d.sulphur_supplier), str(d.sulphur_lot_number), str(d.sulphur_empty_date)].filter(Boolean).join(" / "),
-    [str(d.oil_supplier), fmtIsoDate(d.oil_batch_number)].filter(Boolean).join(" / "),
-    str(d.classifier_vfd),
-    [str(d.blower_inlet_valve), str(d.blower_outlet_valve)].filter(Boolean).join(" / "),
-    [str(d.finished_goods_bag) ? `${str(d.finished_goods_bag)} bags` : "", str(d.packing_size) ? `${str(d.packing_size)} kg` : ""].filter(Boolean).join(", "),
-    str(d.work_details),
-  ];
-  opValues.forEach((v, i) => {
-    const cell = ws.getCell(r, i + 1);
-    cell.value = v;
-    cell.alignment = { vertical: "middle", wrapText: true, horizontal: "center" };
-    cell.border = box;
+  // One data row PER ENTRY of this job number (Production files 1..N entries).
+  entries.forEach((en, idx) => {
+    ws.getRow(r).height = 28;
+    const opValues = [
+      String(idx + 1),
+      str(en.material_code),
+      [str(en.sulphur_supplier), str(en.sulphur_lot_number), str(en.sulphur_empty_date)].filter(Boolean).join(" / "),
+      [str(en.oil_supplier), fmtIsoDate(en.oil_batch_number)].filter(Boolean).join(" / "),
+      str(en.classifier_vfd),
+      [str(en.blower_inlet_valve), str(en.blower_outlet_valve)].filter(Boolean).join(" / "),
+      [str(en.finished_goods_bag) ? `${str(en.finished_goods_bag)} bags` : "", str(en.packing_size) ? `${str(en.packing_size)} kg` : ""].filter(Boolean).join(", "),
+      str(en.work_details),
+    ];
+    opValues.forEach((v, i) => {
+      const cell = ws.getCell(r, i + 1);
+      cell.value = v;
+      cell.alignment = { vertical: "middle", wrapText: true, horizontal: "center" };
+      cell.border = box;
+    });
+    r++;
   });
-  r++;
   r++;
 
   // ── Daily checkpoints ─────────────────────────────────────────────────────
@@ -553,22 +576,30 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   ws.getCell(`A${r}`).font  = { bold: true, color: { argb: "FF1B5E20" } };
   fillCell(`A${r}`, SECTION_FILL); r++;
 
-  const checks = [
-    ["1. मशीन की सफाई (Machine Cleaning)", d.checkpoint_machine_cleaning],
-    ["2. रोलर की जाँच (Roller Check)",     d.checkpoint_roller_check],
-    ["3. जाली के कपड़े की जाँच (Mesh Cloth Check)", d.checkpoint_mesh_cloth_check],
-  ];
-  checks.forEach(([label, val], i) => {
-    const col = ["A","C","F"][i];
-    const vcol= ["B","D","G"][i];
-    ws.getCell(`${col}${r}`).value = String(label);
-    ws.getCell(`${col}${r}`).font  = { bold: false, size: 10 };
-    ws.getCell(`${vcol}${r}`).value = val ? "✓" : "✗";
-    ws.getCell(`${vcol}${r}`).font  = { bold: true, size: 13, color: { argb: val ? "FF1B5E20" : "FFCC0000" } };
-    ws.getCell(`${vcol}${r}`).alignment = { horizontal: "center" };
-    setBox(`${col}${r}`); setBox(`${vcol}${r}`);
+  // Checkpoints are per-entry; show one line per entry when there are several.
+  entries.forEach((en, idx) => {
+    if (entries.length > 1) {
+      ws.getCell(`A${r}`).value = `Entry ${idx + 1} — ${str(en.material_code)}`;
+      ws.getCell(`A${r}`).font = { bold: true, size: 9, color: { argb: "FF555555" } };
+      r++;
+    }
+    const checks = [
+      ["1. मशीन की सफाई (Machine Cleaning)", en.checkpoint_machine_cleaning],
+      ["2. रोलर की जाँच (Roller Check)",     en.checkpoint_roller_check],
+      ["3. जाली के कपड़े की जाँच (Mesh Cloth Check)", en.checkpoint_mesh_cloth_check],
+    ];
+    checks.forEach(([label, val], i) => {
+      const col = ["A","C","F"][i];
+      const vcol= ["B","D","G"][i];
+      ws.getCell(`${col}${r}`).value = String(label);
+      ws.getCell(`${col}${r}`).font  = { bold: false, size: 10 };
+      ws.getCell(`${vcol}${r}`).value = val ? "✓" : "✗";
+      ws.getCell(`${vcol}${r}`).font  = { bold: true, size: 13, color: { argb: val ? "FF1B5E20" : "FFCC0000" } };
+      ws.getCell(`${vcol}${r}`).alignment = { horizontal: "center" };
+      setBox(`${col}${r}`); setBox(`${vcol}${r}`);
+    });
+    ws.getRow(r).height = 20; r++;
   });
-  ws.getRow(r).height = 20; r++;
   r++;
 
   // ── Hourly readings table ──────────────────────────────────────────────────
@@ -625,28 +656,37 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
   fillCell(`A${r}`, SECTION_FILL); r++;
 
-  const oilSumRows: [string, string][] = [
-    ["Oil Issued (kg)",               str(d.oil_issued_kg)],
-    ["Actual Production (kg)",        mtToKg(d.actual_production_mt)],
-    ["Expected Oil (kg)",             str(d.expected_oil_kg)],
-    ["Actual Oil Consumption (kg)",   str(d.actual_oil_consumption_kg)],
-    ["Oil Variance (kg)",             str(d.oil_variance_kg)],
-    ["Extra / Leftover Balance (kg)", str(d.oil_extra_leftover_balance_kg)],
-    ["Oil Consumption %",             typeof d.oil_consumption_percent === "number" ? `${(d.oil_consumption_percent as number).toFixed(2)}%` : str(d.oil_consumption_percent)],
-    ["QC Incharge Note",              str(d.qc_incharge_note)],
-    ["Stores Incharge Note",          str(d.stores_incharge_note)],
-  ];
-  // Two pairs per row (4 columns each)
-  for (let i = 0; i < oilSumRows.length; i += 2) {
-    const [l1, v1] = oilSumRows[i];
-    const [l2, v2] = oilSumRows[i + 1] ?? ["", ""];
-    ws.getCell(`A${r}`).value = l1; ws.getCell(`A${r}`).font = { bold: true };
-    ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = v1;
-    ws.getCell(`E${r}`).value = l2; ws.getCell(`E${r}`).font = { bold: true };
-    ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = v2;
-    for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
-    r++;
-  }
+  // Oil consumption + stores figures are per entry; render one block per entry.
+  entries.forEach((en, idx) => {
+    if (entries.length > 1) {
+      ws.mergeCells(`A${r}:H${r}`);
+      ws.getCell(`A${r}`).value = `Entry ${idx + 1} — ${str(en.material_code)}`;
+      ws.getCell(`A${r}`).font = { bold: true, size: 9, color: { argb: "FF555555" } };
+      r++;
+    }
+    const oilSumRows: [string, string][] = [
+      ["Oil Issued (kg)",               str(en.oil_issued_kg)],
+      ["Actual Production (kg)",        mtToKg(en.actual_production_mt)],
+      ["Expected Oil (kg)",             str(en.expected_oil_kg)],
+      ["Actual Oil Consumption (kg)",   str(en.actual_oil_consumption_kg)],
+      ["Oil Variance (kg)",             str(en.oil_variance_kg)],
+      ["Extra / Leftover Balance (kg)", str(en.oil_extra_leftover_balance_kg)],
+      ["Oil Consumption %",             typeof en.oil_consumption_percent === "number" ? `${(en.oil_consumption_percent as number).toFixed(2)}%` : str(en.oil_consumption_percent)],
+      ["QC Incharge Note",              str(en.qc_incharge_note)],
+      ["Stores Incharge Note",          str(en.stores_incharge_note)],
+    ];
+    // Two pairs per row (4 columns each)
+    for (let i = 0; i < oilSumRows.length; i += 2) {
+      const [l1, v1] = oilSumRows[i];
+      const [l2, v2] = oilSumRows[i + 1] ?? ["", ""];
+      ws.getCell(`A${r}`).value = l1; ws.getCell(`A${r}`).font = { bold: true };
+      ws.mergeCells(`B${r}:D${r}`); ws.getCell(`B${r}`).value = v1;
+      ws.getCell(`E${r}`).value = l2; ws.getCell(`E${r}`).font = { bold: true };
+      ws.mergeCells(`F${r}:H${r}`); ws.getCell(`F${r}`).value = v2;
+      for (const c of ["A","B","E","F"]) setBox(`${c}${r}`);
+      r++;
+    }
+  });
   r++;
 
   // ── QC Sign-off ────────────────────────────────────────────────────────────
@@ -846,14 +886,44 @@ async function loadJobCard(
   if (!data) return null;
   const d = data as Record<string, unknown>;
 
-  // Hourly readings for the readings table in the report.
+  // ── Gather ALL entries that share this card's job_number ──────────────────
+  // Production files up to several entries under one job_number; the finalized
+  // report should cover every entry of that job, not just the one that was
+  // reviewed. Fall back to this single card when job_number is null/empty.
+  const jobNumber = (d.job_number as string | null) ?? null;
+  let entries: Record<string, unknown>[] = [d];
+  if (jobNumber && jobNumber.trim() !== "") {
+    const { data: siblings } = await supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .eq("factory_id", d.factory_id as string)
+      .eq("job_number", jobNumber)
+      .order("created_at");
+    if (siblings && siblings.length > 0) {
+      entries = siblings as Record<string, unknown>[];
+    }
+  }
+  const entryIds = entries.map(e => e.id as string);
+
+  // Hourly readings for ALL entries of this job (readings are job-level, but we
+  // union across every entry id so none are missed regardless of anchor).
   const { data: readings } = await supabase
     .from("pulveriser_hourly_readings")
     .select("*")
-    .eq("job_card_id", id)
+    .in("job_card_id", entryIds)
     .order("created_at");
 
-  // Latest lab review (result + who/when) for the QC sign-off block.
+  // De-duplicate readings (job-level readings are anchored to one id, but a
+  // union across ids is safe; dedupe by row id just in case).
+  const seenReading = new Set<string>();
+  const allReadings = ((readings ?? []) as Record<string, unknown>[]).filter(rd => {
+    const rid = rd.id as string;
+    if (seenReading.has(rid)) return false;
+    seenReading.add(rid);
+    return true;
+  });
+
+  // Latest lab review on the finalized card for the QC sign-off block.
   const { data: review } = await supabase
     .from("pulveriser_job_card_reviews")
     .select("result, remark, reviewed_by, reviewed_at")
@@ -869,7 +939,8 @@ async function loadJobCard(
   return flatten(d, {
     // batch_no alias for the shared filename helper / subject line.
     batch_no: d.job_number ?? d.material_code ?? d.id,
-    __readings: (readings ?? []) as Record<string, unknown>[],
+    __entries: entries,
+    __readings: allReadings,
     __lab_result: rev?.result ?? null,
     __lab_remark: rev?.remark ?? null,
     __lab_by: labByName,
