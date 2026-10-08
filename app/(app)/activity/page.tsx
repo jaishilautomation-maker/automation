@@ -18,6 +18,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
@@ -152,8 +153,8 @@ export default function ActivityPage() {
           </div>
           <div>
             <label>Date</label>
-            <input type="date" value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)} />
+            <DateField value={selectedDate}
+              onChange={setSelectedDate} />
           </div>
         </div>
 

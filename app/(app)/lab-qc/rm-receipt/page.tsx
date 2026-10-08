@@ -12,6 +12,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -467,7 +468,7 @@ export default function RmReceiptPage() {
             onBlur={() => audit.record("appearance", appearance)} />
 
           <label>Date Received</label>
-          <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)}
+          <DateField value={receivedDate} onChange={setReceivedDate}
             onBlur={() => audit.record("received_date", receivedDate)} />
 
           <label>Truck Number</label>
@@ -546,7 +547,7 @@ export default function RmReceiptPage() {
             value={appearance} onChange={e => setAppearance(e.target.value)} />
 
           <label>Date Received</label>
-          <input type="date" value={receivedDate} onChange={e => setReceivedDate(e.target.value)} />
+          <DateField value={receivedDate} onChange={setReceivedDate} />
 
           {user && activeFactory && (
             <div style={{ marginTop: 12 }}>

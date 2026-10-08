@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import DateField from "@/components/DateField";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
@@ -202,7 +203,7 @@ export default function LabTrialsPage() {
           </div>
           <div>
             <label>Trial Date *</label>
-            <input type="date" value={trialDate} onChange={e => setTrialDate(e.target.value)} />
+            <DateField value={trialDate} onChange={setTrialDate} />
           </div>
         </div>
 

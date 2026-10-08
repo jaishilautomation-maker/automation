@@ -33,6 +33,10 @@ interface RecentReading {
   test_results: Record<string, unknown>;
 }
 
+// Machine options for the hourly reading (Factory A 20/1 has two lines).
+const MACHINE_OPTIONS = ["M1", "M2"] as const;
+type MachineOption = (typeof MACHINE_OPTIONS)[number];
+
 export default function HourlyReadingPage() {
   const { user, profile } = useAuth();
   const { showToast } = useToast();
@@ -42,6 +46,9 @@ export default function HourlyReadingPage() {
   // Batch number (free text input)
   const [batchNumber, setBatchNumber] = useState("");
   const [resolvedBatchId, setResolvedBatchId] = useState<string | null>(null);
+
+  // Machine selection (M1 / M2) — stored inside test_results.machine
+  const [machine, setMachine] = useState<MachineOption>("M1");
 
   // Test definitions
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
@@ -190,6 +197,8 @@ export default function HourlyReadingPage() {
 
       // Build test_results
       const testResults: Record<string, number | string> = {};
+      // Record the selected machine (M1 / M2) alongside the test values.
+      testResults.machine = machine;
       testDefs.forEach(d => {
         const raw = values[d.test_key];
         if (!raw) return;
@@ -253,6 +262,7 @@ export default function HourlyReadingPage() {
       // Reset values only; keep batch number for next reading
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
+      setMachine("M1");
       setReadingTime(new Date().toISOString().slice(0, 16));
       resolveBatch(batchNumber);
     } catch {
@@ -290,6 +300,16 @@ export default function HourlyReadingPage() {
             New batch — will be created on save
           </div>
         )}
+
+        <label>Machine *</label>
+        <select
+          value={machine}
+          onChange={e => setMachine(e.target.value as MachineOption)}
+        >
+          {MACHINE_OPTIONS.map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
 
         <label>Reading Time *</label>
         <input
@@ -359,6 +379,11 @@ export default function HourlyReadingPage() {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                      {(r.test_results as Record<string, unknown>)["machine"] ? (
+                        <span style={{ marginLeft: 8, fontSize: 11, color: "var(--ink-soft)" }}>
+                          · {(r.test_results as Record<string, unknown>)["machine"] as string}
+                        </span>
+                      ) : null}
                     </span>
                     <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>
                       {(r.test_results as Record<string, unknown>)["colour_appearance"] as string ?? "—"}

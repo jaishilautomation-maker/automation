@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import DateField from "@/components/DateField";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
@@ -443,7 +444,7 @@ export default function ProductionJobCardPage() {
           </div>
           <div>
             <label>Job Date *</label>
-            <input type="date" value={jobDate} onChange={e => setJobDate(e.target.value)} />
+            <DateField value={jobDate} onChange={setJobDate} />
           </div>
         </div>
       </div>

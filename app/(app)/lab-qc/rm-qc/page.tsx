@@ -15,6 +15,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -800,7 +801,7 @@ export default function RmQcPage() {
                 <div className="row2">
                   <div>
                     <label>Test Date *</label>
-                    <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
+                    <DateField value={testDate} onChange={setTestDate} />
                   </div>
                   <div>
                     <label>Chemist</label>
@@ -1247,7 +1248,7 @@ export default function RmQcPage() {
                 <div className="row2">
                   <div>
                     <label>Test Date *</label>
-                    <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
+                    <DateField value={testDate} onChange={setTestDate} />
                   </div>
                   <div>
                     <label>Chemist</label>

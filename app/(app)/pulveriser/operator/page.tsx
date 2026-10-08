@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField, { isoToDisplay } from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import {
@@ -55,6 +56,10 @@ interface MachineCloseEntry {
   restart_time: string;    // HH:MM — optional, empty string = not yet restarted
   reason: string;
 }
+
+// Packing size options (kg) for the finished-goods bags. Stored as text in
+// packing_size; used with तैयार माल बैग to auto-compute वास्तविक उत्पादन (kg).
+const PACKING_SIZE_OPTIONS = ["25", "50"] as const;
 
 function blankCloseEntry(): MachineCloseEntry {
   return {
@@ -143,6 +148,18 @@ export default function PulveriserOperatorPage() {
   const [chkMesh, setChkMesh]             = useState(false);
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
   const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
+
+  // Auto-fill वास्तविक उत्पादन (kg) = तैयार माल बैग × पैकिंग साइज़.
+  // Called from the bags and packing-size handlers. If either value is missing
+  // or non-numeric, the actual production field is left untouched so a manual
+  // entry is never wiped out.
+  const recomputeActualKg = useCallback((bagsStr: string, sizeStr: string) => {
+    const bags = parseFloat(bagsStr);
+    const size = parseFloat(sizeStr);
+    if (!isNaN(bags) && !isNaN(size) && bags >= 0 && size > 0) {
+      setActualKg(String(bags * size));
+    }
+  }, []);
 
   // Mill VFD standard for the active card's material_code — reference only.
   const [vfdParam, setVfdParam]           = useState<VfdParameter | null>(null);
@@ -649,7 +666,7 @@ export default function PulveriserOperatorPage() {
         <b>{active.machine_number}</b> · {fmtDate(active.job_date)} · {active.shift ?? "—"} शिफ्ट<br />
         <b>बैच नंबर:</b> {active.material_code} · <b>Party/CODE:</b> {active.party_code ?? "—"} · जॉब: {active.job_number ?? "—"}<br />
         <b>सल्फर:</b> {active.sulphur_supplier ?? "—"} / {active.sulphur_lot_number ?? "—"} / {active.sulphur_empty_date ?? "—"}<br />
-        <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ?? "—"} / {active.oil_quantity ?? "—"}<br />
+        <b>तेल:</b> {active.oil_supplier ?? "—"} / {active.oil_batch_number ? (isoToDisplay(active.oil_batch_number) || active.oil_batch_number) : "—"} / {active.oil_quantity ?? "—"}<br />
         <b>नियोजित उत्पादन:</b> {active.planned_production_mt ?? "—"} MT ·{" "}
         <b>तेल जारी (Stores):</b> {active.oil_issued_kg != null ? `${active.oil_issued_kg} kg` : "—"}
         {vfdParam && (
@@ -726,12 +743,22 @@ export default function PulveriserOperatorPage() {
         <div className="row2">
           <div>
             <label>तैयार माल बैग</label>
-            <input type="text" value={fgBag} onChange={e => setFgBag(e.target.value)} />
+            <input type="number" min="0" step="1" placeholder="0" value={fgBag}
+              onChange={e => { setFgBag(e.target.value); recomputeActualKg(e.target.value, packingSize); }} />
           </div>
           <div>
             <label>पैकिंग साइज़</label>
-            <input type="text" value={packingSize} onChange={e => setPackingSize(e.target.value)} />
+            <select value={packingSize}
+              onChange={e => { setPackingSize(e.target.value); recomputeActualKg(fgBag, e.target.value); }}>
+              <option value="">-- चुनें --</option>
+              {PACKING_SIZE_OPTIONS.map(sz => (
+                <option key={sz} value={sz}>{sz} kg</option>
+              ))}
+            </select>
           </div>
+        </div>
+        <div className="field-hint" style={{ marginTop: 2 }}>
+          बैग × पैकिंग साइज़ से वास्तविक उत्पादन (kg) अपने-आप भर जाता है। ज़रूरत पर ऊपर मान बदल सकते हैं।
         </div>
         <div className="row2">
           <div>
@@ -780,10 +807,9 @@ export default function PulveriserOperatorPage() {
             <div className="row3">
               <div>
                 <label>तारीख</label>
-                <input
-                  type="date"
+                <DateField
                   value={e.close_date}
-                  onChange={ev => updateCloseEntry(e.id, "close_date", ev.target.value)}
+                  onChange={v => updateCloseEntry(e.id, "close_date", v)}
                 />
               </div>
               <div>
@@ -872,8 +898,8 @@ export default function PulveriserOperatorPage() {
                 </div>
                 <div>
                   <label>रीडिंग तारीख</label>
-                  <input type="date" value={r.reading_date}
-                    onChange={e => updateRow(r.id, "reading_date", e.target.value)} />
+                  <DateField value={r.reading_date}
+                    onChange={v => updateRow(r.id, "reading_date", v)} />
                 </div>
               </div>
               <div className="row3">

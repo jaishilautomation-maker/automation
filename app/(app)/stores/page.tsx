@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField, { isoToDisplay } from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
@@ -478,7 +479,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
       <div><b>Sulphur Supplier:</b> {jc.sulphur_supplier ?? "N/A"}</div>
       <div><b>Sulphur Lot:</b> {jc.sulphur_lot_number ?? "N/A"}</div>
       <div><b>Oil Supplier:</b> {jc.oil_supplier ?? "N/A"}</div>
-      <div><b>Oil Batch:</b> {jc.oil_batch_number ?? "N/A"}</div>
+      <div><b>Oil Received Date:</b> {jc.oil_batch_number ? (isoToDisplay(jc.oil_batch_number) || jc.oil_batch_number) : "N/A"}</div>
       {jc.production_at && (
        <div style={{ gridColumn: "1 / -1", paddingTop: 6, borderTop: "1px solid var(--line)" }}>
         <b>Sent by Production:</b>{" "}
@@ -1365,7 +1366,7 @@ function ReceivedSection() {
     <div className="row3">
      <div>
       <label>Date *</label>
-      <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
+      <DateField value={entry.date} onChange={v => setField("date", v)} />
      </div>
      <div>
       <label>Material Type *</label>
@@ -1740,7 +1741,7 @@ function SuppliedSection() {
     <div className="row3">
      <div>
       <label>Date *</label>
-      <input type="date" value={entry.date} onChange={e => setField("date", e.target.value)} />
+      <DateField value={entry.date} onChange={v => setField("date", v)} />
      </div>
      <div>
       <label>Material Type *</label>
@@ -2469,8 +2470,8 @@ function DailyProductionSection() {
        <div className="row2">
         <div>
          <label>Record Date *</label>
-         <input type="date" value={recordDate}
-          onChange={e => setRecordDate(e.target.value)}
+         <DateField value={recordDate}
+          onChange={setRecordDate}
           style={{ maxWidth: 200 }} />
          <div className="field-hint">Date this record is being logged for.</div>
         </div>
@@ -2773,8 +2774,8 @@ function DailyDispatchSection() {
 
     <div style={{ marginBottom: 12 }}>
      <label>Date *</label>
-     <input type="date" value={entry.date}
-      onChange={e => setField("date", e.target.value)}
+     <DateField value={entry.date}
+      onChange={v => setField("date", v)}
       style={{ maxWidth: 200 }} />
     </div>
 
@@ -3368,9 +3369,8 @@ function PackingMaterialSection() {
     <div className="row2">
      <div>
       <label>Date *</label>
-      <input type="date" value={entry.date}
-       onChange={e => {
-        const newDate = e.target.value;
+      <DateField value={entry.date}
+       onChange={newDate => {
         setField("date", newDate);
         // Re-fetch received qty for new date + current product
         if (entry.product && newDate) {
@@ -4005,8 +4005,8 @@ function FinishedGoodsSection() {
     <div className="row2">
      <div>
       <label>Date *</label>
-      <input type="date" value={entry.date}
-       onChange={e => setField("date", e.target.value)} />
+      <DateField value={entry.date}
+       onChange={v => setField("date", v)} />
      </div>
      <div>
       <label>Sulphur Powder (Product) *</label>
@@ -4465,8 +4465,8 @@ function BallMillSection() {
        {prodRows.map((row, idx) => (
         <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
          <td style={{ padding: "6px 4px" }}>
-          <input type="date" value={row.date}
-           onChange={e => updateProdRow(idx, { date: e.target.value })}
+          <DateField value={row.date}
+           onChange={v => updateProdRow(idx, { date: v })}
            style={{ width: 130, padding: "4px 6px", fontSize: 12,
             border: "1px solid var(--line)", borderRadius: 6 }} />
          </td>
@@ -4566,8 +4566,8 @@ function BallMillSection() {
        {dispatchRows.map((row, idx) => (
         <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
          <td style={{ padding: "6px 4px" }}>
-          <input type="date" value={row.dispatch_date}
-           onChange={e => updateDispatch(idx, { dispatch_date: e.target.value })}
+          <DateField value={row.dispatch_date}
+           onChange={v => updateDispatch(idx, { dispatch_date: v })}
            style={{ width: 130, padding: "4px 6px", fontSize: 12,
             border: "1px solid var(--line)", borderRadius: 6 }} />
          </td>
@@ -5014,8 +5014,8 @@ function BatchWiseSection() {
      </div>
      <div>
       <label>Mfg Date</label>
-      <input type="date" value={entry.mfg_date}
-       onChange={e => setField("mfg_date", e.target.value)} />
+      <DateField value={entry.mfg_date}
+       onChange={v => setField("mfg_date", v)} />
      </div>
     </div>
 
@@ -5081,8 +5081,8 @@ function BatchWiseSection() {
          <label style={{ fontSize: 11 }}>
           {idx === 0 ? "F" : idx === 1 ? "I" : idx === 2 ? "L" : String.fromCharCode(70 + idx*3)} — Dispatch Date
         </label>
-         <input type="date" value={d.date}
-          onChange={e => updateDispatch(idx, { date: e.target.value })} />
+         <DateField value={d.date}
+          onChange={v => updateDispatch(idx, { date: v })} />
         </div>
         <div>
          <label style={{ fontSize: 11 }}>
@@ -5448,8 +5448,8 @@ function OilConsumptionSection() {
           </div>
           <div>
             <label>Date *</label>
-            <input type="date" value={entry.date}
-              onChange={e => setField("date", e.target.value)} />
+            <DateField value={entry.date}
+              onChange={v => setField("date", v)} />
           </div>
         </div>
 
@@ -6278,8 +6278,8 @@ function StockLedgerSection() {
        </div>
        <div>
         <label>Date *</label>
-        <input type="date" value={updateDate}
-         onChange={e => setUpdateDate(e.target.value)} />
+        <DateField value={updateDate}
+         onChange={setUpdateDate} />
        </div>
       </div>
 
@@ -6714,8 +6714,8 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
      </div>
      <div>
       <label>Date</label>
-      <input type="date" value={slipDate}
-       onChange={e => setSlipDate(e.target.value)} />
+      <DateField value={slipDate}
+       onChange={setSlipDate} />
      </div>
     </div>
 
@@ -7044,8 +7044,8 @@ function PrnSection() {
         <div className="row3">
           <div>
             <label>PRN Date *</label>
-            <input type="date" value={entry.prn_date}
-              onChange={e => setField("prn_date", e.target.value)} />
+            <DateField value={entry.prn_date}
+              onChange={v => setField("prn_date", v)} />
           </div>
           <div>
             <label>Item Description *</label>
@@ -7127,8 +7127,8 @@ function PrnSection() {
           </div>
           <div>
             <label>PO Date</label>
-            <input type="date" value={entry.po_date}
-              onChange={e => setField("po_date", e.target.value)} />
+            <DateField value={entry.po_date}
+              onChange={v => setField("po_date", v)} />
           </div>
         </div>
 
@@ -7402,8 +7402,8 @@ function DispatchSection() {
     <div className="row2">
      <div>
       <label>Dispatch Date</label>
-      <input type="date" value={dispatchDate}
-       onChange={e => setDispatchDate(e.target.value)} />
+      <DateField value={dispatchDate}
+       onChange={setDispatchDate} />
      </div>
      <div>
       <label>Vehicle No.</label>

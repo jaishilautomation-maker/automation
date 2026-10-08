@@ -14,6 +14,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -665,19 +666,17 @@ export default function BatchAnalysisPage() {
             <div className="row2">
               <div>
                 <label>Manufacturing Date *</label>
-                <input
-                  type="date"
+                <DateField
                   value={mfgDate}
-                  onChange={e => setMfgDate(e.target.value)}
+                  onChange={setMfgDate}
                   onBlur={() => audit.record("mfg_date", mfgDate)}
                 />
               </div>
               <div>
                 <label>Analysis Date *</label>
-                <input
-                  type="date"
+                <DateField
                   value={analysisDate}
-                  onChange={e => setAnalysisDate(e.target.value)}
+                  onChange={setAnalysisDate}
                   onBlur={() => audit.record("analysis_date", analysisDate)}
                 />
               </div>

@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField, { isoToDisplay } from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
@@ -75,7 +76,7 @@ interface Entry {
   sulLot: string;
   sulEmptyDate: string;
   oilSupplier: string;
-  oilBatch: string;
+  oilReceivedDate: string;   // ISO YYYY-MM-DD; shown as DD/MM/YYYY. Stored in oil_batch_number column.
   oilQty: string;
 }
 
@@ -84,7 +85,7 @@ function blankEntry(): Entry {
     key: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     partyCode: "", batchNumber: "", plannedKg: "",
     sulVendorId: "", sulSourceReceiptId: "", sulLot: "", sulEmptyDate: "",
-    oilSupplier: "", oilBatch: "", oilQty: "",
+    oilSupplier: "", oilReceivedDate: "", oilQty: "",
   };
 }
 
@@ -240,7 +241,8 @@ export default function PulveriserProductionPage() {
           // Receipt link (migration 060)
           sulphur_source_receipt_id: e.sulSourceReceiptId || null,
           oil_supplier:          e.oilSupplier.trim() || null,
-          oil_batch_number:      e.oilBatch.trim() || null,
+          // oil_batch_number column now stores the Oil Received Date (ISO YYYY-MM-DD).
+          oil_batch_number:      e.oilReceivedDate || null,
           oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
           production_by:         user.id,
           production_at:         nowISO,
@@ -277,7 +279,8 @@ export default function PulveriserProductionPage() {
           sulphurLotNumber:    e.sulLot.trim()  || null,
           sulphurEmptyDate:    sulReceiptDate,
           oilSupplier:         e.oilSupplier.trim()  || null,
-          oilBatchNumber:      e.oilBatch.trim()     || null,
+          // Oil Received Date — pass as DD/MM/YYYY for display in the email.
+          oilBatchNumber:      e.oilReceivedDate ? isoToDisplay(e.oilReceivedDate) : null,
           oilQuantity:         e.oilQty.trim() === "" ? null : Number(e.oilQty),
           submittedByName:     profile?.full_name ?? "—",
           submittedAt:         nowISO,
@@ -305,7 +308,8 @@ export default function PulveriserProductionPage() {
               date_rm_received:          sulReceiptDate,
               sulphur_source_receipt_id: e.sulSourceReceiptId || null,
               oil_supplier:              e.oilSupplier.trim()  || null,
-              oil_batch_number:          e.oilBatch.trim()     || null,
+              // oil_batch_number column now carries the Oil Received Date (ISO).
+              oil_batch_number:          e.oilReceivedDate     || null,
               oil_quantity:              e.oilQty.trim() === "" ? null : Number(e.oilQty),
               production_by:             profile?.full_name ?? null,
               production_at:             nowISO,
@@ -386,7 +390,7 @@ export default function PulveriserProductionPage() {
         <div className="row2">
           <div>
             <label>Job Date</label>
-            <input type="date" value={jobDate} onChange={e => setJobDate(e.target.value)}
+            <DateField value={jobDate} onChange={setJobDate}
               onBlur={() => audit.record("job_date", jobDate)} />
           </div>
           <div>
@@ -575,8 +579,8 @@ export default function PulveriserProductionPage() {
               </div>
               <div>
                 <label>Date RM was received</label>
-                <input type="date" value={e.sulEmptyDate}
-                  onChange={ev => updateEntry(e.key, { sulEmptyDate: ev.target.value })} />
+                <DateField value={e.sulEmptyDate}
+                  onChange={v => updateEntry(e.key, { sulEmptyDate: v })} />
               </div>
             </div>
 
@@ -589,9 +593,9 @@ export default function PulveriserProductionPage() {
                   onChange={ev => updateEntry(e.key, { oilSupplier: ev.target.value })} />
               </div>
               <div>
-                <label>Oil Batch Number</label>
-                <input type="text" value={e.oilBatch}
-                  onChange={ev => updateEntry(e.key, { oilBatch: ev.target.value })} />
+                <label>Oil Received Date</label>
+                <DateField value={e.oilReceivedDate}
+                  onChange={v => updateEntry(e.key, { oilReceivedDate: v })} />
               </div>
             </div>
             {/* Oil Quantity input removed (29-09-26): oil required is

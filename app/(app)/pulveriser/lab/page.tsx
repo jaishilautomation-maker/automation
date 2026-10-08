@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { isoToDisplay } from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import {
@@ -237,7 +238,7 @@ export default function PulveriserLabPage() {
         <F label="Sulphur Lot" value={active.sulphur_lot_number} />
         <F label="Sulphur Empty Date" value={active.sulphur_empty_date} />
         <F label="Oil Supplier" value={active.oil_supplier} />
-        <F label="Oil Batch" value={active.oil_batch_number} />
+        <F label="Oil Received Date" value={active.oil_batch_number ? (isoToDisplay(active.oil_batch_number) || active.oil_batch_number) : null} />
         <F label="Oil Quantity" value={active.oil_quantity} />
         <F label="Planned Production (kg)" value={active.planned_production_mt != null ? active.planned_production_mt * 1000 : null} />
         <F label="Oil Required (kg)" value={active.oil_required_kg} />

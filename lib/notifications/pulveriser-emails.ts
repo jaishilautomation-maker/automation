@@ -115,7 +115,8 @@ export function buildProductionEmail(d: ProductionEmailArgs): { subject: string;
       ["Sulphur Lot",            d.sulphurLotNumber   ?? "—"],
       ["Sulphur Empty Date",     fmtDate(d.sulphurEmptyDate)],
       ["Oil Supplier",           d.oilSupplier        ?? "—"],
-      ["Oil Batch",              d.oilBatchNumber     ?? "—"],
+      // oilBatchNumber now carries the Oil Received Date (already DD/MM/YYYY).
+      ["Oil Received Date",      d.oilBatchNumber     ?? "—"],
       ["Oil Quantity",           fmtNum(d.oilQuantity, "kg")],
       ["Submitted By",           d.submittedByName],
       ["Submitted At",           fmtTs(d.submittedAt)],

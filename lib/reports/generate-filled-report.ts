@@ -340,6 +340,13 @@ async function buildBatchAnalysisWorkbook(
   return Buffer.from(out as ArrayBuffer);
 }
 
+/** Format an ISO "YYYY-MM-DD" as "DD/MM/YYYY"; pass through anything else. */
+function fmtIsoDate(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
+}
+
 /** Coerce a record value to a display string (empty for null/undefined). */
 function str(v: unknown): string {
   return v === null || v === undefined ? "" : String(v);
@@ -476,9 +483,10 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
     ["Date RM Received", str(d.sulphur_empty_date)],
   ];
   const oilRows = [
-    ["Supplier",     str(d.oil_supplier)],
-    ["Batch Number", str(d.oil_batch_number)],
-    ["Quantity (kg)", str(d.oil_quantity ?? "")],
+    ["Supplier",       str(d.oil_supplier)],
+    // oil_batch_number column now holds the Oil Received Date (ISO).
+    ["Received Date",  fmtIsoDate(d.oil_batch_number)],
+    ["Quantity (kg)",  str(d.oil_quantity ?? "")],
   ];
   for (let i = 0; i < 3; i++) {
     ws.getCell(`A${r}`).value = sulRows[i][0]; ws.getCell(`A${r}`).font = { bold: true };
@@ -501,7 +509,7 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
     "#",
     "माल का कोड नंबर",
     "सल्फर सप्लायर / लॉट / तारीख",
-    "तेल सप्लायर / बैच",
+    "तेल सप्लायर / प्राप्ति तारीख",
     "Classifier VFD",
     "Blower In / Out",
     "FG Bag / Packing",
@@ -524,7 +532,7 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
     "1",
     str(d.material_code),
     [str(d.sulphur_supplier), str(d.sulphur_lot_number), str(d.sulphur_empty_date)].filter(Boolean).join(" / "),
-    [str(d.oil_supplier), str(d.oil_batch_number)].filter(Boolean).join(" / "),
+    [str(d.oil_supplier), fmtIsoDate(d.oil_batch_number)].filter(Boolean).join(" / "),
     str(d.classifier_vfd),
     [str(d.blower_inlet_valve), str(d.blower_outlet_valve)].filter(Boolean).join(" / "),
     [str(d.finished_goods_bag) ? `${str(d.finished_goods_bag)} bags` : "", str(d.packing_size) ? `${str(d.packing_size)} kg` : ""].filter(Boolean).join(", "),

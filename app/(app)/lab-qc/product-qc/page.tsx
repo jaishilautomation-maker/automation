@@ -17,6 +17,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -645,10 +646,9 @@ export default function ProductQcPage() {
             <div className="row2">
               <div>
                 <label>Test Date *</label>
-                <input
-                  type="date"
+                <DateField
                   value={testDate}
-                  onChange={e => setTestDate(e.target.value)}
+                  onChange={setTestDate}
                 />
               </div>
               <div>

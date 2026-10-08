@@ -18,6 +18,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
@@ -218,7 +219,7 @@ export default function PackingBreakdownPage() {
         <div className="row2">
           <div>
             <label>Reporting Date *</label>
-            <input type="date" value={reportingDate} onChange={e => setReportingDate(e.target.value)} />
+            <DateField value={reportingDate} onChange={setReportingDate} />
           </div>
           <div>
             <label>Reporting Time</label>
@@ -291,7 +292,7 @@ export default function PackingBreakdownPage() {
         <div className="row2">
           <div>
             <label>Handed Over Date</label>
-            <input type="date" value={handoverDate} onChange={e => setHandoverDate(e.target.value)} />
+            <DateField value={handoverDate} onChange={setHandoverDate} />
           </div>
           <div>
             <label>Handed Over Time</label>

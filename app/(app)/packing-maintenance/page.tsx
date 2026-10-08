@@ -20,6 +20,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
@@ -262,10 +263,9 @@ export default function PackingMaintenancePage() {
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 }}>
           <div>
             <label>Date</label>
-            <input
-              type="date"
+            <DateField
               value={checklistDate}
-              onChange={e => setChecklistDate(e.target.value)}
+              onChange={setChecklistDate}
               style={{ width: 160 }}
             />
           </div>
