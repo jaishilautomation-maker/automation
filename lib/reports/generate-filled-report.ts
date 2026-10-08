@@ -650,6 +650,49 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   }
   r++;
 
+  // ── Machine close / band time table ────────────────────────────────────────
+  const closeTimes = (d.__close_times as Record<string, unknown>[]) ?? [];
+  ws.mergeCells(`A${r}:H${r}`);
+  ws.getCell(`A${r}`).value = `मशीन बंद समय / Machine Close Time (${closeTimes.length})`;
+  ws.getCell(`A${r}`).font  = { bold: true, size: 11, color: { argb: "FF1B5E20" } };
+  fillCell(`A${r}`, SECTION_FILL); r++;
+
+  const ctHdrs = ["#", "Date", "Close Time", "Restart Time", "Reason / Remark"];
+  const ctSpans = [["A","A"], ["B","B"], ["C","C"], ["D","D"], ["E","H"]];
+  ws.getRow(r).height = 18;
+  ctHdrs.forEach((h, i) => {
+    const [lc, rc] = ctSpans[i];
+    if (lc !== rc) ws.mergeCells(`${lc}${r}:${rc}${r}`);
+    const cell = ws.getCell(`${lc}${r}`);
+    cell.value = h; cell.font = { bold: true };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = box;
+    cell.fill   = { type: "pattern", pattern: "solid", fgColor: { argb: TABLE_H_FILL } };
+  });
+  r++;
+
+  if (closeTimes.length === 0) {
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value = "No machine close times recorded.";
+    ws.getCell(`A${r}`).alignment = { horizontal: "center" };
+    r++;
+  } else {
+    closeTimes.forEach((ct, idx) => {
+      ws.getCell(`A${r}`).value = String(idx + 1);
+      ws.getCell(`B${r}`).value = fmtIsoDate(ct.close_date);
+      ws.getCell(`C${r}`).value = str(ct.close_time);
+      ws.getCell(`D${r}`).value = str(ct.restart_time);
+      ws.mergeCells(`E${r}:H${r}`);
+      ws.getCell(`E${r}`).value = str(ct.reason);
+      for (const c of ["A","B","C","D","E"]) {
+        ws.getCell(`${c}${r}`).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        setBox(`${c}${r}`);
+      }
+      r++;
+    });
+  }
+  r++;
+
   // ── Stores & Oil consumption summary ──────────────────────────────────────
   ws.mergeCells(`A${r}:H${r}`);
   ws.getCell(`A${r}`).value = "Stores & Oil Consumption";
@@ -923,6 +966,14 @@ async function loadJobCard(
     return true;
   });
 
+  // Machine close / band times for all entries of this job.
+  const { data: closeTimes } = await supabase
+    .from("pulveriser_machine_close_times")
+    .select("id, close_date, close_time, restart_time, reason")
+    .in("job_card_id", entryIds)
+    .order("close_date")
+    .order("close_time");
+
   // Latest lab review on the finalized card for the QC sign-off block.
   const { data: review } = await supabase
     .from("pulveriser_job_card_reviews")
@@ -941,6 +992,7 @@ async function loadJobCard(
     batch_no: d.job_number ?? d.material_code ?? d.id,
     __entries: entries,
     __readings: allReadings,
+    __close_times: (closeTimes ?? []) as Record<string, unknown>[],
     __lab_result: rev?.result ?? null,
     __lab_remark: rev?.remark ?? null,
     __lab_by: labByName,

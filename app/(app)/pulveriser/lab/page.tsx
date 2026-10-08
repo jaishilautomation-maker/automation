@@ -30,6 +30,15 @@ import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildLabEmail } from "@/lib/notifications/pulveriser-emails";
 
+// Machine close/band time row (pulveriser_machine_close_times).
+interface MachineCloseTimeRow {
+  id: string;
+  close_date: string | null;
+  close_time: string | null;
+  restart_time: string | null;
+  reason: string | null;
+}
+
 /** Read-only labelled field row. */
 function F({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -48,6 +57,7 @@ export default function PulveriserLabPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [active, setActive]           = useState<PulveriserJobCard | null>(null);
   const [readings, setReadings]       = useState<PulveriserHourlyReading[]>([]);
+  const [closeTimes, setCloseTimes]   = useState<MachineCloseTimeRow[]>([]);
   const [history, setHistory]         = useState<PulveriserJobCardReview[]>([]);
   const [remark, setRemark]           = useState("");
   const [reopenProduction, setReopenProduction] = useState(false);
@@ -71,17 +81,21 @@ export default function PulveriserLabPage() {
     setActive(jc);
     setRemark("");
     setReopenProduction(false);
-    const [{ data: rd }, { data: hist }] = await Promise.all([
+    const [{ data: rd }, { data: hist }, { data: ct }] = await Promise.all([
       supabase.from("pulveriser_hourly_readings").select("*")
         .eq("job_card_id", jc.id).order("created_at"),
       supabase.from("pulveriser_job_card_reviews").select("*")
         .eq("job_card_id", jc.id).order("reviewed_at", { ascending: false }),
+      supabase.from("pulveriser_machine_close_times")
+        .select("id, close_date, close_time, restart_time, reason")
+        .eq("job_card_id", jc.id).order("close_date").order("close_time"),
     ]);
     setReadings((rd ?? []) as PulveriserHourlyReading[]);
     setHistory((hist ?? []) as PulveriserJobCardReview[]);
+    setCloseTimes((ct ?? []) as MachineCloseTimeRow[]);
   };
 
-  const goBack = () => { setActive(null); setReadings([]); setHistory([]); };
+  const goBack = () => { setActive(null); setReadings([]); setHistory([]); setCloseTimes([]); };
 
   const submitReview = async (result: "ok" | "not_ok") => {
     if (!active || !user) return;
@@ -339,6 +353,26 @@ export default function PulveriserLabPage() {
                 {r.low_production_reason && (
                   <div style={{ color: "var(--warn)" }}>Low prod: {r.low_production_reason}</div>
                 )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Machine close / band time ({closeTimes.length})</h3>
+        {closeTimes.length === 0 ? (
+          <div className="empty">No machine close times recorded.</div>
+        ) : (
+          closeTimes.map((c, i) => (
+            <div className="batch-block" key={c.id}>
+              <span className="batch-label">
+                Close {i + 1} · {c.close_date ? (isoToDisplay(c.close_date) || c.close_date) : "—"}
+              </span>
+              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                Closed {c.close_time ?? "—"}
+                {c.restart_time ? ` · Restarted ${c.restart_time}` : ""}
+                {c.reason ? ` · ${c.reason}` : ""}
               </div>
             </div>
           ))

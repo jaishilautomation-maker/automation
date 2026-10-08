@@ -32,6 +32,13 @@ interface ReadingLite {
   batch_no: string | null;
   bags: number | null;
 }
+interface CloseTimeLite {
+  id: string;
+  close_date: string | null;
+  close_time: string | null;
+  restart_time: string | null;
+  reason: string | null;
+}
 
 const STATUS_BADGE: Record<PulveriserStatus, string> = {
   pending_stores: "warn",
@@ -95,9 +102,10 @@ export default function PulveriserRecordsPage() {
   const [loading, setLoading] = useState(true);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
-  // Preview modal state: the selected card + its (lazily loaded) readings.
+  // Preview modal state: the selected card + its (lazily loaded) readings + close times.
   const [selected, setSelected] = useState<PulveriserJobCard | null>(null);
   const [selReadings, setSelReadings] = useState<ReadingLite[]>([]);
+  const [selCloseTimes, setSelCloseTimes] = useState<CloseTimeLite[]>([]);
   const [selLoading, setSelLoading] = useState(false);
 
   // Cards an operator submitted within the last 24h (computed in load()).
@@ -157,13 +165,22 @@ export default function PulveriserRecordsPage() {
   const openPreview = useCallback(async (jc: PulveriserJobCard) => {
     setSelected(jc);
     setSelReadings([]);
+    setSelCloseTimes([]);
     setSelLoading(true);
-    const { data } = await supabase
-      .from("pulveriser_hourly_readings")
-      .select("machine, reading_date, start_time, stop_time, total_hours, planned_production, batch_no, bags")
-      .eq("job_card_id", jc.id)
-      .order("created_at");
-    setSelReadings((data ?? []) as ReadingLite[]);
+    const [{ data: rd }, { data: ct }] = await Promise.all([
+      supabase
+        .from("pulveriser_hourly_readings")
+        .select("machine, reading_date, start_time, stop_time, total_hours, planned_production, batch_no, bags")
+        .eq("job_card_id", jc.id)
+        .order("created_at"),
+      supabase
+        .from("pulveriser_machine_close_times")
+        .select("id, close_date, close_time, restart_time, reason")
+        .eq("job_card_id", jc.id)
+        .order("close_date").order("close_time"),
+    ]);
+    setSelReadings((rd ?? []) as ReadingLite[]);
+    setSelCloseTimes((ct ?? []) as CloseTimeLite[]);
     setSelLoading(false);
   }, [supabase]);
 
@@ -335,6 +352,23 @@ export default function PulveriserRecordsPage() {
                         {r.machine ?? jc.machine_number ?? "—"} · {r.start_time ?? "—"}→{r.stop_time ?? "—"}
                         {r.total_hours != null ? ` (${r.total_hours}h)` : ""}
                         {r.bags != null ? ` · ${r.bags} ${hi ? "बैग" : "bags"}` : ""}
+                      </div>
+                    ))
+                  )}
+                </Section>
+
+                <Section title={hi ? "मशीन बंद समय" : "Machine close / band time"}>
+                  {selLoading ? (
+                    <div className="field-hint">{t.loading}</div>
+                  ) : selCloseTimes.length === 0 ? (
+                    <div className="field-hint">—</div>
+                  ) : (
+                    selCloseTimes.map((c, i) => (
+                      <div key={c.id} style={{ fontSize: 12, lineHeight: 1.7 }}>
+                        {i + 1}. {c.close_date ? (isoToDisplay(c.close_date) || c.close_date) : "—"}
+                        {" · "}{hi ? "बंद" : "closed"} {c.close_time ?? "—"}
+                        {c.restart_time ? ` → ${hi ? "शुरू" : "restart"} ${c.restart_time}` : ""}
+                        {c.reason ? ` · ${c.reason}` : ""}
                       </div>
                     ))
                   )}
