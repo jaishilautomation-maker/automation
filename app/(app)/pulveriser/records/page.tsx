@@ -18,6 +18,19 @@ import {
   type PulveriserStatus,
 } from "@/lib/types";
 
+// A card filled by an operator in the last 24h, enriched for the handover view.
+interface RecentReadingLite {
+  machine: string | null;
+  start_time: string | null;
+  stop_time: string | null;
+  total_hours: number | null;
+}
+interface RecentFilledCard {
+  card: PulveriserJobCard;
+  operatorName: string | null;
+  readings: RecentReadingLite[];
+}
+
 const STATUS_BADGE: Record<PulveriserStatus, string> = {
   pending_stores: "warn",
   pending_production: "warn",
@@ -66,6 +79,11 @@ export default function PulveriserRecordsPage() {
   const [reviews, setReviews] = useState<Record<string, PulveriserJobCardReview[]>>({});
   const [loading, setLoading] = useState(true);
 
+  // ── Shift-handover: cards an operator filled/submitted in the last 24h ──────
+  // Lets the next (e.g. night) shift see how much the previous operator
+  // produced on each job, plus who filled it and their Taas readings.
+  const [recent, setRecent] = useState<RecentFilledCard[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     const { data: cardData, error } = await supabase
@@ -91,12 +109,118 @@ export default function PulveriserRecordsPage() {
     } else {
       setReviews({});
     }
+
+    // Build the last-24h handover list from the cards already loaded.
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const recentCards = list.filter(
+      c => c.operator_submitted_at != null && new Date(c.operator_submitted_at).getTime() >= cutoff,
+    );
+    if (recentCards.length) {
+      // Resolve operator names (RPC scoped server-side to the caller's factory).
+      const operatorIds = Array.from(
+        new Set(recentCards.map(c => c.operator_by).filter((v): v is string => !!v)),
+      );
+      const nameMap: Record<string, string> = {};
+      if (operatorIds.length) {
+        const { data: names } = await supabase.rpc("fn_operator_names", { p_ids: operatorIds });
+        for (const n of (names ?? []) as { id: string; full_name: string | null }[]) {
+          if (n.full_name) nameMap[n.id] = n.full_name;
+        }
+      }
+      // Readings for these cards, grouped by card id.
+      const { data: readingRows } = await supabase
+        .from("pulveriser_hourly_readings")
+        .select("job_card_id, machine, start_time, stop_time, total_hours")
+        .in("job_card_id", recentCards.map(c => c.id))
+        .order("created_at");
+      const readingsByCard: Record<string, RecentReadingLite[]> = {};
+      for (const r of (readingRows ?? []) as (RecentReadingLite & { job_card_id: string })[]) {
+        (readingsByCard[r.job_card_id] ??= []).push({
+          machine: r.machine, start_time: r.start_time, stop_time: r.stop_time, total_hours: r.total_hours,
+        });
+      }
+      setRecent(recentCards.map(c => ({
+        card: c,
+        operatorName: c.operator_by ? (nameMap[c.operator_by] ?? null) : null,
+        readings: readingsByCard[c.id] ?? [],
+      })));
+    } else {
+      setRecent([]);
+    }
     setLoading(false);
   }, [supabase, showToast, hi]);
 
   useEffect(() => { load(); }, [load]);
 
   return (
+    <>
+    {/* Shift handover — cards filled by an operator in the last 24 hours */}
+    {recent.length > 0 && (
+      <div className="card">
+        <div className="helper-row">
+          <h3 style={{ margin: 0 }}>
+            {hi ? "पिछले 24 घंटे में भरा गया" : "Filled in the last 24 hours"}
+          </h3>
+          <span className="count">{recent.length}</span>
+        </div>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          {hi
+            ? "पिछली शिफ्ट के ऑपरेटर ने क्या भरा — कितना उत्पादन हुआ — यहाँ देखें।"
+            : "What the previous shift's operator filled — how much was produced — for handover."}
+        </div>
+        {recent.map(({ card: c, operatorName, readings }) => {
+          const actualKgVal = c.actual_production_mt != null ? Math.round(c.actual_production_mt * 1000) : null;
+          const plannedKgVal = c.planned_production_mt != null ? Math.round(c.planned_production_mt * 1000) : null;
+          return (
+            <div key={c.id} style={{
+              border: "1px solid var(--line)", borderRadius: 8,
+              padding: 12, marginBottom: 10, background: "var(--surface, #fff)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontWeight: 700 }}>
+                  {t.job}: {c.job_number ?? "—"} · {t.material} {c.material_code ?? "—"}
+                </span>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                  {c.shift ?? "—"} {hi ? "शिफ्ट" : "shift"}
+                </span>
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+                <b>{hi ? "उत्पादन" : "Production"}:</b>{" "}
+                <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+                  {actualKgVal != null ? `${actualKgVal} kg` : "—"}
+                </span>
+                {plannedKgVal != null && <> / {hi ? "नियोजित" : "planned"} {plannedKgVal} kg</>}
+                {" · "}<b>{hi ? "बैग" : "Bags"}:</b> {c.finished_goods_bag ?? "—"}
+                {c.packing_size ? ` × ${c.packing_size}kg` : ""}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 2 }}>
+                <b>{hi ? "ऑपरेटर" : "Operator"}:</b> {operatorName ?? "—"}
+                {c.operator_submitted_at && (
+                  <> · {new Date(c.operator_submitted_at).toLocaleString("en-IN", {
+                    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                  })}</>
+                )}
+              </div>
+              {readings.length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.6 }}>
+                  <b>{hi ? "तास रीडिंग" : "Readings"}:</b>{" "}
+                  {readings.map((r, i) =>
+                    `${r.machine ?? c.machine_number ?? "—"} ${r.start_time ?? "—"}→${r.stop_time ?? "—"}${r.total_hours != null ? ` (${r.total_hours}h)` : ""}`
+                    + (i < readings.length - 1 ? "  ·  " : "")
+                  )}
+                </div>
+              )}
+              {c.work_details && (
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
+                  <b>{hi ? "कार्य" : "Work"}:</b> {c.work_details}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    )}
+
     <div className="card">
       <h3>{t.heading}</h3>
       {loading ? (
@@ -185,5 +309,6 @@ export default function PulveriserRecordsPage() {
         ))
       )}
     </div>
+    </>
   );
 }
