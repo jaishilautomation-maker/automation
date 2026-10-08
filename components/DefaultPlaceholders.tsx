@@ -58,11 +58,11 @@ export default function DefaultPlaceholders() {
         m.addedNodes.forEach(node => {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
           const el = node as Element;
-          if (el.matches?.("input, textarea")) {
+          if (el.matches("input, textarea")) {
             stampField(el as HTMLInputElement | HTMLTextAreaElement);
           }
           // Also check descendants of the added subtree.
-          if (el.querySelectorAll) stampAll(el);
+          stampAll(el);
         });
       }
     });
