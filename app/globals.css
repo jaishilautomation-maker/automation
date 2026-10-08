@@ -133,12 +133,31 @@ select,
 textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  /* Darker, clearly visible border on every form control */
+  border: 1.5px solid var(--ink-soft);
   border-radius: 8px;
   font-size: 15px;
   background: #fff;
   color: var(--ink);
   font-family: inherit;
+}
+/* Focus state: emphasise the active field with the brand accent */
+input[type=text]:focus,
+input[type=number]:focus,
+input[type=date]:focus,
+input[type=time]:focus,
+input[type=email]:focus,
+input[type=password]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--clay);
+  outline: none;
+}
+/* Placeholder text styling (incl. the global "यहाँ लिखो" default) */
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-soft);
+  opacity: 0.7;
 }
 input:disabled { background: #f5f4f0; color: var(--ink-soft); }
 textarea { resize: vertical; min-height: 56px; }
