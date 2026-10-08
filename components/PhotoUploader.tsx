@@ -308,12 +308,13 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
         )}
       </div>
 
-      {/* Hidden file input — accepts images, prefers camera on mobile */}
+      {/* Hidden file input — accepts images. No `capture` attribute so phones
+          show the native picker (Gallery OR Camera) instead of forcing the
+          camera; the user chooses where the photo comes from. */}
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
