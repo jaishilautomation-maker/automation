@@ -75,6 +75,11 @@ export default function BatchAnalysisPage() {
     draftKey(pathname, activeFactory?.id, user?.id),
   );
   const d0 = draft.restored;
+  // One-time snapshot of the restored draft, captured at mount. The defs-load
+  // effect seeds `values` from THIS (not the live `d0`), because `d0` changes on
+  // every autosave (localStorage write) and must NOT re-trigger the seed — that
+  // would wipe/clobber what the chemist is actively typing.
+  const [initialDraft] = useState<DraftShape | null>(() => draft.restored);
 
   // Batch number (free text)
   const [batchNumber, setBatchNumber] = useState(d0?.batchNumber ?? "");
@@ -146,13 +151,14 @@ export default function BatchAnalysisPage() {
           setTestDefs(defs);
           const init: Record<string, string> = {};
           defs.forEach(d => { init[d.test_key] = ""; });
-          // Merge any saved draft values over the blank init so restored input
-          // survives a tab/browser close.
-          setValues({ ...init, ...(d0?.values ?? {}) });
+          // Merge the one-time restored draft over the blank init so restored
+          // input survives a tab/browser close — WITHOUT re-seeding on later
+          // autosaves (initialDraft is captured once at mount).
+          setValues({ ...init, ...(initialDraft?.values ?? {}) });
         }
         setLoadingDefs(false);
       });
-  }, [supabase, d0]);
+  }, [supabase, initialDraft]);
 
   // -------------------------------------------------------------------------
   // Load party list (single master — §0)

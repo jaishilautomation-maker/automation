@@ -58,6 +58,10 @@ export default function HourlyReadingPage() {
     draftKey(pathname, activeFactory?.id, user?.id),
   );
   const d0 = draft.restored;
+  // One-time snapshot of the restored draft (captured at mount). The defs-load
+  // effect seeds `values` from this, NOT the live `d0`, so autosaves don't
+  // re-seed and clobber what the user is typing.
+  const [initialDraft] = useState<DraftShape | null>(() => draft.restored);
 
   // Batch number (free text input)
   const [batchNumber, setBatchNumber] = useState(d0?.batchNumber ?? "");
@@ -113,13 +117,14 @@ export default function HourlyReadingPage() {
           setTestDefs(defs);
           const init: Record<string, string> = {};
           defs.forEach(d => { init[d.test_key] = ""; });
-          // Merge any saved draft values over the blank init so restored input
-          // survives a tab/browser close.
-          setValues({ ...init, ...(d0?.values ?? {}) });
+          // Merge the one-time restored draft over the blank init so restored
+          // input survives a tab/browser close — without re-seeding on later
+          // autosaves (initialDraft is captured once at mount).
+          setValues({ ...init, ...(initialDraft?.values ?? {}) });
         }
         setLoadingDefs(false);
       });
-  }, [supabase, d0]);
+  }, [supabase, initialDraft]);
 
   // -------------------------------------------------------------------------
   // Resolve batch number → batch_id (look up or will create on submit)

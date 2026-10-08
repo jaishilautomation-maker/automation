@@ -65,6 +65,10 @@ export default function ProductQcPage() {
     draftKey(pathname, activeFactory?.id, user?.id),
   );
   const d0 = draft.restored;
+  // One-time snapshot of the restored draft (captured at mount). The defs-load
+  // effect seeds `values` from this, NOT the live `d0`, so autosaves don't
+  // re-seed and clobber what the user is typing.
+  const [initialDraft] = useState<DraftShape | null>(() => draft.restored);
 
   // Step 1: product selection
   const [products, setProducts]         = useState<Product[]>([]);
@@ -213,11 +217,11 @@ export default function ProductQcPage() {
         const init: Record<string, string> = {};
         defs.forEach(d => { init[d.test_key] = ""; });
         // Merge any saved draft values over the blank init so restored input
-        // survives a tab/browser close.
-        setValues({ ...init, ...(d0?.values ?? {}) });
+        // survives a tab/browser close (one-time; see initialDraft).
+        setValues({ ...init, ...(initialDraft?.values ?? {}) });
         setLoadingDefs(false);
       });
-  }, [productId, phase, supabase, d0]);
+  }, [productId, phase, supabase, initialDraft]);
 
   // -------------------------------------------------------------------------
   // Check for existing record when batch+product+phase all known
