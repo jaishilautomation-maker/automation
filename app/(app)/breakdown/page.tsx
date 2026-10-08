@@ -17,10 +17,12 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { BREAKDOWN_MACHINES } from "@/lib/types";
 import type { BreakdownMachine, BreakdownEntry } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
@@ -65,7 +67,24 @@ export default function BreakdownPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
-  const [selectedMachine, setSelectedMachine] = useState<BreakdownMachine>(BREAKDOWN_MACHINES[0]);
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    selectedMachine: BreakdownMachine;
+    startAt: string;
+    finishAt: string;
+    natureOfBreakdown: string;
+    repairCarriedOut: string;
+    partsReplaced: string;
+    correctiveAction: string;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
+  const [selectedMachine, setSelectedMachine] = useState<BreakdownMachine>(d0?.selectedMachine ?? BREAKDOWN_MACHINES[0]);
   const [entries, setEntries]     = useState<BreakdownEntry[]>([]);
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
@@ -73,13 +92,23 @@ export default function BreakdownPage() {
   const audit = useFieldAudit();
 
   // Form state
-  const [startAt, setStartAt]                   = useState(localNow());
-  const [finishAt, setFinishAt]                 = useState("");
-  const [natureOfBreakdown, setNatureOfBreakdown] = useState("");
-  const [repairCarriedOut, setRepairCarriedOut] = useState("");
-  const [partsReplaced, setPartsReplaced]       = useState("");
-  const [correctiveAction, setCorrectiveAction] = useState("");
-  const [remarks, setRemarks]                   = useState("");
+  const [startAt, setStartAt]                   = useState(d0?.startAt ?? localNow());
+  const [finishAt, setFinishAt]                 = useState(d0?.finishAt ?? "");
+  const [natureOfBreakdown, setNatureOfBreakdown] = useState(d0?.natureOfBreakdown ?? "");
+  const [repairCarriedOut, setRepairCarriedOut] = useState(d0?.repairCarriedOut ?? "");
+  const [partsReplaced, setPartsReplaced]       = useState(d0?.partsReplaced ?? "");
+  const [correctiveAction, setCorrectiveAction] = useState(d0?.correctiveAction ?? "");
+  const [remarks, setRemarks]                   = useState(d0?.remarks ?? "");
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      selectedMachine, startAt, finishAt, natureOfBreakdown,
+      repairCarriedOut, partsReplaced, correctiveAction, remarks,
+    });
+  }, [selectedMachine, startAt, finishAt, natureOfBreakdown,
+      repairCarriedOut, partsReplaced, correctiveAction, remarks, draftSave]);
 
   // -------------------------------------------------------------------------
   // Load entries for selected machine
@@ -108,6 +137,7 @@ export default function BreakdownPage() {
   const resetForm = () => {
     setStartAt(localNow()); setFinishAt(""); setNatureOfBreakdown("");
     setRepairCarriedOut(""); setPartsReplaced(""); setCorrectiveAction(""); setRemarks("");
+    draft.clear();
   };
 
   // -------------------------------------------------------------------------

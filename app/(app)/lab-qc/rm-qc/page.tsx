@@ -13,12 +13,14 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
@@ -123,8 +125,27 @@ export default function RmQcPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    qcRmType: QcRmType;
+    crudeInvoiceNumber: string;
+    values: Record<string, string>;
+    testDate: string;
+    remarks: string;
+    oilBatchNumber: string;
+    oilAppearance: string;
+    oilMass: string;
+    oilVolume: string;
+    oilViscosity: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // A-20/1 type selector
-  const [qcRmType, setQcRmType] = useState<QcRmType>("crude_sulphur");
+  const [qcRmType, setQcRmType] = useState<QcRmType>(d0?.qcRmType ?? "crude_sulphur");
 
   const [materials, setMaterials]     = useState<Material[]>([]);
   const [loadingMats, setLoadingMats] = useState(true);
@@ -135,7 +156,7 @@ export default function RmQcPage() {
   // A-20/1 Crude Sulphur: invoice number resolved against rm_receipts.
   // No auto-create — the chemist must enter an invoice that was already
   // registered in the RM Receipt activity.
-  const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState("");
+  const [crudeInvoiceNumber, setCrudeInvoiceNumber] = useState(d0?.crudeInvoiceNumber ?? "");
   const [resolvingInvoice, setResolvingInvoice]     = useState(false);
   const [receiptLinkError, setReceiptLinkError]     = useState<string | null>(null);
   // Pulled read-only from the matched rm_receipts row on successful link.
@@ -152,20 +173,20 @@ export default function RmQcPage() {
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [values, setValues]           = useState<Record<string, string>>({});
-  const [testDate, setTestDate]       = useState(new Date().toISOString().slice(0, 10));
+  const [testDate, setTestDate]       = useState(d0?.testDate ?? new Date().toISOString().slice(0, 10));
   // Chemist name is taken from the logged-in user (profile.full_name) — no
   // manual entry. Used only for email/sheet display; chemist_id = user.id
   // remains the authoritative identity on the record.
   const chemistName = profile?.full_name ?? "";
-  const [remarks, setRemarks]         = useState("");
+  const [remarks, setRemarks]         = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]   = useState(false);
 
   // Oil QC fields
-  const [oilBatchNumber, setOilBatchNumber] = useState("");
-  const [oilAppearance, setOilAppearance]   = useState("");
-  const [oilMass, setOilMass]               = useState("");
-  const [oilVolume, setOilVolume]           = useState("");
-  const [oilViscosity, setOilViscosity]     = useState("");
+  const [oilBatchNumber, setOilBatchNumber] = useState(d0?.oilBatchNumber ?? "");
+  const [oilAppearance, setOilAppearance]   = useState(d0?.oilAppearance ?? "");
+  const [oilMass, setOilMass]               = useState(d0?.oilMass ?? "");
+  const [oilVolume, setOilVolume]           = useState(d0?.oilVolume ?? "");
+  const [oilViscosity, setOilViscosity]     = useState(d0?.oilViscosity ?? "");
   const [oilSubmitting, setOilSubmitting]   = useState(false);
 
   const oilDensity = (parseFloat(oilMass) && parseFloat(oilVolume))
@@ -201,6 +222,16 @@ export default function RmQcPage() {
 
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
   const audit = useFieldAudit();
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      qcRmType, crudeInvoiceNumber, values, testDate, remarks,
+      oilBatchNumber, oilAppearance, oilMass, oilVolume, oilViscosity,
+    });
+  }, [qcRmType, crudeInvoiceNumber, values, testDate, remarks,
+      oilBatchNumber, oilAppearance, oilMass, oilVolume, oilViscosity, draftSave]);
 
   const selectedMaterial = materials.find(m => m.id === materialId);
   const isSulphurPowder  = selectedMaterial?.code === "SULPHUR_POWDER";
@@ -276,10 +307,12 @@ export default function RmQcPage() {
         setTestDefs(defs);
         const init: Record<string, string> = {};
         defs.forEach(d => { init[d.test_key] = ""; });
-        setValues(init);
+        // Merge any saved draft values over the blank init so restored input
+        // survives a tab/browser close.
+        setValues({ ...init, ...(d0?.values ?? {}) });
         setLoadingDefs(false);
       });
-  }, [materialId, isSulphurPowder, supabase]);
+  }, [materialId, isSulphurPowder, supabase, d0]);
 
   // ---------------------------------------------------------------------------
   // Crude Sulphur: auto-load the IS-6655 A-grade specs (no grade selector).
@@ -681,6 +714,7 @@ export default function RmQcPage() {
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
       audit.reset();
+      draft.clear();
     } catch {
       showToast("Network error — try again.", true);
     } finally {
@@ -1076,6 +1110,7 @@ export default function RmQcPage() {
                 showToast("Oil QC saved ✓");
                 setOilBatchNumber(""); setOilAppearance("");
                 setOilMass(""); setOilVolume(""); setOilViscosity("");
+                draft.clear();
               } catch { showToast("Network error.", true); }
               finally { setOilSubmitting(false); }
             }}

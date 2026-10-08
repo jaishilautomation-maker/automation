@@ -12,12 +12,14 @@
 // =============================================================================
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildPostProductionEmail } from "@/lib/notifications/lab-qc-emails";
@@ -44,25 +46,57 @@ export default function PostProductionPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    productId: string;
+    batchId: string;
+    linkedPqcId: string;
+    testDate: string;
+    chemistName: string;
+    productBeingRetested: string;
+    trackingType: string;
+    parametersChecked: string;
+    stabilityResult: string;
+    stabilityReadingDate: string;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   const [products, setProducts]         = useState<Product[]>([]);
-  const [productId, setProductId]       = useState("");
+  const [productId, setProductId]       = useState(d0?.productId ?? "");
   const [batches, setBatches]           = useState<BatchOption[]>([]);
-  const [batchId, setBatchId]           = useState("");
+  const [batchId, setBatchId]           = useState(d0?.batchId ?? "");
   const [pqcOptions, setPqcOptions]     = useState<PqcOption[]>([]);
-  const [linkedPqcId, setLinkedPqcId]   = useState("");
+  const [linkedPqcId, setLinkedPqcId]   = useState(d0?.linkedPqcId ?? "");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBatches, setLoadingBatches]   = useState(false);
 
   // Form fields
-  const [testDate, setTestDate]               = useState(new Date().toISOString().slice(0, 10));
-  const [chemistName, setChemistName]         = useState("");
-  const [productBeingRetested, setProductBeingRetested] = useState("");
-  const [trackingType, setTrackingType]       = useState<string>("");
-  const [parametersChecked, setParametersChecked] = useState("");
-  const [stabilityResult, setStabilityResult] = useState("");
-  const [stabilityReadingDate, setStabilityReadingDate] = useState("");
-  const [remarks, setRemarks]                 = useState("");
+  const [testDate, setTestDate]               = useState(d0?.testDate ?? new Date().toISOString().slice(0, 10));
+  const [chemistName, setChemistName]         = useState(d0?.chemistName ?? "");
+  const [productBeingRetested, setProductBeingRetested] = useState(d0?.productBeingRetested ?? "");
+  const [trackingType, setTrackingType]       = useState<string>(d0?.trackingType ?? "");
+  const [parametersChecked, setParametersChecked] = useState(d0?.parametersChecked ?? "");
+  const [stabilityResult, setStabilityResult] = useState(d0?.stabilityResult ?? "");
+  const [stabilityReadingDate, setStabilityReadingDate] = useState(d0?.stabilityReadingDate ?? "");
+  const [remarks, setRemarks]                 = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]           = useState(false);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      productId, batchId, linkedPqcId, testDate, chemistName,
+      productBeingRetested, trackingType, parametersChecked,
+      stabilityResult, stabilityReadingDate, remarks,
+    });
+  }, [productId, batchId, linkedPqcId, testDate, chemistName,
+      productBeingRetested, trackingType, parametersChecked,
+      stabilityResult, stabilityReadingDate, remarks, draftSave]);
 
   // Load products — A-20: 5 Lab QC products only; A-20/1: all non-trial
   const A20_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "ZIDDI", "LIQUID_CALCIUM", "LIQUID_BORON"];
@@ -174,6 +208,7 @@ export default function PostProductionPage() {
       setTrackingType(""); setParametersChecked(""); setStabilityResult("");
       setStabilityReadingDate(""); setRemarks(""); setChemistName("");
       setProductBeingRetested("");
+      draft.clear();
     } catch {
       showToast("Network error — try again.", true);
     } finally {

@@ -12,12 +12,14 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
@@ -54,8 +56,28 @@ export default function BatchAnalysisPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    batchNumber: string;
+    partyCode: string;
+    values: Record<string, string>;
+    analysisDate: string;
+    mfgDate: string;
+    jobNo: string;
+    srNo: string;
+    shift: string;
+    lotNo: string;
+    remarks: string;
+    reworkAction: ReworkAction | "";
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // Batch number (free text)
-  const [batchNumber, setBatchNumber] = useState("");
+  const [batchNumber, setBatchNumber] = useState(d0?.batchNumber ?? "");
   const [resolvedBatchId, setResolvedBatchId] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
 
@@ -68,25 +90,35 @@ export default function BatchAnalysisPage() {
 
   // Party selection + customer specs (for live pass/fail)
   const [parties, setParties]           = useState<PartyOption[]>([]);
-  const [partyCode, setPartyCode]       = useState("");
+  const [partyCode, setPartyCode]       = useState(d0?.partyCode ?? "");
   const [specs, setSpecs]               = useState<SpecRow[]>([]);
 
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
-  const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().slice(0, 10));
+  const [analysisDate, setAnalysisDate] = useState(d0?.analysisDate ?? new Date().toISOString().slice(0, 10));
   // Manufacturing date — defaults to today, chemist can override if the batch
   // was produced on a different day than the analysis.
-  const [mfgDate, setMfgDate]           = useState(new Date().toISOString().slice(0, 10));
+  const [mfgDate, setMfgDate]           = useState(d0?.mfgDate ?? new Date().toISOString().slice(0, 10));
   // JSCI/QC/16 Final Inspection header fields (stored in test_results JSONB).
-  const [jobNo, setJobNo]               = useState("");
-  const [srNo, setSrNo]                 = useState("");
-  const [shift, setShift]               = useState("");   // "day" | "night" | ""
-  const [lotNo, setLotNo]               = useState("");
-  const [remarks, setRemarks]           = useState("");
-  const [reworkAction, setReworkAction] = useState<ReworkAction | "">("");
+  const [jobNo, setJobNo]               = useState(d0?.jobNo ?? "");
+  const [srNo, setSrNo]                 = useState(d0?.srNo ?? "");
+  const [shift, setShift]               = useState(d0?.shift ?? "");   // "day" | "night" | ""
+  const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
+  const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
+  const [reworkAction, setReworkAction] = useState<ReworkAction | "">(d0?.reworkAction ?? "");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
   const audit = useFieldAudit();
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      batchNumber, partyCode, values, analysisDate, mfgDate,
+      jobNo, srNo, shift, lotNo, remarks, reworkAction,
+    });
+  }, [batchNumber, partyCode, values, analysisDate, mfgDate,
+      jobNo, srNo, shift, lotNo, remarks, reworkAction, draftSave]);
 
 
   // -------------------------------------------------------------------------
@@ -114,11 +146,13 @@ export default function BatchAnalysisPage() {
           setTestDefs(defs);
           const init: Record<string, string> = {};
           defs.forEach(d => { init[d.test_key] = ""; });
-          setValues(init);
+          // Merge any saved draft values over the blank init so restored input
+          // survives a tab/browser close.
+          setValues({ ...init, ...(d0?.values ?? {}) });
         }
         setLoadingDefs(false);
       });
-  }, [supabase]);
+  }, [supabase, d0]);
 
   // -------------------------------------------------------------------------
   // Load party list (single master — §0)
@@ -315,6 +349,7 @@ export default function BatchAnalysisPage() {
     setShift("");
     setLotNo("");
     audit.reset();
+    draft.clear();
   };
 
   const handleBatchBlur = () => { resolveBatch(batchNumber); };

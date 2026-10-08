@@ -8,6 +8,8 @@
 // =============================================================================
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
@@ -1247,8 +1249,12 @@ function ReceivedSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<ReceivedEntry>(draftKey(pathname, "received", user?.id));
 
- const [entry, setEntry]      = useState<ReceivedEntry>(blankReceivedEntry());
+ const [entry, setEntry]      = useState<ReceivedEntry>(() => draft.restored ?? blankReceivedEntry());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedReceivedRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -1353,6 +1359,7 @@ function ReceivedSection() {
    });
 
    showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
+   draft.clear();
    setEntry(blankReceivedEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -1623,8 +1630,12 @@ function SuppliedSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<SuppliedEntry>(draftKey(pathname, "supplied", user?.id));
 
- const [entry, setEntry]      = useState<SuppliedEntry>(blankSuppliedEntry());
+ const [entry, setEntry]      = useState<SuppliedEntry>(() => draft.restored ?? blankSuppliedEntry());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedSuppliedRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -1728,6 +1739,7 @@ function SuppliedSection() {
    });
 
    showToast("Supplied entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
+   draft.clear();
    setEntry(blankSuppliedEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -2046,20 +2058,27 @@ type DailyProdHistoryRow =
  | (SavedDailyProdRowV2 & { legacy: false })
  | (SavedDailyProdRow   & { legacy: true  });
 
+interface DailyProdDraft { batchNo: string; recordDate: string; storeRemark: string }
+
 function DailyProductionSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<DailyProdDraft>(draftKey(pathname, "daily_prod", user?.id));
 
  // ── Batch number input ──────────────────────────────────────────────────
- const [batchNo, setBatchNo]     = useState("");
+ const [batchNo, setBatchNo]     = useState(() => draft.restored?.batchNo ?? "");
  const [fetching, setFetching]   = useState(false);
  const [fetchError, setFetchError] = useState<string | null>(null);
  const [fetched, setFetched]     = useState<FetchedBatchData | null>(null);
 
  // ── Store-editable fields ───────────────────────────────────────────────
- const [recordDate, setRecordDate]   = useState(today());
- const [storeRemark, setStoreRemark] = useState("");
+ const [recordDate, setRecordDate]   = useState(() => draft.restored?.recordDate ?? today());
+ const [storeRemark, setStoreRemark] = useState(() => draft.restored?.storeRemark ?? "");
+
+ const draftSave = draft.save;
+ useEffect(() => { draftSave({ batchNo, recordDate, storeRemark }); }, [batchNo, recordDate, storeRemark, draftSave]);
 
  // ── Save / edit state ───────────────────────────────────────────────────
  const [submitting, setSubmitting] = useState(false);
@@ -2295,6 +2314,7 @@ function DailyProductionSection() {
     if (error) { showToast("Save failed: " + error.message, true); return; }
     showToast("Saved -- Batch " + payload.batch_no + " | " + payload.product + " | " + (payload.actual_mt != null ? (payload.actual_mt * 1000).toFixed(0) : "?") + " kg");
    }
+   draft.clear();
    clearFetch();
    setRecordDate(today());
    loadHistory();
@@ -2668,8 +2688,12 @@ function DailyDispatchSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<DailyDispatchRow>(draftKey(pathname, "daily_dispatch", user?.id));
 
- const [entry, setEntry]       = useState<DailyDispatchRow>(blankDispatchRow());
+ const [entry, setEntry]       = useState<DailyDispatchRow>(() => draft.restored ?? blankDispatchRow());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting]  = useState(false);
  const [history, setHistory]     = useState<SavedDailyDispatchRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -2754,6 +2778,7 @@ function DailyDispatchSection() {
    });
 
    showToast("Daily dispatch saved -- " + entry.date + " Total MT: " + totalMt.toFixed(3));
+   draft.clear();
    setEntry(blankDispatchRow()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -3090,8 +3115,12 @@ function PackingMaterialSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<PmEntry>(draftKey(pathname, "packing_material", user?.id));
 
- const [entry, setEntry]      = useState<PmEntry>(blankPmEntry());
+ const [entry, setEntry]      = useState<PmEntry>(() => draft.restored ?? blankPmEntry());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedPmRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -3332,6 +3361,7 @@ function PackingMaterialSection() {
    if (saveErr) { showToast((editId ? "Update" : "Save") + " failed: " + saveErr.message, true); return; }
    showToast((editId ? "Updated" : "Saved") + " -- " + entry.product + " Cl. Bal: " + clBal.toFixed(0));
    setEditId(null);
+   draft.clear();
    setEntry(blankPmEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -3803,8 +3833,12 @@ function FinishedGoodsSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<FgEntry>(draftKey(pathname, "finished_goods", user?.id));
 
- const [entry, setEntry]      = useState<FgEntry>(blankFgEntry());
+ const [entry, setEntry]      = useState<FgEntry>(() => draft.restored ?? blankFgEntry());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedFgRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -3959,6 +3993,7 @@ function FinishedGoodsSection() {
     if (error) { showToast("Save failed: " + error.message, true); return; }
     showToast("Saved -- " + entry.product + " C/Bal: " + clBal.toFixed(0) + " bags | " + (totalMt ?? 0).toFixed(3) + " MT");
    }
+   draft.clear();
    setEntry(blankFgEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -4296,14 +4331,20 @@ function computeBmRow(r: BmProdRow): BmProdRow {
  return { ...r, kg, total_mt: kg != null ? kg / 1000 : null };
 }
 
+interface BmDraft { prodRows: BmProdRow[]; dispatchRows: BmDispatchRow[]; prevBalance: string }
+
 function BallMillSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<BmDraft>(draftKey(pathname, "ball_mill", user?.id));
 
- const [prodRows, setProdRows]     = useState<BmProdRow[]>([blankProdRow()]);
- const [dispatchRows, setDispatchRows] = useState<BmDispatchRow[]>([blankBmDispatchRow()]);
- const [prevBalance, setPrevBalance]  = useState<string>("");
+ const [prodRows, setProdRows]     = useState<BmProdRow[]>(() => draft.restored?.prodRows ?? [blankProdRow()]);
+ const [dispatchRows, setDispatchRows] = useState<BmDispatchRow[]>(() => draft.restored?.dispatchRows ?? [blankBmDispatchRow()]);
+ const [prevBalance, setPrevBalance]  = useState<string>(() => draft.restored?.prevBalance ?? "");
+ const draftSave = draft.save;
+ useEffect(() => { draftSave({ prodRows, dispatchRows, prevBalance }); }, [prodRows, dispatchRows, prevBalance, draftSave]);
  const [submitting, setSubmitting]   = useState(false);
  const [history, setHistory]      = useState<SavedBmEntry[]>([]);
  const [histLoading, setHistLoading]  = useState(true);
@@ -4429,6 +4470,7 @@ function BallMillSection() {
    });
 
    showToast("Ball Mill entry saved -- Balance: " + newBalance + " bags");
+   draft.clear();
    setProdRows([blankProdRow()]);
    setDispatchRows([blankBmDispatchRow()]);
    loadHistory();
@@ -4857,8 +4899,12 @@ function BatchWiseSection() {
  const { user } = useAuth();
  const { showToast } = useToast();
  const supabase = createClient();
+ const pathname = usePathname();
+ const draft = useFormDraft<BatchWiseEntry>(draftKey(pathname, "batch_wise", user?.id));
 
- const [entry, setEntry]      = useState<BatchWiseEntry>(blankBatchEntry());
+ const [entry, setEntry]      = useState<BatchWiseEntry>(() => draft.restored ?? blankBatchEntry());
+ const draftSave = draft.save;
+ useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
  const [history, setHistory]    = useState<SavedBatchRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
@@ -4979,6 +5025,7 @@ function BatchWiseSection() {
    });
 
    showToast("Batch saved -- " + entry.batch_no + " Remaining: " + (derived.remainingBags ?? 0) + " bags / " + (derived.remainingMt ?? 0).toFixed(3) + " MT");
+   draft.clear();
    setEntry(blankBatchEntry()); loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String), true);
@@ -5295,8 +5342,12 @@ function OilConsumptionSection() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const supabase = createClient();
+  const pathname = usePathname();
+  const draft = useFormDraft<OilConsumptionEntry>(draftKey(pathname, "oil_consumption", user?.id));
 
-  const [entry, setEntry]           = useState<OilConsumptionEntry>(blankOilEntry(11));
+  const [entry, setEntry]           = useState<OilConsumptionEntry>(() => draft.restored ?? blankOilEntry(11));
+  const draftSave = draft.save;
+  useEffect(() => { draftSave(entry); }, [entry, draftSave]);
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory]       = useState<SavedOilRow[]>([]);
   const [histLoading, setHistLoading] = useState(true);
@@ -5422,6 +5473,7 @@ function OilConsumptionSection() {
       });
 
       showToast("Oil consumption saved -- " + entry.date + " Total: " + totalConsumption);
+      draft.clear();
       setEntry(blankOilEntry(entry.drums.length));
       loadHistory();
     } catch (e: unknown) {
@@ -6913,8 +6965,12 @@ function PrnSection() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const supabase = createClient();
+  const pathname = usePathname();
+  const draft = useFormDraft<PrnEntry>(draftKey(pathname, "prn", user?.id));
 
-  const [entry, setEntry]           = useState<PrnEntry>(blankPrnEntry());
+  const [entry, setEntry]           = useState<PrnEntry>(() => draft.restored ?? blankPrnEntry());
+  const draftSave = draft.save;
+  useEffect(() => { draftSave(entry); }, [entry, draftSave]);
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory]       = useState<SavedPrnRow[]>([]);
   const [histLoading, setHistLoading] = useState(true);
@@ -7018,6 +7074,7 @@ function PrnSection() {
       });
 
       showToast("PRN saved -- " + entry.item_description);
+      draft.clear();
       setEntry(blankPrnEntry()); loadHistory();
     } catch (e: unknown) {
       showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);

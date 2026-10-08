@@ -17,11 +17,13 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { PackingBreakdownReport, PackingFaultType } from "@/lib/types";
 
 const FAULT_TYPES: { value: PackingFaultType; label: string }[] = [
@@ -60,37 +62,82 @@ export default function PackingBreakdownPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    documentNo: string;
+    machineCode: string;
+    machineName: string;
+    department: string;
+    reportingDate: string;
+    reportingTime: string;
+    problemReported: string;
+    natureFaults: PackingFaultType[];
+    attendedBy: string;
+    faultDetails: string;
+    rootCause: string;
+    actionTaken: string;
+    causeOfDelay: string;
+    spareParts: string;
+    qtySec: string;
+    handoverDate: string;
+    handoverTime: string;
+    prodSuperSign: string;
+    prodManagerSign: string;
+    maintEngSign: string;
+    maintHeadSign: string;
+    productionRemarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // Form state
-  const [documentNo, setDocumentNo]       = useState("");
-  const [machineCode, setMachineCode]     = useState("");
-  const [machineName, setMachineName]     = useState<string>("");
-  const [department, setDepartment]       = useState("Packing");
-  const [reportingDate, setReportingDate] = useState(todayISO());
-  const [reportingTime, setReportingTime] = useState(nowTime());
+  const [documentNo, setDocumentNo]       = useState(d0?.documentNo ?? "");
+  const [machineCode, setMachineCode]     = useState(d0?.machineCode ?? "");
+  const [machineName, setMachineName]     = useState<string>(d0?.machineName ?? "");
+  const [department, setDepartment]       = useState(d0?.department ?? "Packing");
+  const [reportingDate, setReportingDate] = useState(d0?.reportingDate ?? todayISO());
+  const [reportingTime, setReportingTime] = useState(d0?.reportingTime ?? nowTime());
 
-  const [problemReported, setProblemReported]   = useState("");
-  const [natureFaults, setNatureFaults]         = useState<PackingFaultType[]>([]);
-  const [attendedBy, setAttendedBy]             = useState("");
+  const [problemReported, setProblemReported]   = useState(d0?.problemReported ?? "");
+  const [natureFaults, setNatureFaults]         = useState<PackingFaultType[]>(d0?.natureFaults ?? []);
+  const [attendedBy, setAttendedBy]             = useState(d0?.attendedBy ?? "");
 
-  const [faultDetails, setFaultDetails]         = useState("");
-  const [rootCause, setRootCause]               = useState("");
-  const [actionTaken, setActionTaken]           = useState("");
-  const [causeOfDelay, setCauseOfDelay]         = useState("");
-  const [spareParts, setSpareParts]             = useState("");
-  const [qtySec, setQtySec]                     = useState("");
+  const [faultDetails, setFaultDetails]         = useState(d0?.faultDetails ?? "");
+  const [rootCause, setRootCause]               = useState(d0?.rootCause ?? "");
+  const [actionTaken, setActionTaken]           = useState(d0?.actionTaken ?? "");
+  const [causeOfDelay, setCauseOfDelay]         = useState(d0?.causeOfDelay ?? "");
+  const [spareParts, setSpareParts]             = useState(d0?.spareParts ?? "");
+  const [qtySec, setQtySec]                     = useState(d0?.qtySec ?? "");
 
-  const [handoverDate, setHandoverDate]         = useState("");
-  const [handoverTime, setHandoverTime]         = useState("");
+  const [handoverDate, setHandoverDate]         = useState(d0?.handoverDate ?? "");
+  const [handoverTime, setHandoverTime]         = useState(d0?.handoverTime ?? "");
 
-  const [prodSuperSign, setProdSuperSign]       = useState("");
-  const [prodManagerSign, setProdManagerSign]   = useState("");
-  const [maintEngSign, setMaintEngSign]         = useState("");
-  const [maintHeadSign, setMaintHeadSign]       = useState("");
+  const [prodSuperSign, setProdSuperSign]       = useState(d0?.prodSuperSign ?? "");
+  const [prodManagerSign, setProdManagerSign]   = useState(d0?.prodManagerSign ?? "");
+  const [maintEngSign, setMaintEngSign]         = useState(d0?.maintEngSign ?? "");
+  const [maintHeadSign, setMaintHeadSign]       = useState(d0?.maintHeadSign ?? "");
 
-  const [productionRemarks, setProductionRemarks] = useState("");
+  const [productionRemarks, setProductionRemarks] = useState(d0?.productionRemarks ?? "");
 
   const [submitting, setSubmitting]             = useState(false);
   const [reports, setReports]                   = useState<PackingBreakdownReport[]>([]);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      documentNo, machineCode, machineName, department, reportingDate, reportingTime,
+      problemReported, natureFaults, attendedBy, faultDetails, rootCause, actionTaken,
+      causeOfDelay, spareParts, qtySec, handoverDate, handoverTime,
+      prodSuperSign, prodManagerSign, maintEngSign, maintHeadSign, productionRemarks,
+    });
+  }, [documentNo, machineCode, machineName, department, reportingDate, reportingTime,
+      problemReported, natureFaults, attendedBy, faultDetails, rootCause, actionTaken,
+      causeOfDelay, spareParts, qtySec, handoverDate, handoverTime,
+      prodSuperSign, prodManagerSign, maintEngSign, maintHeadSign, productionRemarks, draftSave]);
 
   // -------------------------------------------------------------------------
   // Load recent reports
@@ -129,6 +176,7 @@ export default function PackingBreakdownPage() {
     setHandoverDate(""); setHandoverTime("");
     setProdSuperSign(""); setProdManagerSign(""); setMaintEngSign(""); setMaintHeadSign("");
     setProductionRemarks("");
+    draft.clear();
   }
 
   // -------------------------------------------------------------------------

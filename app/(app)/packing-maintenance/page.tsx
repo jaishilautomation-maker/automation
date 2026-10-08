@@ -19,11 +19,13 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey, peekDraft } from "@/lib/use-form-draft";
 import type {
   PackingMaintenanceItem,
   PackingMaintenanceChecklist,
@@ -67,6 +69,25 @@ export default function PackingMaintenancePage() {
   const [productionManagerSign, setProductionManagerSign] = useState("");
 
   const [submitting, setSubmitting]   = useState(false);
+
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  // Scoped to the selected date (discriminator) so each day's in-progress
+  // checklist persists independently. The checklist is loaded fresh from the
+  // DB per date; the draft only backfills unsaved local edits.
+  const pathname = usePathname();
+  interface DraftShape {
+    entries: Record<string, EntryState>;
+    maintEngineerSign: string;
+    productionManagerSign: string;
+  }
+  const draftKeyStr = draftKey(pathname, activeFactory?.id, user?.id, checklistDate);
+  const draft = useFormDraft<DraftShape>(draftKeyStr);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({ entries, maintEngineerSign, productionManagerSign });
+  }, [entries, maintEngineerSign, productionManagerSign, draftSave]);
 
   // -------------------------------------------------------------------------
   // Load master items once
@@ -131,16 +152,28 @@ export default function PackingMaintenancePage() {
       setMaintEngineerSign(cl.maintenance_engineer_sign ?? "");
       setProductionManagerSign(cl.production_manager_sign ?? "");
     } else {
-      // Reset to blanks for a new checklist
+      // Reset to blanks for a new checklist, then overlay any saved local draft
+      // so unsaved edits survive a tab/browser close.
       const init: Record<string, EntryState> = {};
       items.forEach(r => { init[r.id] = { itemId: r.id, status: null, remark: "" }; });
-      setEntries(init);
-      setMaintEngineerSign("");
-      setProductionManagerSign("");
+      const saved = peekDraft<DraftShape>(draftKeyStr);
+      if (saved) {
+        const merged: Record<string, EntryState> = { ...init };
+        for (const id of Object.keys(init)) {
+          if (saved.entries?.[id]) merged[id] = saved.entries[id];
+        }
+        setEntries(merged);
+        setMaintEngineerSign(saved.maintEngineerSign ?? "");
+        setProductionManagerSign(saved.productionManagerSign ?? "");
+      } else {
+        setEntries(init);
+        setMaintEngineerSign("");
+        setProductionManagerSign("");
+      }
     }
 
     setLoadingChecklist(false);
-  }, [activeFactory, checklistDate, items, supabase]);
+  }, [activeFactory, checklistDate, items, supabase, draftKeyStr]);
 
   // Reload when date or items change
   useEffect(() => {
@@ -222,6 +255,7 @@ export default function PackingMaintenancePage() {
       }
 
       showToast("Checklist saved ✓");
+      draft.clear();
       loadChecklist();
     } catch {
       showToast("Network error — try again.", true);

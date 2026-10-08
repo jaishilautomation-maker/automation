@@ -17,8 +17,10 @@
 // =============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
+import { useFormDraft, draftKey, peekDraft } from "@/lib/use-form-draft";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import {
@@ -149,6 +151,33 @@ export default function PulveriserOperatorPage() {
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
   const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
 
+  // ── Draft autosave ────────────────────────────────────────────────────────
+  // Persist the operator's in-progress entry for the OPEN job card locally so a
+  // closed tab/browser never loses typed data. Keyed by the active card id.
+  const pathname = usePathname();
+  interface OperatorDraft {
+    actualKg: string; classifierVfd: string; blowerIn: string; blowerOut: string;
+    fgBag: string; packingSize: string; qcNote: string; storesNote: string;
+    workDetails: string; chkClean: boolean; chkRoller: boolean; chkMesh: boolean;
+    rows: HourlyRow[]; closeEntries: MachineCloseEntry[];
+  }
+  const draft = useFormDraft<OperatorDraft>(
+    draftKey(pathname, user?.id, active?.id),
+  );
+  const draftSave = draft.save;
+
+  // Autosave the editable fields whenever they change, only while a card is open.
+  useEffect(() => {
+    if (!active) return;
+    draftSave({
+      actualKg, classifierVfd, blowerIn, blowerOut, fgBag, packingSize,
+      qcNote, storesNote, workDetails, chkClean, chkRoller, chkMesh,
+      rows, closeEntries,
+    });
+  }, [active, actualKg, classifierVfd, blowerIn, blowerOut, fgBag, packingSize,
+      qcNote, storesNote, workDetails, chkClean, chkRoller, chkMesh,
+      rows, closeEntries, draftSave]);
+
   // Auto-fill वास्तविक उत्पादन (kg) = तैयार माल बैग × पैकिंग साइज़.
   // Called from the bags and packing-size handlers. If either value is missing
   // or non-numeric, the actual production field is left untouched so a manual
@@ -199,6 +228,27 @@ export default function PulveriserOperatorPage() {
     setChkClean(jc.checkpoint_machine_cleaning);
     setChkRoller(jc.checkpoint_roller_check);
     setChkMesh(jc.checkpoint_mesh_cloth_check);
+
+    // Restore any locally saved draft for THIS card (unsaved edits from a
+    // previous session). It overrides the DB pre-fill above so the operator
+    // picks up exactly where they left off.
+    const saved = peekDraft<OperatorDraft>(draftKey(pathname, user?.id, jc.id));
+    if (saved) {
+      setActualKg(saved.actualKg);
+      setClassifierVfd(saved.classifierVfd);
+      setBlowerIn(saved.blowerIn);
+      setBlowerOut(saved.blowerOut);
+      setFgBag(saved.fgBag);
+      setPackingSize(saved.packingSize);
+      setQcNote(saved.qcNote);
+      setStoresNote(saved.storesNote);
+      setWorkDetails(saved.workDetails);
+      setChkClean(saved.chkClean);
+      setChkRoller(saved.chkRoller);
+      setChkMesh(saved.chkMesh);
+      if (saved.rows?.length) setRows(saved.rows);
+      if (saved.closeEntries?.length) setCloseEntries(saved.closeEntries);
+    }
 
     // Load the mill VFD standard for this card's Party/CODE (reference values).
     setVfdParam(null);
@@ -551,6 +601,8 @@ export default function PulveriserOperatorPage() {
         }
       }
 
+      // Saved to the DB — the local draft for this card is now redundant.
+      draft.clear();
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");
       goBack();
       loadPending();

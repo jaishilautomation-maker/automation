@@ -15,12 +15,14 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
@@ -46,22 +48,40 @@ export default function ProductQcPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    productId: string;
+    phase: QcPhase;
+    batchId: string;
+    directBatchNumber: string;
+    directLotNumber: string;
+    values: Record<string, string>;
+    testDate: string;
+    chemistName: string;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // Step 1: product selection
   const [products, setProducts]         = useState<Product[]>([]);
-  const [productId, setProductId]       = useState("");
+  const [productId, setProductId]       = useState(d0?.productId ?? "");
   const [loadingProducts, setLoadingProducts] = useState(true);
 
   // Step 2: phase selection (for phase-aware products)
-  const [phase, setPhase]               = useState<QcPhase>("none");
+  const [phase, setPhase]               = useState<QcPhase>(d0?.phase ?? "none");
 
   // Step 3: batch selection
   const [batches, setBatches]           = useState<BatchOption[]>([]);
-  const [batchId, setBatchId]           = useState("");
+  const [batchId, setBatchId]           = useState(d0?.batchId ?? "");
   const [loadingBatches, setLoadingBatches] = useState(false);
 
   // A-20 direct batch entry (no batch-analysis / hourly-reading in this factory)
-  const [directBatchNumber, setDirectBatchNumber] = useState("");
-  const [directLotNumber, setDirectLotNumber]     = useState("");
+  const [directBatchNumber, setDirectBatchNumber] = useState(d0?.directBatchNumber ?? "");
+  const [directLotNumber, setDirectLotNumber]     = useState(d0?.directLotNumber ?? "");
 
   // Test definitions for selected product + phase
   const [testDefs, setTestDefs]         = useState<QcTestDefinition[]>([]);
@@ -73,11 +93,21 @@ export default function ProductQcPage() {
 
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
-  const [testDate, setTestDate]         = useState(new Date().toISOString().slice(0, 10));
-  const [chemistName, setChemistName]   = useState("");
-  const [remarks, setRemarks]           = useState("");
+  const [testDate, setTestDate]         = useState(d0?.testDate ?? new Date().toISOString().slice(0, 10));
+  const [chemistName, setChemistName]   = useState(d0?.chemistName ?? "");
+  const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      productId, phase, batchId, directBatchNumber, directLotNumber,
+      values, testDate, chemistName, remarks,
+    });
+  }, [productId, phase, batchId, directBatchNumber, directLotNumber,
+      values, testDate, chemistName, remarks, draftSave]);
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
@@ -182,10 +212,12 @@ export default function ProductQcPage() {
         setTestDefs(defs);
         const init: Record<string, string> = {};
         defs.forEach(d => { init[d.test_key] = ""; });
-        setValues(init);
+        // Merge any saved draft values over the blank init so restored input
+        // survives a tab/browser close.
+        setValues({ ...init, ...(d0?.values ?? {}) });
         setLoadingDefs(false);
       });
-  }, [productId, phase, supabase]);
+  }, [productId, phase, supabase, d0]);
 
   // -------------------------------------------------------------------------
   // Check for existing record when batch+product+phase all known
@@ -426,6 +458,7 @@ export default function ProductQcPage() {
         });
 
         showToast("Product QC updated ✓");
+        draft.clear();
       } else {
         const { data: newRow, error } = await supabase
           .from("product_qc")
@@ -519,6 +552,7 @@ export default function ProductQcPage() {
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
         setChemistName("");
+        draft.clear();
       }
     } catch {
       showToast("Network error — try again.", true);

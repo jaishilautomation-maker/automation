@@ -10,12 +10,14 @@
 // =============================================================================
 
 import { useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Material, Vendor } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
@@ -50,34 +52,68 @@ export default function RmReceiptPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    rmType: RmType;
+    materialId: string;
+    invoiceNumber: string;
+    quantityMt: string;
+    appearance: string;
+    receivedDate: string;
+    csTruckNumber: string;
+    csVendorId: string;
+    supplierName: string;
+    oilDatetime: string;
+    oilQuantity: string;
+    truckNumber: string;
+    oilBatchNumber: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // A-20/1: type selector
-  const [rmType, setRmType] = useState<RmType>("crude_sulphur");
+  const [rmType, setRmType] = useState<RmType>(d0?.rmType ?? "crude_sulphur");
 
   // A-20: material from DB
   const [materials, setMaterials]       = useState<Material[]>([]);
   const [loadingMats, setLoadingMats]   = useState(true);
-  const [materialId, setMaterialId]     = useState("");
+  const [materialId, setMaterialId]     = useState(d0?.materialId ?? "");
 
   // Crude Sulphur fields
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [quantityMt, setQuantityMt]     = useState("");
-  const [appearance, setAppearance]     = useState("");
-  const [receivedDate, setReceivedDate] = useState(todayISO());
-  const [csTruckNumber, setCsTruckNumber] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState(d0?.invoiceNumber ?? "");
+  const [quantityMt, setQuantityMt]     = useState(d0?.quantityMt ?? "");
+  const [appearance, setAppearance]     = useState(d0?.appearance ?? "");
+  const [receivedDate, setReceivedDate] = useState(d0?.receivedDate ?? todayISO());
+  const [csTruckNumber, setCsTruckNumber] = useState(d0?.csTruckNumber ?? "");
   // Crude sulphur vendor — loaded from vendors table (migration 058).
   const [csVendors, setCsVendors]       = useState<Vendor[]>([]);
-  const [csVendorId, setCsVendorId]     = useState("");
+  const [csVendorId, setCsVendorId]     = useState(d0?.csVendorId ?? "");
 
   // Oil fields
-  const [supplierName, setSupplierName] = useState("");
-  const [oilDatetime, setOilDatetime]   = useState(nowLocalDatetime());
-  const [oilQuantity, setOilQuantity]   = useState("");
-  const [truckNumber, setTruckNumber]   = useState("");
-  const [oilBatchNumber, setOilBatchNumber] = useState("");
+  const [supplierName, setSupplierName] = useState(d0?.supplierName ?? "");
+  const [oilDatetime, setOilDatetime]   = useState(d0?.oilDatetime ?? nowLocalDatetime());
+  const [oilQuantity, setOilQuantity]   = useState(d0?.oilQuantity ?? "");
+  const [truckNumber, setTruckNumber]   = useState(d0?.truckNumber ?? "");
+  const [oilBatchNumber, setOilBatchNumber] = useState(d0?.oilBatchNumber ?? "");
 
   const [submitting, setSubmitting]     = useState(false);
   const photoRef = useRef<PhotoUploaderHandle | null>(null);
   const audit = useFieldAudit();
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      rmType, materialId, invoiceNumber, quantityMt, appearance, receivedDate,
+      csTruckNumber, csVendorId, supplierName, oilDatetime, oilQuantity,
+      truckNumber, oilBatchNumber,
+    });
+  }, [rmType, materialId, invoiceNumber, quantityMt, appearance, receivedDate,
+      csTruckNumber, csVendorId, supplierName, oilDatetime, oilQuantity,
+      truckNumber, oilBatchNumber, draftSave]);
 
   const selectedMaterial = materials.find(m => m.id === materialId);
 
@@ -117,6 +153,7 @@ export default function RmReceiptPage() {
     setOilQuantity(""); setTruckNumber(""); setOilBatchNumber("");
     if (!isA20_1 && clearMaterial) setMaterialId("");
     audit.reset();
+    draft.clear();
   };
 
   // ── Crude Sulphur submit ──

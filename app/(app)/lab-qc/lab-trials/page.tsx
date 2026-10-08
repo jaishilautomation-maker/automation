@@ -9,12 +9,14 @@
 // =============================================================================
 
 import { useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import DateField from "@/components/DateField";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, LabTrialStatus } from "@/lib/types";
 import PhotoUploader, { type PhotoUploaderHandle } from "@/components/PhotoUploader";
 import { notifyEvent } from "@/lib/notifications/notify-client";
@@ -34,6 +36,29 @@ export default function LabTrialsPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    trialCode: string;
+    trialDate: string;
+    productId: string;
+    batchId: string;
+    objective: string;
+    appearance: string;
+    density: string;
+    phNeat: string;
+    ph5pct: string;
+    suspensibility: string;
+    remarksIfFailed: string;
+    conclusion: string;
+    status: LabTrialStatus;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // All products (regular + trial-only)
   const [products, setProducts]     = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -42,25 +67,37 @@ export default function LabTrialsPage() {
   const [batches, setBatches]       = useState<BatchOption[]>([]);
 
   // Form state
-  const [trialCode, setTrialCode]   = useState("");
-  const [trialDate, setTrialDate]   = useState(new Date().toISOString().slice(0, 10));
-  const [productId, setProductId]   = useState("");
-  const [batchId, setBatchId]       = useState("");
-  const [objective, setObjective]   = useState("");
-  const [appearance, setAppearance] = useState("");
-  const [density, setDensity]       = useState("");
-  const [phNeat, setPhNeat]         = useState("");
-  const [ph5pct, setPh5pct]         = useState("");
-  const [suspensibility, setSuspensibility] = useState("");
-  const [remarksIfFailed, setRemarksIfFailed] = useState("");
-  const [conclusion, setConclusion] = useState("");
-  const [status, setStatus]         = useState<LabTrialStatus>("ongoing");
-  const [remarks, setRemarks]       = useState("");
+  const [trialCode, setTrialCode]   = useState(d0?.trialCode ?? "");
+  const [trialDate, setTrialDate]   = useState(d0?.trialDate ?? new Date().toISOString().slice(0, 10));
+  const [productId, setProductId]   = useState(d0?.productId ?? "");
+  const [batchId, setBatchId]       = useState(d0?.batchId ?? "");
+  const [objective, setObjective]   = useState(d0?.objective ?? "");
+  const [appearance, setAppearance] = useState(d0?.appearance ?? "");
+  const [density, setDensity]       = useState(d0?.density ?? "");
+  const [phNeat, setPhNeat]         = useState(d0?.phNeat ?? "");
+  const [ph5pct, setPh5pct]         = useState(d0?.ph5pct ?? "");
+  const [suspensibility, setSuspensibility] = useState(d0?.suspensibility ?? "");
+  const [remarksIfFailed, setRemarksIfFailed] = useState(d0?.remarksIfFailed ?? "");
+  const [conclusion, setConclusion] = useState(d0?.conclusion ?? "");
+  const [status, setStatus]         = useState<LabTrialStatus>(d0?.status ?? "ongoing");
+  const [remarks, setRemarks]       = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting] = useState(false);
 
   // Photo uploader refs
   const productPhotoRef   = useRef<PhotoUploaderHandle | null>(null);
   const jobCardPhotoRef   = useRef<PhotoUploaderHandle | null>(null);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({
+      trialCode, trialDate, productId, batchId, objective, appearance,
+      density, phNeat, ph5pct, suspensibility, remarksIfFailed,
+      conclusion, status, remarks,
+    });
+  }, [trialCode, trialDate, productId, batchId, objective, appearance,
+      density, phNeat, ph5pct, suspensibility, remarksIfFailed,
+      conclusion, status, remarks, draftSave]);
 
   // Load all products (including trial-only)
   useEffect(() => {
@@ -181,6 +218,7 @@ export default function LabTrialsPage() {
       setPhNeat(""); setPh5pct(""); setSuspensibility(""); setRemarksIfFailed("");
       setConclusion(""); setRemarks(""); setProductId(""); setBatchId("");
       setStatus("ongoing");
+      draft.clear();
     } catch {
       showToast("Network error — try again.", true);
     } finally {

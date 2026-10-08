@@ -16,8 +16,10 @@
 // =============================================================================
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
@@ -100,14 +102,32 @@ export default function PulveriserProductionPage() {
   const [rejectedCount, setRejectedCount] = useState(0);
   const audit = useFieldAudit();
 
-  // Shared header
-  const [machine, setMachine]     = useState<PulveriserMachine>("M1");
-  const [jobNumber, setJobNumber] = useState("");
-  const [shift, setShift]         = useState<"Day" | "Night" | "">("");
-  const [jobDate, setJobDate]     = useState(todayISO());
+  // ── Draft autosave ────────────────────────────────────────────────────────
+  // Persist the whole in-progress job card locally so a closed tab/browser
+  // never loses typed data. Keyed per route + factory + user.
+  const pathname = usePathname();
+  interface DraftShape {
+    machine: PulveriserMachine;
+    jobNumber: string;
+    shift: "Day" | "Night" | "";
+    jobDate: string;
+    entries: Entry[];
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
 
-  // 1–6 entries
-  const [entries, setEntries]     = useState<Entry[]>([blankEntry()]);
+  // Shared header (seeded from any saved draft)
+  const [machine, setMachine]     = useState<PulveriserMachine>(d0?.machine ?? "M1");
+  const [jobNumber, setJobNumber] = useState(d0?.jobNumber ?? "");
+  const [shift, setShift]         = useState<"Day" | "Night" | "">(d0?.shift ?? "");
+  const [jobDate, setJobDate]     = useState(d0?.jobDate ?? todayISO());
+
+  // 1–6 entries (seeded from any saved draft)
+  const [entries, setEntries]     = useState<Entry[]>(
+    d0?.entries && d0.entries.length > 0 ? d0.entries : [blankEntry()],
+  );
   const [submitting, setSubmitting] = useState(false);
 
   // Mill-type VFD rows drive the Party/CODE dropdown + oil standard lookup.
@@ -188,10 +208,17 @@ export default function PulveriserProductionPage() {
     setEntries(prev => prev.filter(e => e.key !== key));
   };
 
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({ machine, jobNumber, shift, jobDate, entries });
+  }, [machine, jobNumber, shift, jobDate, entries, draftSave]);
+
   const reset = () => {
     setJobNumber(""); setShift(""); setJobDate(todayISO());
     setEntries([blankEntry()]);
     audit.reset();
+    draft.clear();
   };
 
   const handleCreate = async () => {

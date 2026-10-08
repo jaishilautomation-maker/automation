@@ -12,11 +12,13 @@
 // =============================================================================
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildPackingQcEmail } from "@/lib/notifications/lab-qc-emails";
 
@@ -34,16 +36,38 @@ export default function PackingQcPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    itemId: string;
+    poWeight: string;
+    actualWeight: string;
+    dropTest: PassFail;
+    strengthCheck: PassFail;
+    overall: PassFail;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   const [items, setItems]           = useState<PackingItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
-  const [itemId, setItemId]         = useState("");
-  const [poWeight, setPoWeight]     = useState("");
-  const [actualWeight, setActualWeight] = useState("");
-  const [dropTest, setDropTest]     = useState<PassFail>("");
-  const [strengthCheck, setStrengthCheck] = useState<PassFail>("");
-  const [overall, setOverall]       = useState<PassFail>("");
-  const [remarks, setRemarks]       = useState("");
+  const [itemId, setItemId]         = useState(d0?.itemId ?? "");
+  const [poWeight, setPoWeight]     = useState(d0?.poWeight ?? "");
+  const [actualWeight, setActualWeight] = useState(d0?.actualWeight ?? "");
+  const [dropTest, setDropTest]     = useState<PassFail>(d0?.dropTest ?? "");
+  const [strengthCheck, setStrengthCheck] = useState<PassFail>(d0?.strengthCheck ?? "");
+  const [overall, setOverall]       = useState<PassFail>(d0?.overall ?? "");
+  const [remarks, setRemarks]       = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting] = useState(false);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({ itemId, poWeight, actualWeight, dropTest, strengthCheck, overall, remarks });
+  }, [itemId, poWeight, actualWeight, dropTest, strengthCheck, overall, remarks, draftSave]);
 
   // Live correlation % = actual / po * 100
   const correlation = (() => {
@@ -121,6 +145,7 @@ export default function PackingQcPage() {
       showToast("Packing QC saved ✓");
       setItemId(""); setPoWeight(""); setActualWeight("");
       setDropTest(""); setStrengthCheck(""); setOverall(""); setRemarks("");
+      draft.clear();
     } catch {
       showToast("Network error — try again.", true);
     } finally {

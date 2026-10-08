@@ -16,11 +16,13 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -67,25 +69,50 @@ export default function ProductionJobCardPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  // Per-formula-item editable inputs, keyed by formulaItemId so they survive
+  // the DB-driven rebuild of lineItems when product / batch size change.
+  type LineInput = Pick<LineItem, "addedQty" | "rmBatchNo" | "drumBagNo" | "remark">;
+  const pathname = usePathname();
+  interface DraftShape {
+    productId: string;
+    lotNo: string;
+    jobDate: string;
+    batchSize: string;
+    premixStart: string;
+    premixEnd: string;
+    beadMillStart: string;
+    beadMillEnd: string;
+    flowRate: string;
+    slurryA: string;
+    slurryB: string;
+    ph: string;
+    lineInputs: Record<string, LineInput>;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // Master data
   const [products, setProducts]     = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
 
   // Form state — header
-  const [productId, setProductId]   = useState("");
-  const [lotNo, setLotNo]           = useState("");
-  const [jobDate, setJobDate]       = useState(todayISO());
-  const [batchSize, setBatchSize]   = useState("");
+  const [productId, setProductId]   = useState(d0?.productId ?? "");
+  const [lotNo, setLotNo]           = useState(d0?.lotNo ?? "");
+  const [jobDate, setJobDate]       = useState(d0?.jobDate ?? todayISO());
+  const [batchSize, setBatchSize]   = useState(d0?.batchSize ?? "");
 
   // Phase timing
-  const [premixStart, setPremixStart]       = useState("");
-  const [premixEnd, setPremixEnd]           = useState("");
-  const [beadMillStart, setBeadMillStart]   = useState("");
-  const [beadMillEnd, setBeadMillEnd]       = useState("");
-  const [flowRate, setFlowRate]             = useState("");
-  const [slurryA, setSlurryA]               = useState("");
-  const [slurryB, setSlurryB]               = useState("");
-  const [ph, setPh]                         = useState("");
+  const [premixStart, setPremixStart]       = useState(d0?.premixStart ?? "");
+  const [premixEnd, setPremixEnd]           = useState(d0?.premixEnd ?? "");
+  const [beadMillStart, setBeadMillStart]   = useState(d0?.beadMillStart ?? "");
+  const [beadMillEnd, setBeadMillEnd]       = useState(d0?.beadMillEnd ?? "");
+  const [flowRate, setFlowRate]             = useState(d0?.flowRate ?? "");
+  const [slurryA, setSlurryA]               = useState(d0?.slurryA ?? "");
+  const [slurryB, setSlurryB]               = useState(d0?.slurryB ?? "");
+  const [ph, setPh]                         = useState(d0?.ph ?? "");
 
   // Line items
   const [lineItems, setLineItems]   = useState<LineItem[]>([]);
@@ -94,6 +121,27 @@ export default function ProductionJobCardPage() {
   // Records
   const [recentCards, setRecentCards] = useState<ProductionJobCard[]>([]);
   const [submitting, setSubmitting]   = useState(false);
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  // lineItems is reduced to a formulaItemId → editable-fields map so the typed
+  // per-row data persists even though the array is rebuilt from the DB formula.
+  const draftSave = draft.save;
+  useEffect(() => {
+    const lineInputs: Record<string, LineInput> = {};
+    for (const li of lineItems) {
+      lineInputs[li.formulaItemId] = {
+        addedQty: li.addedQty, rmBatchNo: li.rmBatchNo,
+        drumBagNo: li.drumBagNo, remark: li.remark,
+      };
+    }
+    draftSave({
+      productId, lotNo, jobDate, batchSize,
+      premixStart, premixEnd, beadMillStart, beadMillEnd,
+      flowRate, slurryA, slurryB, ph, lineInputs,
+    });
+  }, [productId, lotNo, jobDate, batchSize,
+      premixStart, premixEnd, beadMillStart, beadMillEnd,
+      flowRate, slurryA, slurryB, ph, lineItems, draftSave]);
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware = PHASE_AWARE_PROD_CODES.includes(selectedProduct?.code ?? "");
@@ -151,24 +199,28 @@ export default function ProductionJobCardPage() {
         const bsKg = parseFloat(batchSize) || 0;
 
         setLineItems(
-          defs.map(d => ({
-            formulaItemId:   d.id,
-            orderNo:         d.order_no,
-            phase:           d.phase,
-            componentName:   d.component_name,
-            jscCode:         d.jsc_code,
-            instructedQty:   bsKg > 0
-              ? scaleQty(d.instructed_qty_kg, d.reference_batch_size_kg, bsKg)
-              : d.instructed_qty_kg,
-            addedQty:        "",
-            rmBatchNo:       "",
-            drumBagNo:       "",
-            remark:          "",
-          }))
+          defs.map(d => {
+            // Restore any saved per-row inputs for this formula item.
+            const saved = d0?.lineInputs?.[d.id];
+            return {
+              formulaItemId:   d.id,
+              orderNo:         d.order_no,
+              phase:           d.phase,
+              componentName:   d.component_name,
+              jscCode:         d.jsc_code,
+              instructedQty:   bsKg > 0
+                ? scaleQty(d.instructed_qty_kg, d.reference_batch_size_kg, bsKg)
+                : d.instructed_qty_kg,
+              addedQty:        saved?.addedQty  ?? "",
+              rmBatchNo:       saved?.rmBatchNo ?? "",
+              drumBagNo:       saved?.drumBagNo ?? "",
+              remark:          saved?.remark    ?? "",
+            };
+          })
         );
         setLoadingFormula(false);
       });
-  }, [productId, supabase]);
+  }, [productId, supabase, d0]);
 
   // Re-scale when batch size changes without refetching formula
   useEffect(() => {
@@ -295,6 +347,7 @@ export default function ProductionJobCardPage() {
       setProductId(""); setLotNo(""); setBatchSize(""); setJobDate(todayISO());
       setPremixStart(""); setPremixEnd(""); setBeadMillStart(""); setBeadMillEnd("");
       setFlowRate(""); setSlurryA(""); setSlurryB(""); setPh(""); setLineItems([]);
+      draft.clear();
       loadRecent();
     } catch {
       showToast("Network error — try again.", true);

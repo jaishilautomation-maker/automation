@@ -12,11 +12,13 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { evalFormula } from "@/lib/formula";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
@@ -43,12 +45,26 @@ export default function HourlyReadingPage() {
   const { activeFactory } = useModule();
   const supabase = createClient();
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  const pathname = usePathname();
+  interface DraftShape {
+    batchNumber: string;
+    machine: MachineOption;
+    values: Record<string, string>;
+    readingTime: string;
+    remarks: string;
+  }
+  const draft = useFormDraft<DraftShape>(
+    draftKey(pathname, activeFactory?.id, user?.id),
+  );
+  const d0 = draft.restored;
+
   // Batch number (free text input)
-  const [batchNumber, setBatchNumber] = useState("");
+  const [batchNumber, setBatchNumber] = useState(d0?.batchNumber ?? "");
   const [resolvedBatchId, setResolvedBatchId] = useState<string | null>(null);
 
   // Machine selection (M1 / M2) — stored inside test_results.machine
-  const [machine, setMachine] = useState<MachineOption>("M1");
+  const [machine, setMachine] = useState<MachineOption>(d0?.machine ?? "M1");
 
   // Test definitions
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
@@ -56,12 +72,18 @@ export default function HourlyReadingPage() {
 
   // Form state
   const [values, setValues]           = useState<Record<string, string>>({});
-  const [readingTime, setReadingTime] = useState(() =>
+  const [readingTime, setReadingTime] = useState(d0?.readingTime ??
     new Date().toISOString().slice(0, 16)
   );
-  const [remarks, setRemarks]         = useState("");
+  const [remarks, setRemarks]         = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]   = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+
+  // Autosave the live form state on every change (debounced inside the hook).
+  const draftSave = draft.save;
+  useEffect(() => {
+    draftSave({ batchNumber, machine, values, readingTime, remarks });
+  }, [batchNumber, machine, values, readingTime, remarks, draftSave]);
 
   // Recent readings for the entered batch number
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
@@ -91,11 +113,13 @@ export default function HourlyReadingPage() {
           setTestDefs(defs);
           const init: Record<string, string> = {};
           defs.forEach(d => { init[d.test_key] = ""; });
-          setValues(init);
+          // Merge any saved draft values over the blank init so restored input
+          // survives a tab/browser close.
+          setValues({ ...init, ...(d0?.values ?? {}) });
         }
         setLoadingDefs(false);
       });
-  }, [supabase]);
+  }, [supabase, d0]);
 
   // -------------------------------------------------------------------------
   // Resolve batch number → batch_id (look up or will create on submit)
@@ -264,6 +288,7 @@ export default function HourlyReadingPage() {
       setRemarks("");
       setMachine("M1");
       setReadingTime(new Date().toISOString().slice(0, 16));
+      draft.clear();
       resolveBatch(batchNumber);
     } catch {
       showToast("Network error — try again.", true);
