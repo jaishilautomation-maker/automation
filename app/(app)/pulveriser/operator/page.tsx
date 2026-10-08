@@ -46,6 +46,21 @@ interface HourlyRow {
   reading_date: string;
 }
 
+// A job card filled by an operator in the last 24h, enriched for the handover
+// panel: the operator's display name (resolved via RPC) and its hourly readings.
+interface RecentReadingLite {
+  reading_date: string | null;
+  machine: string | null;
+  start_time: string | null;
+  stop_time: string | null;
+  total_hours: number | null;
+}
+interface RecentFilledCard {
+  card: PulveriserJobCard;
+  operatorName: string | null;
+  readings: RecentReadingLite[];
+}
+
 // ---------------------------------------------------------------------------
 // Machine Close (Band) Time — multiple entries per job card, any time during
 // the shift. Operator can save and continue later.
@@ -130,6 +145,11 @@ export default function PulveriserOperatorPage() {
 
   const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+
+  // ── Shift-handover panel: cards filled/submitted in the last 24 hours ──────
+  // Lets a night-shift operator see what the previous operator already produced
+  // on each job (read-only). Grouped by job number, each with its readings.
+  const [recent, setRecent] = useState<RecentFilledCard[]>([]);
   // activeGroup = the opened job-number group (1+ entries sharing one job_number).
   // active      = the entry currently selected in the dropdown (one of the group's entries).
   const [activeGroup, setActiveGroup] = useState<PulveriserJobCard[] | null>(null);
@@ -234,7 +254,57 @@ export default function PulveriserOperatorPage() {
     setLoadingList(false);
   }, [supabase, showToast]);
 
-  useEffect(() => { loadPending(); }, [loadPending]);
+  // Load cards an operator filled/submitted in the last 24 hours (handover view).
+  const loadRecent = useCallback(async () => {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Cards whose operator work was submitted within the window. (Covers the
+    // common day→night handover: the day operator submits, the card leaves the
+    // pending list, but stays visible here for 24h.)
+    const { data, error } = await supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .not("operator_submitted_at", "is", null)
+      .gte("operator_submitted_at", cutoff)
+      .order("operator_submitted_at", { ascending: false });
+    if (error || !data) { setRecent([]); return; }
+    const cards = data as PulveriserJobCard[];
+    if (cards.length === 0) { setRecent([]); return; }
+
+    // Resolve operator names in one RPC call (scoped server-side to the factory).
+    const operatorIds = Array.from(
+      new Set(cards.map(c => c.operator_by).filter((v): v is string => !!v)),
+    );
+    const nameMap: Record<string, string> = {};
+    if (operatorIds.length > 0) {
+      const { data: names } = await supabase.rpc("fn_operator_names", { p_ids: operatorIds });
+      for (const n of (names ?? []) as { id: string; full_name: string | null }[]) {
+        if (n.full_name) nameMap[n.id] = n.full_name;
+      }
+    }
+
+    // Fetch readings for these cards in one query, grouped by job_card_id.
+    const cardIds = cards.map(c => c.id);
+    const { data: readingRows } = await supabase
+      .from("pulveriser_hourly_readings")
+      .select("job_card_id, reading_date, machine, start_time, stop_time, total_hours")
+      .in("job_card_id", cardIds)
+      .order("created_at");
+    const readingsByCard: Record<string, RecentReadingLite[]> = {};
+    for (const r of (readingRows ?? []) as (RecentReadingLite & { job_card_id: string })[]) {
+      (readingsByCard[r.job_card_id] ??= []).push({
+        reading_date: r.reading_date, machine: r.machine,
+        start_time: r.start_time, stop_time: r.stop_time, total_hours: r.total_hours,
+      });
+    }
+
+    setRecent(cards.map(c => ({
+      card: c,
+      operatorName: c.operator_by ? (nameMap[c.operator_by] ?? null) : null,
+      readings: readingsByCard[c.id] ?? [],
+    })));
+  }, [supabase]);
+
+  useEffect(() => { loadPending(); loadRecent(); }, [loadPending, loadRecent]);
 
   // ── Load per-ENTRY fields (operator fields, machine-close, rejection banner)
   //    into the form. Hourly readings are NOT loaded here — they are job-level.
@@ -647,6 +717,7 @@ export default function PulveriserOperatorPage() {
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");
       goBack();
       loadPending();
+      loadRecent();
     } catch (e: unknown) {
       showToast("सहेजा नहीं जा सका: " + (e instanceof Error ? e.message : String(e)), true);
     } finally {
@@ -657,6 +728,7 @@ export default function PulveriserOperatorPage() {
   // ── List view — one clickable item per JOB NUMBER ────────────────────────
   if (!activeGroup) {
     return (
+      <>
       <div className="card">
         <h3>भरने के लिए जॉब नंबर</h3>
         <div className="field-hint" style={{ marginBottom: 10 }}>
@@ -705,6 +777,68 @@ export default function PulveriserOperatorPage() {
           })
         )}
       </div>
+
+      {/* Shift handover — what operators filled in the last 24 hours (read-only) */}
+      {recent.length > 0 && (
+        <div className="card">
+          <div className="helper-row">
+            <h3 style={{ margin: 0 }}>पिछले 24 घंटे में भरा गया</h3>
+            <span className="count">{recent.length}</span>
+          </div>
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            पिछली शिफ्ट के ऑपरेटर ने क्या भरा — कितना उत्पादन हुआ — यहाँ देखें और अपना काम आगे बढ़ाएँ।
+          </div>
+          {recent.map(({ card: c, operatorName, readings }) => {
+            const actualKgVal = c.actual_production_mt != null ? Math.round(c.actual_production_mt * 1000) : null;
+            const plannedKgVal = c.planned_production_mt != null ? Math.round(c.planned_production_mt * 1000) : null;
+            return (
+              <div key={c.id} style={{
+                border: "1px solid var(--line)", borderRadius: 8,
+                padding: 12, marginBottom: 10, background: "var(--surface)",
+              }}>
+                <div className="pi-top" style={{ marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700 }}>
+                    जॉब: {c.job_number ?? "—"} · बैच {c.material_code ?? "—"}
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{c.shift ?? "—"} शिफ्ट</span>
+                </div>
+                <div className="pi-sub" style={{ lineHeight: 1.7 }}>
+                  <b>उत्पादन:</b>{" "}
+                  <span style={{ fontWeight: 700, color: "var(--clay)" }}>
+                    {actualKgVal != null ? `${actualKgVal} kg` : "—"}
+                  </span>
+                  {plannedKgVal != null && <> / नियोजित {plannedKgVal} kg</>}
+                  {" · "}<b>बैग:</b> {c.finished_goods_bag ?? "—"}
+                  {c.packing_size ? ` × ${c.packing_size}kg` : ""}
+                </div>
+                <div className="pi-sub" style={{ marginTop: 2 }}>
+                  <b>ऑपरेटर:</b> {operatorName ?? "—"}
+                  {c.operator_submitted_at && (
+                    <> · {new Date(c.operator_submitted_at).toLocaleString("en-IN", {
+                      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                    })}</>
+                  )}
+                </div>
+                {readings.length > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.6 }}>
+                    <b>तास रीडिंग:</b>{" "}
+                    {readings.map((r, i) =>
+                      `${r.machine ?? c.machine_number ?? "—"} ${r.start_time ?? "—"}→${r.stop_time ?? "—"}${r.total_hours != null ? ` (${r.total_hours}h)` : ""}`
+                      + (i < readings.length - 1 ? "  ·  " : "")
+                    )}
+                  </div>
+                )}
+                {c.work_details && (
+                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4 }}>
+                    <b>कार्य:</b> {c.work_details}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      </>
     );
   }
 
