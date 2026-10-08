@@ -377,7 +377,7 @@ async function buildJobCardWorkbook(record: FlatRecord): Promise<Buffer> {
   // A   B      C        D       E       F       G       H
   // col widths
   ws.columns = [
-    { width: 5  },  // A – Sr. No.
+    { width: 22 },  // A – labels (Machine, Batch, Supplier, Oil Issued…) + Sr. No.
     { width: 20 },  // B – माल का कोड नंबर / label
     { width: 22 },  // C – Sulphur details / value
     { width: 22 },  // D – Oil details / value
