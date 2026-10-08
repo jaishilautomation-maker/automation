@@ -130,8 +130,16 @@ export default function PulveriserOperatorPage() {
 
   const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+  // activeGroup = the opened job-number group (1+ entries sharing one job_number).
+  // active      = the entry currently selected in the dropdown (one of the group's entries).
+  const [activeGroup, setActiveGroup] = useState<PulveriserJobCard[] | null>(null);
   const [active, setActive]           = useState<PulveriserJobCard | null>(null);
   const [submitting, setSubmitting]   = useState(false);
+
+  // Hourly readings are UNIVERSAL for the whole job number, not per entry. They
+  // are anchored to the group's PRIMARY entry id (first entry) so a single set
+  // of readings covers every entry of that job card.
+  const primaryJobId = activeGroup && activeGroup.length > 0 ? activeGroup[0].id : null;
 
   // Operator-owned fields
   // actualKg holds KG (as entered). DB column actual_production_mt stays in MT,
@@ -155,28 +163,43 @@ export default function PulveriserOperatorPage() {
   // Persist the operator's in-progress entry for the OPEN job card locally so a
   // closed tab/browser never loses typed data. Keyed by the active card id.
   const pathname = usePathname();
+  // Per-ENTRY draft: operator fields + machine-close for one entry (keyed by entry id).
   interface OperatorDraft {
     actualKg: string; classifierVfd: string; blowerIn: string; blowerOut: string;
     fgBag: string; packingSize: string; qcNote: string; storesNote: string;
     workDetails: string; chkClean: boolean; chkRoller: boolean; chkMesh: boolean;
-    rows: HourlyRow[]; closeEntries: MachineCloseEntry[];
+    closeEntries: MachineCloseEntry[];
   }
+  // Job-LEVEL draft: the shared hourly readings (keyed by the primary job id).
+  interface JobDraft { rows: HourlyRow[]; }
+
   const draft = useFormDraft<OperatorDraft>(
     draftKey(pathname, user?.id, active?.id),
   );
   const draftSave = draft.save;
 
-  // Autosave the editable fields whenever they change, only while a card is open.
+  const jobDraft = useFormDraft<JobDraft>(
+    draftKey(pathname, user?.id, "job", primaryJobId),
+  );
+  const jobDraftSave = jobDraft.save;
+
+  // Autosave the per-entry fields whenever they change, only while an entry is open.
   useEffect(() => {
     if (!active) return;
     draftSave({
       actualKg, classifierVfd, blowerIn, blowerOut, fgBag, packingSize,
       qcNote, storesNote, workDetails, chkClean, chkRoller, chkMesh,
-      rows, closeEntries,
+      closeEntries,
     });
   }, [active, actualKg, classifierVfd, blowerIn, blowerOut, fgBag, packingSize,
       qcNote, storesNote, workDetails, chkClean, chkRoller, chkMesh,
-      rows, closeEntries, draftSave]);
+      closeEntries, draftSave]);
+
+  // Autosave the job-level hourly readings whenever they change.
+  useEffect(() => {
+    if (!primaryJobId) return;
+    jobDraftSave({ rows });
+  }, [primaryJobId, rows, jobDraftSave]);
 
   // Auto-fill वास्तविक उत्पादन (kg) = तैयार माल बैग × पैकिंग साइज़.
   // Called from the bags and packing-size handlers. If either value is missing
@@ -213,8 +236,9 @@ export default function PulveriserOperatorPage() {
 
   useEffect(() => { loadPending(); }, [loadPending]);
 
-  const openCard = async (jc: PulveriserJobCard) => {
-    setActive(jc);
+  // ── Load per-ENTRY fields (operator fields, machine-close, rejection banner)
+  //    into the form. Hourly readings are NOT loaded here — they are job-level.
+  const loadEntryFields = async (jc: PulveriserJobCard) => {
     // Pre-fill operator fields (may already hold values from a prior rework)
     setActualKg(jc.actual_production_mt != null ? (jc.actual_production_mt * 1000).toString() : "");
     setClassifierVfd(jc.classifier_vfd ?? "");
@@ -229,9 +253,8 @@ export default function PulveriserOperatorPage() {
     setChkRoller(jc.checkpoint_roller_check);
     setChkMesh(jc.checkpoint_mesh_cloth_check);
 
-    // Restore any locally saved draft for THIS card (unsaved edits from a
-    // previous session). It overrides the DB pre-fill above so the operator
-    // picks up exactly where they left off.
+    // Restore any locally saved per-entry draft (unsaved edits). Overrides the
+    // DB pre-fill so the operator resumes exactly where they left off.
     const saved = peekDraft<OperatorDraft>(draftKey(pathname, user?.id, jc.id));
     if (saved) {
       setActualKg(saved.actualKg);
@@ -246,11 +269,10 @@ export default function PulveriserOperatorPage() {
       setChkClean(saved.chkClean);
       setChkRoller(saved.chkRoller);
       setChkMesh(saved.chkMesh);
-      if (saved.rows?.length) setRows(saved.rows);
       if (saved.closeEntries?.length) setCloseEntries(saved.closeEntries);
     }
 
-    // Load the mill VFD standard for this card's Party/CODE (reference values).
+    // Load the mill VFD standard for this entry's Party/CODE (reference values).
     setVfdParam(null);
     if (jc.party_code) {
       const { data: vp } = await supabase
@@ -262,11 +284,44 @@ export default function PulveriserOperatorPage() {
       setVfdParam((vp as VfdParameter | null) ?? null);
     }
 
-    // Load any existing hourly readings (rework case)
+    // Load this entry's machine close time entries (per entry)
+    const { data: closeData } = await supabase
+      .from("pulveriser_machine_close_times")
+      .select("*")
+      .eq("job_card_id", jc.id)
+      .order("created_at");
+    const existingClose = (closeData ?? []).map(r => ({
+      id:           r.id,
+      persistedId:  r.id as string,
+      close_date:   r.close_date  ?? new Date().toISOString().slice(0, 10),
+      close_time:   r.close_time  ?? "",
+      restart_time: r.restart_time ?? "",
+      reason:       r.reason      ?? "",
+    })) as MachineCloseEntry[];
+    if (!saved?.closeEntries?.length) {
+      setCloseEntries(existingClose.length ? existingClose : [blankCloseEntry()]);
+    }
+
+    // Load rejection history to show rework banner if this entry was rejected
+    setRejectionHistory([]);
+    const { data: reviews } = await supabase
+      .from("pulveriser_job_card_reviews")
+      .select("result, remark, reviewed_at, rejected_stage")
+      .eq("job_card_id", jc.id)
+      .order("reviewed_at", { ascending: false });
+    if (reviews && reviews.length > 0) {
+      setRejectionHistory(reviews as {
+        result: string; remark: string | null; reviewed_at: string; rejected_stage: string | null;
+      }[]);
+    }
+  };
+
+  // ── Load JOB-LEVEL hourly readings once (anchored to the primary entry id).
+  const loadJobHourlyReadings = async (primaryId: string) => {
     const { data } = await supabase
       .from("pulveriser_hourly_readings")
       .select("*")
-      .eq("job_card_id", jc.id)
+      .eq("job_card_id", primaryId)
       .order("created_at");
     const existing = (data ?? []).map(r => ({
       id: r.id,
@@ -282,40 +337,32 @@ export default function PulveriserOperatorPage() {
       bags: r.bags?.toString() ?? "",
       reading_date: r.reading_date ?? new Date().toISOString().slice(0, 10),
     })) as HourlyRow[];
-    setRows(existing.length ? existing : [blankRow()]);
+    // A locally saved draft for the job's readings wins over the DB copy.
+    const jobDraft = peekDraft<JobDraft>(draftKey(pathname, user?.id, "job", primaryId));
+    if (jobDraft?.rows?.length) setRows(jobDraft.rows);
+    else setRows(existing.length ? existing : [blankRow()]);
+  };
 
-    // Load any existing machine close time entries
-    const { data: closeData } = await supabase
-      .from("pulveriser_machine_close_times")
-      .select("*")
-      .eq("job_card_id", jc.id)
-      .order("created_at");
-    const existingClose = (closeData ?? []).map(r => ({
-      id:           r.id,
-      persistedId:  r.id as string,
-      close_date:   r.close_date  ?? new Date().toISOString().slice(0, 10),
-      close_time:   r.close_time  ?? "",
-      restart_time: r.restart_time ?? "",
-      reason:       r.reason      ?? "",
-    })) as MachineCloseEntry[];
-    setCloseEntries(existingClose.length ? existingClose : [blankCloseEntry()]);
+  // Open a whole job-number group: load its shared hourly readings once, then
+  // select the first entry for the per-entry fields.
+  const openGroup = async (entries: PulveriserJobCard[]) => {
+    if (entries.length === 0) return;
+    setActiveGroup(entries);
+    await loadJobHourlyReadings(entries[0].id);
+    setActive(entries[0]);
+    await loadEntryFields(entries[0]);
+  };
 
-    // Load rejection history to show rework banner if this card was previously rejected
-    setRejectionHistory([]);
-    const { data: reviews } = await supabase
-      .from("pulveriser_job_card_reviews")
-      .select("result, remark, reviewed_at, rejected_stage")
-      .eq("job_card_id", jc.id)
-      .order("reviewed_at", { ascending: false });
-    if (reviews && reviews.length > 0) {
-      setRejectionHistory(reviews as {
-        result: string; remark: string | null; reviewed_at: string; rejected_stage: string | null;
-      }[]);
-    }
+  // Switch which entry's per-entry fields are being filled (dropdown). Hourly
+  // readings stay as-is (they are job-level).
+  const selectEntry = async (jc: PulveriserJobCard) => {
+    setActive(jc);
+    await loadEntryFields(jc);
   };
 
   const goBack = () => {
-    setActive(null); setRows([blankRow()]); setCloseEntries([blankCloseEntry()]);
+    setActiveGroup(null); setActive(null);
+    setRows([blankRow()]); setCloseEntries([blankCloseEntry()]);
     setVfdParam(null); setActualKg(""); setRejectionHistory([]);
   };
 
@@ -333,18 +380,6 @@ export default function PulveriserOperatorPage() {
 
   const updateRow = (id: string, field: keyof HourlyRow, val: string | string[]) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: val } : r));
-  };
-  const addRow = () => setRows(prev => [...prev, blankRow()]);
-  const removeRow = async (row: HourlyRow) => {
-    if (rows.length === 1) { showToast("कम से कम एक रीडिंग पंक्ति ज़रूरी है।", true); return; }
-    if (row.persistedId) {
-      const { error } = await supabase
-        .from("pulveriser_hourly_readings")
-        .delete()
-        .eq("id", row.persistedId);
-      if (error) { showToast("पंक्ति नहीं हटा सके: " + error.message, true); return; }
-    }
-    setRows(prev => prev.filter(r => r.id !== row.id));
   };
 
   // ── Machine Close Time helpers ────────────────────────────────────────────
@@ -443,13 +478,17 @@ export default function PulveriserOperatorPage() {
       .select("id");
   };
 
+  // Hourly readings are job-level: always anchored to the group's PRIMARY entry
+  // id so one set of readings covers every entry of the job number.
   const syncHourlyRows = async (jc: PulveriserJobCard) => {
+    const anchorId = primaryJobId ?? jc.id;
+    const anchorFactory = (activeGroup && activeGroup[0]?.factory_id) || jc.factory_id;
     for (const r of rows) {
       const diff = codedDiff(r.start_time, r.stop_time);
       const hours = diff !== null ? codedToHours(diff) : null;
       const body = {
-        job_card_id:           jc.id,
-        factory_id:            jc.factory_id,
+        job_card_id:           anchorId,
+        factory_id:            anchorFactory,
         machine:               r.machine.trim() || jc.machine_number,
         start_time:            r.start_time.trim() || null,
         stop_time:             r.stop_time.trim() || null,
@@ -601,8 +640,10 @@ export default function PulveriserOperatorPage() {
         }
       }
 
-      // Saved to the DB — the local draft for this card is now redundant.
+      // Saved to the DB — the local drafts (per-entry + job-level readings) are
+      // now redundant.
       draft.clear();
+      jobDraft.clear();
       showToast(submit ? "QC के लिए भेजा गया ✓" : "प्रगति सहेजी गई ✓");
       goBack();
       loadPending();
@@ -613,57 +654,90 @@ export default function PulveriserOperatorPage() {
     }
   };
 
-  // ── List view ───────────────────────────────────────────────────────────
-  if (!active) {
+  // ── List view — one clickable item per JOB NUMBER ────────────────────────
+  if (!activeGroup) {
     return (
       <div className="card">
-        <h3>भरने के लिए जॉब कार्ड</h3>
+        <h3>भरने के लिए जॉब नंबर</h3>
         <div className="field-hint" style={{ marginBottom: 10 }}>
-          प्रोडक्शन ने ये बनाए हैं। अपनी जानकारी भरें और QC के लिए भेजें।
+          प्रोडक्शन ने ये बनाए हैं। जॉब नंबर चुनें, फिर एंट्री चुनकर जानकारी भरें और QC के लिए भेजें।
         </div>
         {loadingList ? (
           <div className="empty">लोड हो रहा है…</div>
         ) : pending.length === 0 ? (
           <div className="empty">कोई लंबित जॉब कार्ड नहीं है।</div>
         ) : (
-          groupByJobNumber(pending).map(group => (
-            <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
-                जॉब: {group.jobNumber ?? "—"}
-                {group.entries.length > 1 && ` · ${group.entries.length} entries`}
-              </div>
-              {group.entries.map((jc, i) => (
-                <div className="pending-item" key={jc.id} onClick={() => openCard(jc)}>
-                  <div className="pi-top">
-                    <span>Entry {i + 1} · {jc.machine_number} · {fmtDate(jc.job_date)}</span>
-                    <span>{jc.shift ?? "—"}</span>
-                  </div>
-                  <div className="pi-sub">
-                    बैच नंबर: {jc.material_code} · Party/CODE: {jc.party_code ?? "—"}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.6 }}>
-                    {jc.production_at && (
-                      <span>📋 Production ने भेजा: {new Date(jc.production_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                    )}
-                    {jc.oil_issued_at && (
-                      <span style={{ marginLeft: jc.production_at ? 12 : 0 }}>
-                        🛢 Stores ने तेल दिया: {new Date(jc.oil_issued_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    )}
-                  </div>
+          groupByJobNumber(pending).map(group => {
+            const first = group.entries[0];
+            return (
+              <div
+                className="pending-item"
+                key={group.jobNumber ?? first.id}
+                onClick={() => openGroup(group.entries)}
+                style={{ marginBottom: 10 }}
+              >
+                <div className="pi-top">
+                  <span style={{ fontWeight: 700 }}>जॉब: {group.jobNumber ?? "—"}</span>
+                  <span>
+                    {group.entries.length > 1
+                      ? `${group.entries.length} एंट्री`
+                      : "1 एंट्री"}
+                  </span>
                 </div>
-              ))}
-            </div>
-          ))
+                <div className="pi-sub">
+                  {first.machine_number} · {fmtDate(first.job_date)} · {first.shift ?? "—"} शिफ्ट
+                </div>
+                <div className="pi-sub" style={{ marginTop: 2 }}>
+                  {group.entries.map((e, i) => `E${i + 1}: ${e.material_code ?? "—"}`).join("  ·  ")}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 4, lineHeight: 1.6 }}>
+                  {first.production_at && (
+                    <span>📋 Production ने भेजा: {new Date(first.production_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  )}
+                  {first.oil_issued_at && (
+                    <span style={{ marginLeft: first.production_at ? 12 : 0 }}>
+                      🛢 Stores ने तेल दिया: {new Date(first.oil_issued_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     );
   }
 
+  // Guard: group open but no entry selected yet (should not happen).
+  if (!active) return null;
+
   // ── Fill view ─────────────────────────────────────────────────────────────
   return (
     <>
       <button className="back-link" type="button" onClick={goBack}>← सूची पर वापस जाएँ</button>
+
+      {/* Entry selector — which entry of this job number to fill */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>जॉब: {active.job_number ?? "—"}</h3>
+        <label>एंट्री चुनें</label>
+        <select
+          value={active.id}
+          onChange={e => {
+            const next = activeGroup.find(x => x.id === e.target.value);
+            if (next) selectEntry(next);
+          }}
+        >
+          {activeGroup.map((e, i) => (
+            <option key={e.id} value={e.id}>
+              एंट्री {i + 1} — बैच {e.material_code ?? "—"} · {e.party_code ?? "—"}
+            </option>
+          ))}
+        </select>
+        <div className="field-hint" style={{ marginTop: 6 }}>
+          इस जॉब नंबर में {activeGroup.length} एंट्री है{activeGroup.length > 1 ? "ं" : ""}।
+          हर एंट्री की वास्तविक उत्पादन/मशीन सेटिंग अलग भरें। प्रति घंटा रीडिंग पूरे जॉब के लिए एक ही है (नीचे)।
+        </div>
+      </div>
 
       {/* REWORK banner — shown when this card has prior NOT OK reviews */}
       {rejectionHistory.some(r => r.result === "not_ok") && (() => {
@@ -751,18 +825,7 @@ export default function PulveriserOperatorPage() {
         )}
       </div>
 
-      {/* Actual production — drives all oil-consumption calculations (DB trigger) */}
-      <div className="card">
-        <h3>वास्तविक उत्पादन</h3>
-        <label>वास्तविक उत्पादन (kg)</label>
-        <input type="number" min="0" step="1" placeholder="0"
-          value={actualKg} onChange={e => setActualKg(e.target.value)} />
-        <div className="field-hint" style={{ marginTop: 6 }}>
-          तेल की खपत के आँकड़े इसी से अपने-आप गणना होते हैं (सहेजने पर)।
-        </div>
-      </div>
-
-      {/* Operator machine settings */}
+      {/* 1. Operator machine settings */}
       <div className="card">
         <h3>मशीन सेटिंग्स</h3>
         <div className="row2">
@@ -789,7 +852,7 @@ export default function PulveriserOperatorPage() {
         <input type="text" value={blowerOut} onChange={e => setBlowerOut(e.target.value)} />
       </div>
 
-      {/* Packing / notes */}
+      {/* 2. Packing & notes — वास्तविक उत्पादन sits right below bags/packing size */}
       <div className="card">
         <h3>पैकिंग और नोट्स</h3>
         <div className="row2">
@@ -809,10 +872,17 @@ export default function PulveriserOperatorPage() {
             </select>
           </div>
         </div>
+
+        {/* वास्तविक उत्पादन — auto-filled from bags × packing size; drives oil calcs */}
+        <label>वास्तविक उत्पादन (kg)</label>
+        <input type="number" min="0" step="1" placeholder="0"
+          value={actualKg} onChange={e => setActualKg(e.target.value)} />
         <div className="field-hint" style={{ marginTop: 2 }}>
-          बैग × पैकिंग साइज़ से वास्तविक उत्पादन (kg) अपने-आप भर जाता है। ज़रूरत पर ऊपर मान बदल सकते हैं।
+          बैग × पैकिंग साइज़ से अपने-आप भर जाता है। ज़रूरत पर यहाँ बदल सकते हैं।
+          तेल की खपत के आँकड़े इसी से गणना होते हैं (सहेजने पर)।
         </div>
-        <div className="row2">
+
+        <div className="row2" style={{ marginTop: 12 }}>
           <div>
             <label>QC इंचार्ज नोट</label>
             <input type="text" value={qcNote} onChange={e => setQcNote(e.target.value)} />
@@ -918,30 +988,35 @@ export default function PulveriserOperatorPage() {
         </div>
       </div>
 
-      {/* Hourly readings (repeatable) */}
+      {/* Checkpoints */}
       <div className="card">
-        <div className="helper-row">
-          <h3 style={{ margin: 0 }}>प्रति घंटा रीडिंग</h3>
-          <span className="count">{rows.length}</span>
+        <h3>जाँच बिंदु</h3>
+        <div className="checkline">
+          <input type="checkbox" checked={chkClean} onChange={e => setChkClean(e.target.checked)} />
+          <span>मशीन की सफाई</span>
         </div>
-        {rows.map((r, i) => {
+        <div className="checkline">
+          <input type="checkbox" checked={chkRoller} onChange={e => setChkRoller(e.target.checked)} />
+          <span>रोलर की जाँच</span>
+        </div>
+        <div className="checkline">
+          <input type="checkbox" checked={chkMesh} onChange={e => setChkMesh(e.target.checked)} />
+          <span>जाली के कपड़े की जाँच</span>
+        </div>
+      </div>
+
+      {/* तास रीडिंग — JOB-LEVEL, single reading for the whole job number */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>तास रीडिंग</h3>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          यह रीडिंग पूरे जॉब नंबर के लिए एक ही है।
+        </div>
+        {(() => {
+          const r = rows[0];
+          if (!r) return null;
           const diff = codedDiff(r.start_time, r.stop_time);
           return (
-            <div key={r.id} style={{
-              border: "1px solid var(--line)", borderRadius: 8,
-              padding: 14, marginBottom: 10, background: "var(--surface)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>रीडिंग {i + 1}</span>
-                {rows.length > 1 && (
-                  <button type="button" className="btn btn-ghost"
-                    style={{ fontSize: 11, padding: "3px 10px", color: "var(--warn)" }}
-                    onClick={() => removeRow(r)}>
-                    हटाएँ
-                  </button>
-                )}
-              </div>
-
+            <>
               <div className="row2">
                 <div>
                   <label>मशीन</label>
@@ -1006,29 +1081,9 @@ export default function PulveriserOperatorPage() {
                   </label>
                 ))}
               </div>
-            </div>
+            </>
           );
-        })}
-        <button type="button" className="btn btn-ghost" onClick={addRow}>
-          + प्रति घंटा रीडिंग जोड़ें
-        </button>
-      </div>
-
-      {/* Checkpoints */}
-      <div className="card">
-        <h3>जाँच बिंदु</h3>
-        <div className="checkline">
-          <input type="checkbox" checked={chkClean} onChange={e => setChkClean(e.target.checked)} />
-          <span>मशीन की सफाई</span>
-        </div>
-        <div className="checkline">
-          <input type="checkbox" checked={chkRoller} onChange={e => setChkRoller(e.target.checked)} />
-          <span>रोलर की जाँच</span>
-        </div>
-        <div className="checkline">
-          <input type="checkbox" checked={chkMesh} onChange={e => setChkMesh(e.target.checked)} />
-          <span>जाली के कपड़े की जाँच</span>
-        </div>
+        })()}
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
