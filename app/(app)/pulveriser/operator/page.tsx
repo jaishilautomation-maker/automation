@@ -130,6 +130,8 @@ export default function PulveriserOperatorPage() {
 
   const [pending, setPending]         = useState<PulveriserJobCard[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+  // Ids of pending cards that were rejected by Lab and sent back for rework.
+  const [reworkIds, setReworkIds]     = useState<Set<string>>(new Set());
   // activeGroup = the opened job-number group (1+ entries sharing one job_number).
   // active      = the entry currently selected in the dropdown (one of the group's entries).
   const [activeGroup, setActiveGroup] = useState<PulveriserJobCard[] | null>(null);
@@ -229,8 +231,25 @@ export default function PulveriserOperatorPage() {
       .eq("status", "pending")
       .not("material_code", "is", null)
       .order("created_at", { ascending: false });
-    if (error) showToast("लोड नहीं हो सका: " + error.message, true);
-    else setPending((data ?? []) as PulveriserJobCard[]);
+    if (error) { showToast("लोड नहीं हो सका: " + error.message, true); setLoadingList(false); return; }
+    const list = (data ?? []) as PulveriserJobCard[];
+    setPending(list);
+
+    // Flag REWORK cards: a 'pending' card that has a prior NOT-OK review was
+    // rejected by Lab and sent back to the operator (vs a fresh card). Mark
+    // those so the list can highlight them in red.
+    if (list.length) {
+      const { data: rev } = await supabase
+        .from("pulveriser_job_card_reviews")
+        .select("job_card_id, result")
+        .in("job_card_id", list.map(c => c.id))
+        .eq("result", "not_ok");
+      const ids = new Set<string>();
+      for (const r of (rev ?? []) as { job_card_id: string }[]) ids.add(r.job_card_id);
+      setReworkIds(ids);
+    } else {
+      setReworkIds(new Set());
+    }
     setLoadingList(false);
   }, [supabase, showToast]);
 
@@ -669,15 +688,34 @@ export default function PulveriserOperatorPage() {
         ) : (
           groupByJobNumber(pending).map(group => {
             const first = group.entries[0];
+            // Rework = any entry in this job was rejected by Lab and sent back.
+            const isRework = group.entries.some(e => reworkIds.has(e.id));
             return (
               <div
                 className="pending-item"
                 key={group.jobNumber ?? first.id}
                 onClick={() => openGroup(group.entries)}
-                style={{ marginBottom: 10 }}
+                style={{
+                  marginBottom: 10,
+                  ...(isRework ? {
+                    border: "2px solid var(--warn)",
+                    background: "var(--warn-soft)",
+                  } : {}),
+                }}
               >
                 <div className="pi-top">
-                  <span style={{ fontWeight: 700 }}>जॉब: {group.jobNumber ?? "—"}</span>
+                  <span style={{ fontWeight: 700 }}>
+                    जॉब: {group.jobNumber ?? "—"}
+                    {isRework && (
+                      <span style={{
+                        marginLeft: 8, fontSize: 11, fontWeight: 700,
+                        color: "#fff", background: "var(--warn)",
+                        padding: "2px 8px", borderRadius: 10,
+                      }}>
+                        ⚠ रीवर्क
+                      </span>
+                    )}
+                  </span>
                   <span>
                     {group.entries.length > 1
                       ? `${group.entries.length} एंट्री`
