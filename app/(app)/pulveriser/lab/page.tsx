@@ -175,6 +175,147 @@ export default function PulveriserLabPage() {
       showToast(result === "ok"
         ? "Marked OK ✓ — job card finalized."
         : "Marked NOT OK — sent to Production to decide the rework route.");
+
+      // ── Direct FG stock update on OK (client-side, no trigger dependency) ──
+      // The DB trigger trg_pulveriser_fg_ledger_entry also attempts this, but
+      // can silently skip due to item_code mismatches or RLS restrictions.
+      // This client-side insert is the reliable path: it runs as the logged-in
+      // user (who has full stores_stock_ledger INSERT access) and uses the
+      // exact same data the lab page already has in memory.
+      if (result === "ok") {
+        try {
+          // Re-fetch the job card so we have the latest actual_production_mt
+          // (set by the operator) and packing_size.
+          const { data: jc } = await supabase
+            .from("pulveriser_job_cards")
+            .select("id, factory_id, job_date, job_number, party_code, material_code, actual_production_mt, packing_size, finished_goods_bag, operator_by")
+            .eq("id", active.id)
+            .single();
+
+          if (jc && jc.actual_production_mt != null && jc.actual_production_mt > 0) {
+            // Duplicate guard
+            const { data: existing } = await supabase
+              .from("stores_stock_ledger")
+              .select("id")
+              .eq("reference_id", jc.id)
+              .eq("reference_type", "production_fg")
+              .limit(1)
+              .maybeSingle();
+
+            if (!existing) {
+              // Find the matching FG stock item.
+              // Resolution order (most → least specific):
+              //   1. Exact item_code = party_code
+              //   2. item_code ILIKE party_code  (catches capitalisation)
+              //   3. item_name ILIKE party_code  (catches old auto-generated codes)
+              //   4. No match → skip silently (never post to wrong item)
+              const matchCode = (jc.party_code ?? "").trim() || (jc.material_code ?? "").trim();
+              let fgItemId: string | null = null;
+              let fgFactoryId: string = jc.factory_id;
+
+              if (matchCode) {
+                // 1. Exact item_code match
+                const { data: exactItem } = await supabase
+                  .from("stores_stock_items")
+                  .select("id, factory_id")
+                  .eq("factory_id", jc.factory_id)
+                  .eq("category", "finished_good")
+                  .eq("item_code", matchCode)
+                  .eq("is_active", true)
+                  .limit(1)
+                  .maybeSingle();
+
+                if (exactItem) {
+                  fgItemId = exactItem.id;
+                  fgFactoryId = exactItem.factory_id;
+                }
+
+                // 2. ILIKE item_code match (capitalisation differences)
+                if (!fgItemId) {
+                  const { data: ilikeCodeItem } = await supabase
+                    .from("stores_stock_items")
+                    .select("id, factory_id")
+                    .eq("factory_id", jc.factory_id)
+                    .eq("category", "finished_good")
+                    .eq("is_active", true)
+                    .ilike("item_code", matchCode)
+                    .limit(1)
+                    .maybeSingle();
+                  if (ilikeCodeItem) {
+                    fgItemId = ilikeCodeItem.id;
+                    fgFactoryId = ilikeCodeItem.factory_id;
+                  }
+                }
+
+                // 3. ILIKE item_name match (covers old auto-generated item_codes
+                //    where item_name contains the party_code as a substring, e.g.
+                //    "APOLLO TYRE/CLASSIC AUTO 160108" contains "160108")
+                if (!fgItemId) {
+                  const { data: ilikeNameItem } = await supabase
+                    .from("stores_stock_items")
+                    .select("id, factory_id")
+                    .eq("factory_id", jc.factory_id)
+                    .eq("category", "finished_good")
+                    .eq("is_active", true)
+                    .ilike("item_name", `%${matchCode}%`)
+                    .limit(1)
+                    .maybeSingle();
+                  if (ilikeNameItem) {
+                    fgItemId = ilikeNameItem.id;
+                    fgFactoryId = ilikeNameItem.factory_id;
+                  }
+                }
+              }
+
+              if (fgItemId) {
+                const qtyKg = jc.actual_production_mt * 1000;
+
+                // Fetch latest closing balance for this FG item.
+                const { data: lastRow } = await supabase
+                  .from("stores_stock_ledger")
+                  .select("closing_balance")
+                  .eq("item_id", fgItemId)
+                  .order("created_at", { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                const prevBal = (lastRow as { closing_balance: number } | null)?.closing_balance ?? 0;
+                const newBal  = prevBal + qtyKg;
+
+                const packingKg  = jc.packing_size ? Number(jc.packing_size) : null;
+                const bagsCount  = packingKg && packingKg > 0
+                  ? Math.floor(qtyKg / packingKg)
+                  : null;
+
+                await supabase.from("stores_stock_ledger").insert({
+                  item_id:            fgItemId,
+                  factory_id:         fgFactoryId,
+                  transaction_date:   jc.job_date ?? new Date().toISOString().slice(0, 10),
+                  transaction_source: "manual",         // RLS only allows 'manual' from client
+                  qty_received:       qtyKg,
+                  qty_issued:         0,
+                  dispatch_qty:       0,
+                  closing_balance:    newBal,
+                  reference_id:       jc.id,
+                  reference_type:     "production_fg",  // marks this as QC-approved FG receipt
+                  remark:             JSON.stringify({
+                    source:        "QC OK — Lab finalization",
+                    job_number:    jc.job_number ?? null,
+                    party_code:    jc.party_code ?? null,
+                    material_code: jc.material_code ?? null,
+                    actual_kg:     qtyKg,
+                    packing_size:  jc.packing_size ?? null,
+                    bags:          bagsCount,
+                    fg_bag_type:   jc.finished_goods_bag ?? null,
+                  }),
+                  entered_by: user.id,
+                });
+              }
+            }
+          }
+        } catch {
+          // FG ledger update is best-effort — never block the review toast
+        }
+      }
       goBack();
       loadPending();
     } catch (e: unknown) {

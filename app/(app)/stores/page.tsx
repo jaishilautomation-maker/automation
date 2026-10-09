@@ -77,6 +77,7 @@ interface SlipPrefill {
  qtyRequired: number | null;    // oil required (kg) from the job card
  usedFor: string;               // e.g. "Job JB-0451 / Ceat 108 / Batch B-1024"
  remark: string;
+ plannedProduction: number | null; // planned production (kg) from the job card
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +98,58 @@ function today(): string {
 function nilText(s: string | null | undefined): string {
  return (s && s.trim()) ? s.trim() : "N/A";
 }
+// Return the correct display unit for a stock item.
+// Packing materials are counted in Nos. regardless of what the DB row says.
+// Raw materials stay as-is (always 'kg').
+function displayUnit(unit: string, category?: string): string {
+ if (category === "packaging_material") return "nos";
+ return unit || "kg";
+}
+
+// Parse the bag weight (kg) embedded in a packing material item name.
+// Looks for a number immediately before "KG" or "kg" in the name.
+// Examples: "CEAT R5299 25 KG" -> 25, "JKI-108 50 KG" -> 50,
+//           "JUMBO BAGS 500 KG" -> 500, "Plain Bags EXPORT 25 kg for Export" -> 25
+// Returns null if no weight is found (e.g. THREAD CONE, WOODEN PALLETS).
+function parseBagWeight(itemName: string): number | null {
+ const match = itemName.match(/(\d+(?:\.\d+)?)\s*kg/i);
+ if (!match) return null;
+ const w = Number(match[1]);
+ return w > 0 ? w : null;
+}
+
+// Parse a quantity from a free-text weight/count string like "2034.000",
+// "2034 Nos", "500 kg", "1200". Returns null if unparseable or zero.
+function parseQty(s: string): number | null {
+ if (!s || !s.trim()) return null;
+ const match = s.trim().match(/^(\d+(?:\.\d+)?)/);
+ if (!match) return null;
+ const n = Number(match[1]);
+ return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Maps RECEIVED_CODES / SUPPLIED_CODES values to stores_stock_items.item_name
+// patterns. Used to look up the matching item in the DB for ledger stock updates.
+// Match is done case-insensitively via ILIKE in the query.
+const CODE_TO_ITEM_NAME_PATTERN: Record<string, string> = {
+ "Ceat108 bag":            "CEAT 108",
+ "M2615 bag":              "MRF M-2615",
+ "Lanxess bag":            "LANXESS",
+ "R5299 bag":              "CEAT R5299",
+ "Apollo bag":             "APOLLO TYRE",
+ "W10 bag":                "BRIDGESTONE WE-10",
+ "Rubber bag":             "RUBBER MAKER",
+ "JKI bag":                "JKI-108",
+ "Jumbo bag":              "JUMBO BAGS",
+ "old bag":                "Old Bags",
+ "Export Bag":             "Plain Bags EXPORT",
+ "Chem Grind Oil":         "Chem Grind Oil",
+ "Gear oil 320":           "Gear Oil 320",
+ "Power Oil M4150":        "Power Oil Citrine",
+ "ELASTO 541 OIL":         "Elasto 541 Oil",
+ "Magnesium Carbonate":    "Magnesium Carbonate",
+ "Liquid Sulphur(Molten)": "Crude Sulphur",
+};
 
 // ---------------------------------------------------------------------------
 // Main page
@@ -212,6 +265,14 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
  const [selectedOilItemId, setSelectedOilItemId] = useState("");
  const [oilItemBalance, setOilItemBalance]     = useState<number | null>(null);
 
+ // ── Bags issued state (fetched from slip ledger for selected card) ────────
+ interface BagsIssuedRow {
+  bagType: string;
+  qtyIssued: number;
+  issuedAt: string; // ISO datetime from ledger created_at
+ }
+ const [bagsIssued, setBagsIssued] = useState<BagsIssuedRow[]>([]);
+
  // Load all active oil-related items from stores_stock_items once
  const loadOilItems = useCallback(async () => {
   const { data } = await supabase
@@ -244,6 +305,68 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   setOilItemBalance((data as { closing_balance: number } | null)?.closing_balance ?? 0);
  };
 
+ // Open a card — load rejection history and bags-issued slips
+ const openCard = async (jc: PulveriserJobCard) => {
+  setSelected(jc);
+  setOilIssued(jc.oil_issued_kg?.toString() ?? "");
+  setStoresNote(jc.stores_incharge_note ?? "");
+  setRejectionHistory([]);
+  setSelectedOilItemId("");
+  setOilItemBalance(null);
+  setBagsIssued([]);
+
+  const [{ data: reviews }, { data: slipRows }] = await Promise.all([
+   supabase
+    .from("pulveriser_job_card_reviews")
+    .select("result, remark, reviewed_at")
+    .eq("job_card_id", jc.id)
+    .order("reviewed_at", { ascending: false }),
+   supabase
+    .from("stores_stock_ledger")
+    .select("remark, created_at")
+    .eq("reference_type", "slip")
+    .order("created_at", { ascending: false })
+    .limit(200),
+  ]);
+
+  if (reviews?.length) {
+   setRejectionHistory(reviews as { result: string; remark: string | null; reviewed_at: string }[]);
+  }
+
+  // Filter slip rows to those linked to this job card (used_for contains the
+  // job number or batch number) and that are packaging materials (nos unit or
+  // bag weight present in name).
+  if (slipRows?.length) {
+   const jobRef = jc.job_number ? `Job ${jc.job_number}` : null;
+   const batchRef = jc.material_code ? jc.material_code : null;
+   const rows: BagsIssuedRow[] = [];
+   for (const row of slipRows as { remark: string | null; created_at: string }[]) {
+    try {
+     const p = JSON.parse(row.remark ?? "{}") as Partial<SlipPayload>;
+     if (!p.material_description || !p.qty_issued) continue;
+     // Match to this job card
+     const usedFor = p.used_for ?? "";
+     const matched =
+      (jobRef && usedFor.includes(jobRef)) ||
+      (batchRef && usedFor.includes(batchRef));
+     if (!matched) continue;
+     // Only packaging material slips (unit is nos, or bag weight in name)
+     const isPacking =
+      p.unit === "nos" ||
+      p.unit === "bags" ||
+      parseBagWeight(p.material_description) != null;
+     if (!isPacking) continue;
+     rows.push({
+      bagType: p.material_description,
+      qtyIssued: p.qty_issued,
+      issuedAt: row.created_at,
+     });
+    } catch { /* skip malformed */ }
+   }
+   setBagsIssued(rows);
+  }
+ };
+
  const loadCards = useCallback(async () => {
   setLoading(true);
   let q = supabase
@@ -260,24 +383,6 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
 
  useEffect(() => { loadCards(); loadOilItems(); }, [loadCards, loadOilItems]);
 
- // Open a card — load rejection history if any
- const openCard = async (jc: PulveriserJobCard) => {
-  setSelected(jc);
-  setOilIssued(jc.oil_issued_kg?.toString() ?? "");
-  setStoresNote(jc.stores_incharge_note ?? "");
-  setRejectionHistory([]);
-  setSelectedOilItemId("");
-  setOilItemBalance(null);
-  const { data: reviews } = await supabase
-   .from("pulveriser_job_card_reviews")
-   .select("result, remark, reviewed_at")
-   .eq("job_card_id", jc.id)
-   .order("reviewed_at", { ascending: false });
-  if (reviews?.length) {
-   setRejectionHistory(reviews as { result: string; remark: string | null; reviewed_at: string }[]);
-  }
- };
-
  const closeCard = () => {
   setSelected(null);
   setOilIssued("");
@@ -285,6 +390,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   setRejectionHistory([]);
   setSelectedOilItemId("");
   setOilItemBalance(null);
+  setBagsIssued([]);
  };
 
  // Issue oil — the core action
@@ -608,25 +714,75 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
     {jc.oil_issued_kg != null && jc.status !== "pending_stores" && (
      <div className="card">
       <h3>Oil Issued</h3>
-      <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-       <div>
-        <b>Issued:</b>{" "}
-        <span style={{ fontWeight: 700, color: "var(--ok)" }}>
-         {jc.oil_issued_kg} kg
-        </span>
-       </div>
-       {jc.oil_issued_at && (
-        <div>
-         <b>Issued At:</b>{" "}
-         {new Date(jc.oil_issued_at).toLocaleString("en-IN", {
-          day: "2-digit", month: "short", year: "numeric",
-          hour: "2-digit", minute: "2-digit",
-         })}
-        </div>
-       )}
+      <div style={{ overflowX: "auto" }}>
+       <table className="dash" style={{ minWidth: 480 }}>
+        <thead>
+         <tr>
+          <th>Oil Type</th>
+          <th style={{ textAlign: "right" }}>Quantity Issued (kg)</th>
+          <th>Issued At</th>
+         </tr>
+        </thead>
+        <tbody>
+         <tr>
+          <td style={{ fontWeight: 600, fontSize: 13 }}>
+           {jc.oil_supplier ?? "Oil"}
+          </td>
+          <td style={{ textAlign: "right", fontWeight: 700, color: "var(--ok)", fontSize: 13 }}>
+           {jc.oil_issued_kg} kg
+          </td>
+          <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+           {jc.oil_issued_at
+            ? new Date(jc.oil_issued_at).toLocaleString("en-IN", {
+               day: "2-digit", month: "short", year: "numeric",
+               hour: "2-digit", minute: "2-digit",
+              })
+            : "N/A"}
+          </td>
+         </tr>
+        </tbody>
+       </table>
       </div>
      </div>
     )}
+
+    {/* Bags Issued — fetched from Material Issue Slip records for this job card */}
+    <div className="card">
+     <h3>Bags Issued</h3>
+     {bagsIssued.length === 0 ? (
+      <div className="empty" style={{ fontSize: 13, color: "var(--ink-soft)", padding: "8px 0" }}>
+       No bags have been issued for this job card yet.
+      </div>
+     ) : (
+      <div style={{ overflowX: "auto" }}>
+       <table className="dash" style={{ minWidth: 480 }}>
+        <thead>
+         <tr>
+          <th>Bag Type</th>
+          <th style={{ textAlign: "right" }}>Quantity Issued (nos)</th>
+          <th>Issued At</th>
+         </tr>
+        </thead>
+        <tbody>
+         {bagsIssued.map((row, i) => (
+          <tr key={i}>
+           <td style={{ fontWeight: 600, fontSize: 13 }}>{row.bagType}</td>
+           <td style={{ textAlign: "right", fontWeight: 700, color: "var(--ok)", fontSize: 13 }}>
+            {row.qtyIssued}
+           </td>
+           <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+            {new Date(row.issuedAt).toLocaleString("en-IN", {
+             day: "2-digit", month: "short", year: "numeric",
+             hour: "2-digit", minute: "2-digit",
+            })}
+           </td>
+          </tr>
+         ))}
+        </tbody>
+       </table>
+      </div>
+     )}
+    </div>
 
     {/* Shortcut actions */}
     <div className="card">
@@ -645,6 +801,9 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
          qtyRequired: jc.oil_required_kg ?? null,
          usedFor: usedForParts.join(" / "),
          remark: "",
+         plannedProduction: jc.planned_production_mt != null
+          ? jc.planned_production_mt * 1000
+          : null,
         });
         closeCard();
        }}>
@@ -1325,6 +1484,7 @@ function ReceivedSection() {
     material_type: entry.material_type,
     material_type_other: entry.material_type_other.trim(),
    };
+   // ── 1. Logbook row (always saved, qty all 0 — audit record) ──────────
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
     transaction_date: entry.date, transaction_source: "manual",
@@ -1333,6 +1493,54 @@ function ReceivedSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   // ── 2. Stock ledger update — add received qty to the matching item ────
+   // Match by materials field first (direct ILIKE against item_name),
+   // then fall back to the Code→pattern mapping if materials is empty.
+   const receivedQty = parseQty(entry.f_wt);
+   const materialsText = entry.materials.trim();
+   const codePattern   = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
+   const searchPattern = materialsText || codePattern;
+   if (searchPattern && receivedQty != null) {
+    const { data: stockItem } = await supabase
+     .from("stores_stock_items")
+     .select("id, factory_id, item_name, unit, category")
+     .eq("is_active", true)
+     .ilike("item_name", `%${searchPattern}%`)
+     .limit(1)
+     .maybeSingle();
+    if (stockItem) {
+     const { data: lastRow } = await supabase
+      .from("stores_stock_ledger")
+      .select("closing_balance")
+      .eq("item_id", stockItem.id)
+      .order("created_at", { ascending: false })
+      .limit(1).maybeSingle();
+     const prevBal = (lastRow as { closing_balance: number } | null)?.closing_balance ?? 0;
+     const newBal  = prevBal + receivedQty;
+     await supabase.from("stores_stock_ledger").insert({
+      item_id:            stockItem.id,
+      factory_id:         stockItem.factory_id,
+      transaction_date:   entry.date,
+      transaction_source: "manual",
+      qty_received:       receivedQty,
+      qty_issued:         0,
+      dispatch_qty:       0,
+      closing_balance:    newBal,
+      reference_type:     "received_entry",
+      remark: JSON.stringify({
+       source: "Received Entry Book",
+       material: materialsText || null,
+       code: entry.code || null,
+       particular: payload.particular || null,
+       inv_chl_no: payload.inv_chl_no || null,
+       vehicle_no: payload.vehicle_no || null,
+       remark: payload.remarks || null,
+      }),
+      entered_by: user.id,
+     });
+    }
+   }
 
    const nowISO = new Date().toISOString();
    const { subject, html } = buildReceivedEmail({
@@ -1705,6 +1913,7 @@ function SuppliedSection() {
     material_type: entry.material_type,
     material_type_other: entry.material_type_other.trim(),
    };
+   // ── 1. Logbook row (always saved, qty all 0 — audit record) ──────────
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
     transaction_date: entry.date, transaction_source: "manual",
@@ -1713,6 +1922,54 @@ function SuppliedSection() {
     entered_by: user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
+
+   // ── 2. Stock ledger update — deduct supplied qty from the matching item ─
+   // Match by materials field first (direct ILIKE against item_name),
+   // then fall back to the Code→pattern mapping if materials is empty.
+   const suppliedQty          = parseQty(entry.f_wt);
+   const suppliedMaterialsText = entry.materials.trim();
+   const suppliedCodePattern   = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
+   const suppliedSearchPattern = suppliedMaterialsText || suppliedCodePattern;
+   if (suppliedSearchPattern && suppliedQty != null) {
+    const { data: stockItem } = await supabase
+     .from("stores_stock_items")
+     .select("id, factory_id, item_name, unit, category")
+     .eq("is_active", true)
+     .ilike("item_name", `%${suppliedSearchPattern}%`)
+     .limit(1)
+     .maybeSingle();
+    if (stockItem) {
+     const { data: lastRow } = await supabase
+      .from("stores_stock_ledger")
+      .select("closing_balance")
+      .eq("item_id", stockItem.id)
+      .order("created_at", { ascending: false })
+      .limit(1).maybeSingle();
+     const prevBal = (lastRow as { closing_balance: number } | null)?.closing_balance ?? 0;
+     const newBal  = prevBal - suppliedQty;
+     await supabase.from("stores_stock_ledger").insert({
+      item_id:            stockItem.id,
+      factory_id:         stockItem.factory_id,
+      transaction_date:   entry.date,
+      transaction_source: "manual",
+      qty_received:       0,
+      qty_issued:         suppliedQty,
+      dispatch_qty:       0,
+      closing_balance:    newBal,
+      reference_type:     "supplied_entry",
+      remark: JSON.stringify({
+       source: "Supplied Entry Book",
+       material: suppliedMaterialsText || null,
+       code: entry.code || null,
+       particular: payload.particular || null,
+       inv_chl_no: payload.inv_chl_no || null,
+       vehicle_no: payload.vehicle_no || null,
+       remark: payload.remarks || null,
+      }),
+      entered_by: user.id,
+     });
+    }
+   }
 
    const nowISO = new Date().toISOString();
    const { subject, html } = buildSuppliedEmail({
@@ -6206,7 +6463,7 @@ function StockLedgerSection() {
    showToast(
     (isAdd ? "Stock added" : "Stock deducted") +
     " — " + activeItem.item_name + " " +
-    (isAdd ? "+" : "−") + qty.toFixed(3) + " " + activeItem.unit +
+    (isAdd ? "+" : "−") + qty.toFixed(3) + " " + displayUnit(activeItem.unit, activeItem.category) +
     " | New balance: " + newBal.toFixed(3)
    );
    setMode("view");
@@ -6265,7 +6522,7 @@ function StockLedgerSection() {
        <div style={{ fontSize: 12, marginTop: 2,
         color: below ? "var(--warn)" : "var(--ink-soft)" }}>
         {below ? "⚠ Material Required" : "✓ Above minimum threshold"}
-        {" — "}Min: {threshold} {activeItem.unit}
+        {" — "}Min: {threshold} {displayUnit(activeItem.unit, activeItem.category)}
        </div>
       )}
      </div>
@@ -6273,7 +6530,7 @@ function StockLedgerSection() {
       <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Current Balance</div>
       <div style={{ fontWeight: 700, fontSize: 22,
        color: below ? "var(--warn)" : "var(--ok)" }}>
-       {bal.toFixed(3)} <span style={{ fontSize: 14 }}>{activeItem.unit}</span>
+       {bal.toFixed(3)} <span style={{ fontSize: 14 }}>{displayUnit(activeItem.unit, activeItem.category)}</span>
       </div>
      </div>
     </div>
@@ -6307,12 +6564,12 @@ function StockLedgerSection() {
        {mode === "add"
         ? "Record new stock received. This quantity will be added to the current balance."
         : "Record stock used or removed. This quantity will be subtracted from the current balance."}
-       {" "}Current: <b>{bal.toFixed(3)} {activeItem.unit}</b>
+       {" "}Current: <b>{bal.toFixed(3)} {displayUnit(activeItem.unit, activeItem.category)}</b>
       </div>
 
       <div className="row2">
        <div>
-        <label>Quantity ({activeItem.unit}) *</label>
+        <label>Quantity ({displayUnit(activeItem.unit, activeItem.category)}) *</label>
         <input type="number" min="0.001" step="0.001" placeholder="0.000"
          value={updateQty} onChange={e => setUpdateQty(e.target.value)}
          style={{ fontSize: 16, fontWeight: 700 }} />
@@ -6321,7 +6578,7 @@ function StockLedgerSection() {
           color: mode === "add" ? "var(--ok)" : "var(--warn)" }}>
           New balance: {mode === "add"
            ? (bal + Number(updateQty)).toFixed(3)
-           : (bal - Number(updateQty)).toFixed(3)} {activeItem.unit}
+           : (bal - Number(updateQty)).toFixed(3)} {displayUnit(activeItem.unit, activeItem.category)}
           {mode === "deduct" && Number(updateQty) > bal && (
            <span style={{ color: "var(--warn)", marginLeft: 8 }}>⚠ Will go negative</span>
           )}
@@ -6514,7 +6771,7 @@ function StockLedgerSection() {
          <span style={{ fontWeight: 700 }}>{item.item_name}</span>
          <span style={{ fontWeight: 700, fontSize: 15,
           color: below ? "var(--warn)" : bal != null ? "var(--ok)" : "var(--ink-soft)" }}>
-          {bal != null ? fmt(bal, 3) + " " + item.unit : "No data"}
+          {bal != null ? fmt(bal, 3) + " " + displayUnit(item.unit, item.category) : "No data"}
          </span>
         </div>
         <div className="pi-sub">
@@ -6523,7 +6780,7 @@ function StockLedgerSection() {
          Code: {item.item_code}
          {below && (
           <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
-           ⚠ Material Required (min {threshold} {item.unit})
+           ⚠ Material Required (min {threshold} {displayUnit(item.unit, item.category)})
           </span>
          )}
         </div>
@@ -6560,6 +6817,7 @@ interface SlipPayload {
  remaining: number;
  remark: string;
  item_id: string;
+ planned_production: number | null;
 }
 
 function IssueSlipSection({ prefill, onPrefillConsumed }: {
@@ -6583,6 +6841,7 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
  const [qtyIssued, setQtyIssued]   = useState("");
  const [usedFor, setUsedFor]     = useState("");
  const [remark, setRemark]      = useState("");
+ const [plannedProduction, setPlannedProduction] = useState<number | null>(null);
  const [submitting, setSubmitting]  = useState(false);
 
  // History
@@ -6640,12 +6899,16 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
  // it doesn't re-apply while the user edits the form.
  useEffect(() => {
   if (!prefill || loading) return;
+  // For raw materials, prefill the manual qty fields from the job card's oil required.
+  // For packing materials, qty_required is auto-calculated from planned production
+  // and qty_issued must always start empty (storekeeper fills it in manually).
   if (prefill.qtyRequired != null) {
    setQtyRequired(String(prefill.qtyRequired));
-   setQtyIssued(String(prefill.qtyRequired));
   }
+  // qtyIssued intentionally NOT pre-filled — storekeeper must enter it manually
   if (prefill.usedFor) setUsedFor(prefill.usedFor);
   if (prefill.remark)  setRemark(prefill.remark);
+  setPlannedProduction(prefill.plannedProduction ?? null);
   if (prefill.matchItemName) {
    const needle = prefill.matchItemName.trim().toLowerCase();
    const match = items.find(i =>
@@ -6664,10 +6927,21 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
   ? currentBalance - qtyIssuedNum
   : null;
 
+ // Auto-calculate bags required for packing materials:
+ //   Bags Required = Planned Production (kg) / Bag Weight (kg)
+ const bagWeight = selectedItem?.category === "packaging_material"
+  ? parseBagWeight(selectedItem.item_name)
+  : null;
+ const bagsQtyRequired: number | null =
+  bagWeight != null && plannedProduction != null
+   ? Math.ceil(plannedProduction / bagWeight)
+   : null;
+
  const reset = () => {
   setSelectedItemId(""); setCurrentBalance(null);
   setSlipNo(""); setPlant(""); setSlipDate(today());
   setQtyRequired(""); setQtyIssued(""); setUsedFor(""); setRemark("");
+  setPlannedProduction(null);
  };
 
  const handleIssue = async () => {
@@ -6687,13 +6961,14 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
     plant:        plant,
     date:         slipDate,
     material_description: selectedItem?.item_name ?? selectedItemId,
-    unit:         selectedItem?.unit ?? "kg",
-    qty_required:     Number.isFinite(qtyRequiredNum) ? qtyRequiredNum : 0,
+    unit:         displayUnit(selectedItem?.unit ?? "kg", selectedItem?.category),
+    qty_required:     bagsQtyRequired ?? (Number.isFinite(qtyRequiredNum) ? qtyRequiredNum : 0),
     qty_issued:      qtyIssuedNum,
     used_for:       usedFor.trim(),
     remaining:      newBal,
     remark:        remark.trim(),
     item_id:       selectedItemId,
+    planned_production: plannedProduction,
    };
 
    const { error } = await supabase.from("stores_stock_ledger").insert({
@@ -6750,19 +7025,12 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
    <div className="card">
     <h3>Material Issue Slip</h3>
 
-    {/* Row 1: No. | Plant | Date */}
-    <div className="row3">
+    {/* Row 1: Used For | Date */}
+    <div className="row2">
      <div>
-      <label>No.</label>
-      <input type="text" placeholder="e.g. 2236"
-       value={slipNo} onChange={e => setSlipNo(e.target.value)} />
-     </div>
-     <div>
-      <label>Plant</label>
-      <select value={plant} onChange={e => setPlant(e.target.value)}>
-       <option value="">-- Select plant --</option>
-       {PLANT_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-      </select>
+      <label>Used For (Batch No.)</label>
+      <input type="text" placeholder="e.g. Batch 348, Job 301"
+       value={usedFor} onChange={e => setUsedFor(e.target.value)} />
      </div>
      <div>
       <label>Date</label>
@@ -6794,27 +7062,48 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
      <div>
       <label>Unit</label>
       <input type="text" disabled
-       value={selectedItem?.unit ?? "N/A"}
+       value={selectedItem ? displayUnit(selectedItem.unit, selectedItem.category) : "N/A"}
        placeholder="kg / nos / L..." />
      </div>
     </div>
 
-    {/* Row 3: Qty Required | Qty Issued | Used For */}
+    {/* Row 3: Planned Production (auto) | Bags Qty Required (auto-calc) | Bags Qty Issued */}
     <div className="row3">
      <div>
-      <label>Quantity Required</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
-       value={qtyRequired} onChange={e => setQtyRequired(e.target.value)} />
+      <label>Planned Production (kg)</label>
+      <input type="text" disabled
+       value={plannedProduction != null ? plannedProduction.toFixed(0) + " kg" : "N/A"}
+       style={{
+        fontWeight: 700,
+        color: plannedProduction != null ? "var(--clay)" : undefined,
+       }} />
+      <div className="field-hint">Auto-filled from Job Card</div>
      </div>
      <div>
-      <label>Quantity Issued *</label>
-      <input type="number" min="0.001" step="0.001" placeholder="0"
+      <label>Bags Quantity Required</label>
+      {!selectedItemId ? (
+       // No material selected yet — blank placeholder
+       <input type="text" disabled value="" placeholder="Select a material first" />
+      ) : bagsQtyRequired != null ? (
+       // Packing material with known bag weight — auto-calculated, read-only
+       <>
+        <input type="text" disabled
+         value={bagsQtyRequired + " nos"}
+         style={{ fontWeight: 700, color: "var(--clay)" }} />
+        <div className="field-hint">
+         {plannedProduction} kg ÷ {bagWeight} kg/bag = {bagsQtyRequired} bags
+        </div>
+       </>
+      ) : (
+       // Raw material or bag without a weight in the name — editable
+       <input type="number" min="0" step="0.001" placeholder="0"
+        value={qtyRequired} onChange={e => setQtyRequired(e.target.value)} />
+      )}
+     </div>
+     <div>
+      <label>Bags Quantity Issued *</label>
+      <input type="number" min="0.001" step="1" placeholder="0"
        value={qtyIssued} onChange={e => setQtyIssued(e.target.value)} />
-     </div>
-     <div>
-      <label>Used For (Batch / Job No.)</label>
-      <input type="text" placeholder="e.g. Batch 348, Job 301"
-       value={usedFor} onChange={e => setUsedFor(e.target.value)} />
      </div>
     </div>
 
@@ -6830,7 +7119,7 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
        }} />
       {currentBalance != null && (
        <div className="field-hint">
-        Current stock: {currentBalance.toFixed(3)} {selectedItem?.unit ?? ""}
+        Current stock: {currentBalance.toFixed(3)} {selectedItem ? displayUnit(selectedItem.unit, selectedItem.category) : ""}
        </div>
      )}
      </div>
@@ -6865,8 +7154,9 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
            <th>Date</th>
            <th>Material Description</th>
            <th>Unit</th>
-           <th style={{ textAlign: "right" }}>Qty Required</th>
-           <th style={{ textAlign: "right" }}>Qty Issued</th>
+           <th style={{ textAlign: "right" }}>Planned Prod. (kg)</th>
+           <th style={{ textAlign: "right" }}>Bags Qty Required</th>
+           <th style={{ textAlign: "right" }}>Bags Qty Issued</th>
            <th>Used For</th>
            <th style={{ textAlign: "right" }}>Remaining</th>
            <th>Remark</th>
@@ -6879,7 +7169,10 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
             <td style={{ fontSize: 12 }}>{nilText(row.plant)}</td>
             <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
             <td style={{ fontWeight: 600, fontSize: 12 }}>{row.material_description}</td>
-            <td style={{ fontSize: 12 }}>{row.unit}</td>
+            <td style={{ fontSize: 12 }}>{row.unit === "bags" ? "nos" : row.unit}</td>
+            <td style={{ textAlign: "right", fontWeight: 700, color: "var(--clay)" }}>
+             {row.planned_production != null ? row.planned_production.toFixed(0) : "—"}
+            </td>
             <td style={{ textAlign: "right" }}>
              {row.qty_required > 0 ? fmt(row.qty_required) : "0"}
             </td>
