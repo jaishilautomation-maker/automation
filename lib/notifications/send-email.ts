@@ -173,24 +173,52 @@ function buildRawMessage(args: {
     return toBase64Url(raw);
   }
 
-  // With attachments → wrap the alternative body as the first part of a
-  // multipart/mixed, followed by one base64 part per attachment.
+  // Split into INLINE images (referenced via cid: in the HTML) and regular
+  // file attachments.
+  const inlineAtts = attachments.filter(a => a.cid);
+  const fileAtts   = attachments.filter(a => !a.cid);
+
+  const b64 = (buf: Buffer) => buf.toString("base64").replace(/(.{76})/g, "$1\r\n");
+
+  // Inline images go inside a multipart/related alongside the HTML body, so
+  // `<img src="cid:...">` resolves. Build that related block first.
+  const relBoundary = `rel_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const relatedParts: string[] = [
+    `--${relBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    "",
+    ...altParts,
+    "",
+  ];
+  for (const att of inlineAtts) {
+    relatedParts.push(
+      `--${relBoundary}`,
+      `Content-Type: ${att.contentType}; name="${att.filename}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-ID: <${att.cid}>`,
+      `Content-Disposition: inline; filename="${att.filename}"`,
+      "",
+      b64(att.content),
+      "",
+    );
+  }
+  relatedParts.push(`--${relBoundary}--`);
+
+  // Wrap the related body + any file attachments in a multipart/mixed.
   const mixedBoundary = `mixed_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 8)}`;
 
-  const attachmentParts: string[] = [];
-  for (const att of attachments) {
-    // Base64 content, wrapped at 76 chars per RFC 2045.
-    const b64 = att.content.toString("base64").replace(/(.{76})/g, "$1\r\n");
-    attachmentParts.push(
+  const fileAttParts: string[] = [];
+  for (const att of fileAtts) {
+    fileAttParts.push(
       `--${mixedBoundary}`,
       `Content-Type: ${att.contentType}; name="${att.filename}"`,
       "Content-Transfer-Encoding: base64",
       `Content-Disposition: attachment; filename="${att.filename}"`,
       "",
-      b64,
-      ""
+      b64(att.content),
+      "",
     );
   }
 
@@ -202,11 +230,11 @@ function buildRawMessage(args: {
     `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
     "",
     `--${mixedBoundary}`,
-    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    `Content-Type: multipart/related; boundary="${relBoundary}"`,
     "",
-    ...altParts,
+    ...relatedParts,
     "",
-    ...attachmentParts,
+    ...fileAttParts,
     `--${mixedBoundary}--`,
   ].join("\r\n");
 
@@ -247,6 +275,12 @@ export interface EmailAttachment {
   /** MIME type, e.g. the .xlsx type for a populated report workbook. */
   contentType: string;
   content:     Buffer;
+  /**
+   * Optional Content-ID. When set, the part is embedded INLINE (referenced by
+   * `<img src="cid:THIS_VALUE">` in the HTML) instead of being a downloadable
+   * attachment. Used for lab QC photos shown in the email body.
+   */
+  cid?:        string;
 }
 
 /** Standard MIME type for a modern .xlsx workbook. */

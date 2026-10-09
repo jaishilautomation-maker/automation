@@ -26,12 +26,28 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { sendEmail } from "@/lib/notifications/send-email";
+import { loadQcPhotoAttachments, buildPhotoHtml } from "@/lib/notifications/qc-photo-attachments";
+import {
+  notifyJobCardWhatsApp,
+  type JobCardNotifyEvent,
+} from "@/lib/notifications/whatsapp-jobcard";
 import {
   syncJobCardRow,
   appendRow,
   type JobCardSheetRow,
   type SheetTarget,
 } from "@/lib/notifications/sheets-sync";
+
+// The pulveriser job-card stage events that also fire a WhatsApp message to the
+// next role. Keep in sync with JobCardNotifyEvent. Any other eventType (lab-qc,
+// breakdown, hourly readings, etc.) is email/sheet-only — no WhatsApp.
+const WHATSAPP_JOBCARD_EVENTS = new Set<string>([
+  "pulveriser_production",
+  "pulveriser_production_triage",
+  "pulveriser_stores",
+  "pulveriser_operator",
+  "pulveriser_lab",
+]);
 
 type SheetSyncPayload =
   | { type: "job_card"; row: JobCardSheetRow }
@@ -66,11 +82,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "subject+html or sheetData required" }, { status: 400 });
   }
 
-  // Run email and sheet sync concurrently — each is independently safe (never
-  // throws). Await both so the Vercel lambda doesn't tear down mid-flight.
+  // Run email, sheet sync, and the WhatsApp job-card notification concurrently.
+  // Each is independently safe (never throws). Await all so the Vercel lambda
+  // doesn't tear down mid-flight. The WhatsApp send is a PURE side-effect of a
+  // pulveriser job-card transition — it reads the persisted card to find the
+  // next role and never alters workflow state. referenceId is the job card id.
   await Promise.all([
     wantsEmail
-      ? sendEmail({ eventType, subject: subject!, html: html!, factoryId, referenceId, recipients })
+      ? (async () => {
+          // Lab QC submissions embed any uploaded photos INLINE in the email so
+          // the recipient sees them in the body (the bucket is private, so we
+          // send the image bytes and reference them via cid:).
+          const attachments = eventType.startsWith("lab_qc_")
+            ? await loadQcPhotoAttachments(referenceId)
+            : [];
+          const finalHtml = attachments.length
+            ? html! + buildPhotoHtml(attachments)
+            : html!;
+          await sendEmail({
+            eventType, subject: subject!, html: finalHtml, factoryId, referenceId, recipients,
+            attachments: attachments.length ? attachments : undefined,
+          });
+        })()
       : Promise.resolve(),
     (async () => {
       if (!sheetData) return;
@@ -80,6 +113,9 @@ export async function POST(req: NextRequest) {
         await appendRow(sheetData.target, sheetData.tab, sheetData.values);
       }
     })(),
+    WHATSAPP_JOBCARD_EVENTS.has(eventType)
+      ? notifyJobCardWhatsApp(eventType as JobCardNotifyEvent, referenceId, factoryId)
+      : Promise.resolve(),
   ]);
 
   return NextResponse.json({ queued: true });
