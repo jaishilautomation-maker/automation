@@ -166,6 +166,19 @@ textarea { resize: vertical; min-height: 56px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
+/* Let grid children shrink below their intrinsic width so wide controls
+   (datetime-local, date, time) never overflow their column on phones. */
+.row2 > *, .row3 > * { min-width: 0; }
+.row2 input, .row3 input,
+.row2 select, .row3 select,
+.row2 textarea, .row3 textarea { max-width: 100%; }
+
+/* On narrow screens, stack multi-column rows into a single column so inputs
+   get the full width (fixes datetime-local fields running off-screen). */
+@media (max-width: 560px) {
+  .row2, .row3 { grid-template-columns: 1fr; }
+}
+
 /* ── Chips ───────────────────────────────────────────────────────────────── */
 .chip-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .chip {
