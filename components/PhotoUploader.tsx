@@ -75,7 +75,8 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
   { label, fieldKey, factoryCode, entityType, entityId, currentPath, userId, factoryId, onUploaded },
   ref
 ) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);       // gallery picker (no capture)
+  const cameraInputRef = useRef<HTMLInputElement>(null); // camera (capture=environment)
 
   const [state, setState]         = useState<UploadState>("idle");
   const [error, setError]         = useState<string | null>(null);
@@ -191,8 +192,9 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
       setProgress("");
     }
 
-    // Reset file input so the same file can be re-selected
+    // Reset both file inputs so the same file can be re-selected
     if (inputRef.current) inputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
   }
 
   // -------------------------------------------------------------------------
@@ -237,7 +239,7 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
             marginBottom: 8,
             cursor: "pointer",
           }}
-          onClick={() => !busy && inputRef.current?.click()}
+          onClick={() => !busy && cameraInputRef.current?.click()}
         >
           📷 Tap to add photo
         </div>
@@ -282,9 +284,18 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
           className="btn btn-secondary"
           style={{ fontSize: 12, padding: "6px 12px" }}
           disabled={busy}
+          onClick={() => cameraInputRef.current?.click()}
+        >
+          📷 {previewUrl ? "Retake" : "Camera"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ fontSize: 12, padding: "6px 12px" }}
+          disabled={busy}
           onClick={() => inputRef.current?.click()}
         >
-          {previewUrl ? "Replace photo" : "Choose photo"}
+          🖼 {previewUrl ? "Replace from gallery" : "Choose photo"}
         </button>
 
         {previewUrl && !busy && state !== "done" && (
@@ -308,13 +319,23 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
         )}
       </div>
 
-      {/* Hidden file input — accepts images. No `capture` attribute so phones
-          show the native picker (Gallery OR Camera) instead of forcing the
-          camera; the user chooses where the photo comes from. */}
+      {/* Gallery input — no `capture`, so phones open the photo gallery/picker.
+          Wired to the "Choose photo" / "Replace photo" button. */}
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleFileChange}
+      />
+
+      {/* Camera input — `capture="environment"` opens the rear camera directly
+          on phones. Wired to the "Tap to add photo" drop area. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
