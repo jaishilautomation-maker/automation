@@ -1849,6 +1849,7 @@ function SuppliedSection() {
  const [histLoading, setHistLoading] = useState(true);
  const [filterCodes, setFilterCodes] = useState<string[]>([]);
  const [filterDropOpen, setFilterDropOpen] = useState(false);
+ const [filterDate, setFilterDate] = useState("");
 
  const setField = (k: keyof SuppliedEntry, v: string) =>
   setEntry(prev => ({ ...prev, [k]: v }));
@@ -1884,9 +1885,11 @@ function SuppliedSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- const histFiltered = filterCodes.length === 0
-  ? history
-  : history.filter(r => filterCodes.includes(r.code));
+ const histFiltered = history.filter(r => {
+  if (filterCodes.length > 0 && !filterCodes.includes(r.code)) return false;
+  if (filterDate && r.date !== filterDate) return false;
+  return true;
+ });
 
  const handleSave = async () => {
   if (!entry.date) { showToast("Enter a date.", true); return; }
@@ -2119,28 +2122,58 @@ function SuppliedSection() {
     <div className="helper-row">
      <h3 style={{ margin: 0 }}>
       Supplied History
-      {filterCodes.length > 0 ? " (filtered: " + filterCodes.length + ")" : " (all)"}
+      {(filterCodes.length > 0 || filterDate)
+       ? " (filtered)"
+       : " (all)"}
      </h3>
-     <div style={{ position: "relative" }}>
-      <button type="button"
-       onClick={() => setFilterDropOpen(p => !p)}
+     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      {/* Date filter */}
+      <input
+       type="date"
+       value={filterDate}
+       onChange={e => setFilterDate(e.target.value)}
        style={{
-        padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
-        background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
-        color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
-        fontSize: 12, fontWeight: 700, cursor: "pointer",
-       }}>
-       Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
-      </button>
-      {filterDropOpen && (
-       <CodeFilterDropdown
-        codes={SUPPLIED_CODES}
-        selected={filterCodes}
-        onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
-        onClear={() => setFilterCodes([])}
-        onClose={() => setFilterDropOpen(false)}
-       />
-     )}
+        padding: "5px 10px", border: "1px solid var(--line)", borderRadius: 6,
+        fontSize: 12, fontWeight: 600, cursor: "pointer",
+        background: filterDate ? "var(--clay)" : "#fff",
+        color: filterDate ? "#fff" : "var(--ink-soft)",
+       }}
+       title="Filter by date"
+      />
+      {/* Code filter */}
+      <div style={{ position: "relative" }}>
+       <button type="button"
+        onClick={() => setFilterDropOpen(p => !p)}
+        style={{
+         padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
+         background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
+         color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
+         fontSize: 12, fontWeight: 700, cursor: "pointer",
+        }}>
+        Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
+       </button>
+       {filterDropOpen && (
+        <CodeFilterDropdown
+         codes={SUPPLIED_CODES}
+         selected={filterCodes}
+         onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
+         onClear={() => setFilterCodes([])}
+         onClose={() => setFilterDropOpen(false)}
+        />
+       )}
+      </div>
+      {/* Clear all filters */}
+      {(filterCodes.length > 0 || filterDate) && (
+       <button type="button"
+        onClick={() => { setFilterCodes([]); setFilterDate(""); }}
+        style={{
+         padding: "6px 12px", border: "1px solid var(--line)", borderRadius: 6,
+         background: "#fff", color: "var(--ink-soft)",
+         fontSize: 12, cursor: "pointer",
+        }}>
+        Clear All
+       </button>
+      )}
      </div>
     </div>
     {histLoading ? <div className="empty">Loading...</div>
