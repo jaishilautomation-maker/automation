@@ -6575,8 +6575,8 @@ function StockLedgerSection() {
      </div>
     </div>
 
-    {/* Action buttons — manual add/deduct only for RM and PM; FG is auto-managed */}
-    {mode === "view" && activeItem.category !== "finished_good" && (
+    {/* Action buttons */}
+    {mode === "view" && (
      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
       <button type="button" className="btn btn-primary"
        style={{ width: "auto", padding: "10px 22px", marginTop: 0 }}
@@ -6591,20 +6591,20 @@ function StockLedgerSection() {
      </div>
     )}
 
-    {/* FG items: auto-managed from production — no manual entry */}
+    {/* FG info banner — shown alongside the manual buttons */}
     {mode === "view" && activeItem.category === "finished_good" && (
      <div style={{
       padding: "10px 14px", borderRadius: 8, marginBottom: 16,
-      background: "#e3f2fd", fontSize: 13, color: "#1565c0",
+      background: "#e3f2fd", fontSize: 12, color: "#1565c0",
       border: "1px solid #90caf9",
      }}>
-      Finished Goods stock is updated automatically when the chemist finalizes QC as <b>OK</b>.
-      Manual stock entry is disabled for finished goods.
+      Finished Goods stock is normally updated automatically when the chemist finalizes QC as <b>OK</b>.
+      Use the buttons above only for manual corrections.
      </div>
     )}
 
-    {/* Add / Deduct form — only for RM and PM */}
-    {mode !== "view" && activeItem.category !== "finished_good" && (
+    {/* Add / Deduct form */}
+    {mode !== "view" && (
      <div className="card" style={{
       border: "2px solid " + (mode === "add" ? "var(--ok)" : "var(--warn)"),
       marginBottom: 16,
