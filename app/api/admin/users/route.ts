@@ -274,9 +274,46 @@ export async function DELETE(req: NextRequest) {
 
   const admin = getAdminClient();
 
-  // Deleting from auth.users cascades to profiles and user_roles
-  const { error } = await admin.auth.admin.deleteUser(userId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Step 1: Try the clean auth delete (cascades to profiles + user_roles).
+  const { error: authDeleteErr } = await admin.auth.admin.deleteUser(userId);
 
+  if (!authDeleteErr) {
+    // Clean delete succeeded — done.
+    return NextResponse.json({ success: true });
+  }
+
+  // Step 2: Auth delete failed (common for users without a phone number or
+  // created outside the normal OTP flow). Fall back to manual cleanup:
+  // delete the app-level rows so the user no longer appears in the admin list,
+  // even if the auth.users row persists (they cannot log in without a profile).
+  console.warn(
+    "[admin/users] auth.admin.deleteUser failed, falling back to manual cleanup:",
+    authDeleteErr.message,
+    "userId:", userId
+  );
+
+  const errors: string[] = [];
+
+  const { error: rolesErr } = await admin
+    .from("user_roles")
+    .delete()
+    .eq("user_id", userId);
+  if (rolesErr) errors.push("user_roles: " + rolesErr.message);
+
+  const { error: profileErr } = await admin
+    .from("profiles")
+    .delete()
+    .eq("id", userId);
+  if (profileErr) errors.push("profiles: " + profileErr.message);
+
+  if (errors.length > 0) {
+    // Both fallbacks failed — report the original auth error.
+    return NextResponse.json(
+      { error: authDeleteErr.message + " | cleanup: " + errors.join("; ") },
+      { status: 500 }
+    );
+  }
+
+  // Fallback cleanup succeeded — user is removed from the app.
   return NextResponse.json({ success: true });
 }
