@@ -6517,8 +6517,15 @@ function StockLedgerSection() {
     return p.source ?? (row.reference_type === "stock_add" ? "Stock In" : "Stock Out");
    } catch { return row.reference_type === "stock_add" ? "Stock In" : "Stock Out"; }
   }
+  // reference_type takes precedence for production rows inserted by the lab page
+  // (which must use transaction_source='manual' due to RLS)
+  if (row.reference_type === "production_fg")  return "QC OK — Production";
+  if (row.reference_type === "received_entry") return "Received";
+  if (row.reference_type === "supplied_entry") return "Supplied";
+  if (row.reference_type === "slip")           return "Issue Slip";
+  if (row.reference_type === "oil_issue")      return "Oil Issue";
   switch (row.transaction_source) {
-   case "production_fg":      return "Production FG";
+   case "production_fg":      return "QC OK — Production";
    case "production_rm_oil":  return "Auto Oil Deduct";
    case "production_rm_sul":  return "Auto Sulphur Deduct";
    case "dispatch":           return "Dispatch";
@@ -6568,8 +6575,8 @@ function StockLedgerSection() {
      </div>
     </div>
 
-    {/* Action buttons */}
-    {mode === "view" && (
+    {/* Action buttons — manual add/deduct only for RM and PM; FG is auto-managed */}
+    {mode === "view" && activeItem.category !== "finished_good" && (
      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
       <button type="button" className="btn btn-primary"
        style={{ width: "auto", padding: "10px 22px", marginTop: 0 }}
@@ -6584,8 +6591,20 @@ function StockLedgerSection() {
      </div>
     )}
 
-    {/* Add / Deduct form */}
-    {mode !== "view" && (
+    {/* FG items: auto-managed from production — no manual entry */}
+    {mode === "view" && activeItem.category === "finished_good" && (
+     <div style={{
+      padding: "10px 14px", borderRadius: 8, marginBottom: 16,
+      background: "#e3f2fd", fontSize: 13, color: "#1565c0",
+      border: "1px solid #90caf9",
+     }}>
+      Finished Goods stock is updated automatically when the chemist finalizes QC as <b>OK</b>.
+      Manual stock entry is disabled for finished goods.
+     </div>
+    )}
+
+    {/* Add / Deduct form — only for RM and PM */}
+    {mode !== "view" && activeItem.category !== "finished_good" && (
      <div className="card" style={{
       border: "2px solid " + (mode === "add" ? "var(--ok)" : "var(--warn)"),
       marginBottom: 16,
@@ -6698,6 +6717,7 @@ function StockLedgerSection() {
               background:
                row.reference_type === "stock_add"    ? "rgba(27,94,32,.05)"
                : row.reference_type === "stock_deduct" ? "rgba(211,47,47,.04)"
+               : row.reference_type === "production_fg" ? "rgba(21,101,192,.04)"
                : undefined,
              }}>
               <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.transaction_date)}</td>
@@ -6708,12 +6728,14 @@ function StockLedgerSection() {
                 background:
                  row.reference_type === "stock_add"    ? "var(--ok-soft)"
                  : row.reference_type === "stock_deduct" ? "var(--warn-soft)"
+                 : row.reference_type === "production_fg" ? "#e3f2fd"
                  : row.transaction_source === "production_fg"      ? "#e3f2fd"
                  : row.transaction_source.includes("production") ? "var(--clay-soft)"
                  : "var(--line)",
                 color:
                  row.reference_type === "stock_add"    ? "var(--ok)"
                  : row.reference_type === "stock_deduct" ? "var(--warn)"
+                 : row.reference_type === "production_fg" ? "#1565c0"
                  : row.transaction_source === "production_fg"      ? "#1565c0"
                  : row.transaction_source.includes("production") ? "var(--clay)"
                  : "var(--ink-soft)",

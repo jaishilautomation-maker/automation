@@ -208,7 +208,7 @@ export default function PulveriserLabPage() {
               //   1. Exact item_code = party_code
               //   2. item_code ILIKE party_code  (catches capitalisation)
               //   3. item_name ILIKE party_code  (catches old auto-generated codes)
-              //   4. No match → skip silently (never post to wrong item)
+              //   4. Auto-create new FG item for this party_code (first-time product)
               const matchCode = (jc.party_code ?? "").trim() || (jc.material_code ?? "").trim();
               let fgItemId: string | null = null;
               let fgFactoryId: string = jc.factory_id;
@@ -247,9 +247,7 @@ export default function PulveriserLabPage() {
                   }
                 }
 
-                // 3. ILIKE item_name match (covers old auto-generated item_codes
-                //    where item_name contains the party_code as a substring, e.g.
-                //    "APOLLO TYRE/CLASSIC AUTO 160108" contains "160108")
+                // 3. ILIKE item_name match (covers old auto-generated item_codes)
                 if (!fgItemId) {
                   const { data: ilikeNameItem } = await supabase
                     .from("stores_stock_items")
@@ -263,6 +261,27 @@ export default function PulveriserLabPage() {
                   if (ilikeNameItem) {
                     fgItemId = ilikeNameItem.id;
                     fgFactoryId = ilikeNameItem.factory_id;
+                  }
+                }
+
+                // 4. No existing item — auto-create a new FG stock item for this
+                //    product code so first-time production is never silently dropped.
+                if (!fgItemId) {
+                  const { data: newItem } = await supabase
+                    .from("stores_stock_items")
+                    .insert({
+                      factory_id: jc.factory_id,
+                      item_code:  matchCode,
+                      item_name:  matchCode + " FG",
+                      category:   "finished_good",
+                      unit:       "kg",
+                      is_active:  true,
+                    })
+                    .select("id, factory_id")
+                    .single();
+                  if (newItem) {
+                    fgItemId = newItem.id;
+                    fgFactoryId = newItem.factory_id;
                   }
                 }
               }
