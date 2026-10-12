@@ -16,6 +16,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase-browser";
+import { setDemoRole } from "@/app/(app)/select-module/page";
 import type { AppRole } from "@/lib/types";
 
 interface UserRow {
@@ -91,10 +92,15 @@ export default function AdminPage() {
   // Guard — only admins
   useEffect(() => {
     if (authLoading) return;
-    const role = profile?.role;
+    if (profile === null) return;   // still loading — don't redirect yet
+    const role = profile.role;
     if (role !== "company_admin" && role !== "factory_admin") {
       router.replace("/select-module");
+      return;
     }
+    // Clear any active demo role so AppNav shows the correct admin nav,
+    // not a previously picked role like "chemist" or "production_incharge".
+    setDemoRole(null);
   }, [authLoading, profile, router]);
 
   const loadUsers = useCallback(async () => {

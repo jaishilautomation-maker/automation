@@ -17,11 +17,13 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
+import { setDemoRole } from "@/app/(app)/select-module/page";
 
 interface ProfileRow {
   id: string;
@@ -80,7 +82,8 @@ const MODULE_LABELS: Record<string, string> = {
 };
 
 export default function ActivityPage() {
-  const { profile } = useAuth();
+  const router = useRouter();
+  const { profile, loading: authLoading } = useAuth();
   const { activeFactory } = useModule();
   const { showToast } = useToast();
   const supabase = createClient();
@@ -91,6 +94,19 @@ export default function ActivityPage() {
   const [entries, setEntries]   = useState<FieldEntry[]>([]);
   const [loading, setLoading]   = useState(false);
   const [searched, setSearched] = useState(false);
+
+  // Guard — admin only; wait for auth to finish before redirecting.
+  // Also clears any active demo role so AppNav shows the correct admin nav.
+  useEffect(() => {
+    if (authLoading) return;
+    if (profile === null) return;
+    const role = profile.role;
+    if (role !== "company_admin" && role !== "factory_admin") {
+      router.replace("/select-module");
+      return;
+    }
+    setDemoRole(null);
+  }, [authLoading, profile, router]);
 
   // Load user list (all profiles the current user can see)
   useEffect(() => {
