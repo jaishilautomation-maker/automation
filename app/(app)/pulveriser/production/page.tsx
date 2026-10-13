@@ -97,10 +97,18 @@ export default function PulveriserProductionPage() {
   const { showToast } = useToast();
   const supabase = createClient();
 
-  // Which sub-view is showing: the new-job-card form or the rejected queue.
-  const [view, setView] = useState<"new" | "rejected">("new");
+  // Which sub-view is showing: the new-job-card form, the "my cards" list, or
+  // the rejected queue.
+  const [view, setView] = useState<"new" | "mine" | "rejected">("new");
   const [rejectedCount, setRejectedCount] = useState(0);
   const audit = useFieldAudit();
+
+  // ── Edit mode ───────────────────────────────────────────────────────────
+  // When set, the form is editing ONE existing job-card row (UPDATE) instead
+  // of creating new rows. Only a single entry is shown while editing, because
+  // each entry is its own pulveriser_job_cards row.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
 
   // ── Draft autosave ────────────────────────────────────────────────────────
   // Persist the whole in-progress job card locally so a closed tab/browser
@@ -209,16 +217,134 @@ export default function PulveriserProductionPage() {
   };
 
   // Autosave the live form state on every change (debounced inside the hook).
+  // Skipped while editing an existing card so an edit never overwrites the
+  // "new card" draft.
   const draftSave = draft.save;
   useEffect(() => {
+    if (editId) return;
     draftSave({ machine, jobNumber, shift, jobDate, entries });
-  }, [machine, jobNumber, shift, jobDate, entries, draftSave]);
+  }, [machine, jobNumber, shift, jobDate, entries, draftSave, editId]);
 
   const reset = () => {
     setJobNumber(""); setShift(""); setJobDate(todayISO());
     setEntries([blankEntry()]);
     audit.reset();
     draft.clear();
+  };
+
+  // Leave edit mode and return the form to a clean "create new" state.
+  const cancelEdit = useCallback(() => {
+    setEditId(null);
+    setEditStatus(null);
+    setMachine("M1");
+    setJobNumber(""); setShift(""); setJobDate(todayISO());
+    setEntries([blankEntry()]);
+    audit.reset();
+    draft.clear();
+  }, [audit, draft]);
+
+  // Load one existing job-card row into the form for editing. The create form
+  // becomes a single-entry editor; "Create" turns into "Update".
+  const loadForEdit = useCallback((jc: PulveriserJobCard) => {
+    // Don't let a half-typed draft overwrite the loaded values.
+    draft.clear();
+    audit.reset();
+
+    setEditId(jc.id);
+    setEditStatus(jc.status);
+    setMachine((jc.machine_number ?? "M1") as PulveriserMachine);
+    setJobNumber(jc.job_number ?? "");
+    setShift((jc.shift as "Day" | "Night" | "") ?? "");
+    setJobDate(jc.job_date ?? todayISO());
+
+    // Rebuild the single Entry from the row's Production-owned columns.
+    // planned_production_mt is stored in MT; the form edits KG (×1000).
+    setEntries([{
+      key:                `edit-${jc.id}`,
+      partyCode:          jc.party_code ?? "",
+      batchNumber:        jc.material_code ?? "",
+      plannedKg:          jc.planned_production_mt != null ? String(jc.planned_production_mt * 1000) : "",
+      // The form's vendor/receipt pickers are keyed by ids we don't have on the
+      // row (only the denormalised text). Prefill the free-text sulphur fields
+      // so they're preserved; the user can re-pick a receipt if they need to.
+      sulVendorId:        "",
+      sulSourceReceiptId: jc.sulphur_source_receipt_id ?? "",
+      sulLot:             jc.sulphur_lot_number ?? "",
+      sulEmptyDate:       jc.sulphur_empty_date ?? "",
+      oilSupplier:        jc.oil_supplier ?? "",
+      // oil_batch_number column stores the Oil Received Date (ISO).
+      oilReceivedDate:    jc.oil_batch_number ?? "",
+      oilQty:             jc.oil_quantity != null ? String(jc.oil_quantity) : "",
+    }]);
+
+    setView("new");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [draft, audit]);
+
+  // Update ONE existing job-card row (edit mode). Writes only Production-owned
+  // columns. The DB RLS (pulv_jc_update_production) permits this only while the
+  // row is still 'pending'; if it has moved on, the update is blocked and we
+  // surface a clear message rather than failing silently.
+  const handleUpdate = async () => {
+    if (!user) { showToast("Session expired — sign in again.", true); return; }
+    if (!activeFactory) { showToast("Select a factory/module first.", true); return; }
+    if (!editId) return;
+
+    const e = entries[0];
+    if (!e) { showToast("Nothing to update.", true); return; }
+    if (!e.partyCode)        { showToast("Party/CODE required (drives the oil standard).", true); return; }
+    if (!e.batchNumber.trim()) { showToast("Batch Number required.", true); return; }
+
+    setSubmitting(true);
+    try {
+      const patch = {
+        machine_number:        machine,
+        job_number:            jobNumber.trim() || null,
+        shift:                 shift || null,
+        job_date:              jobDate || null,
+        material_code:         e.batchNumber.trim(),
+        party_code:            e.partyCode,
+        planned_production_mt: plannedMtFor(e),
+        oil_required_kg:       oilRequiredFor(e),
+        sulphur_supplier:      (() => {
+          const v = sulVendors.find(v => v.id === e.sulVendorId);
+          return v ? v.vendor_name : (e.sulLot.trim() || null);
+        })(),
+        sulphur_lot_number:    e.sulLot.trim() || null,
+        sulphur_empty_date:    (() => {
+          const lot = sulLots.find(l => l.receipt_id === e.sulSourceReceiptId);
+          return lot?.received_date ?? (e.sulEmptyDate || null);
+        })(),
+        sulphur_source_receipt_id: e.sulSourceReceiptId || null,
+        oil_supplier:          e.oilSupplier.trim() || null,
+        oil_batch_number:      e.oilReceivedDate || null,
+        oil_quantity:          e.oilQty.trim() === "" ? null : Number(e.oilQty),
+      };
+
+      const { data, error } = await supabase
+        .from("pulveriser_job_cards")
+        .update(patch)
+        .eq("id", editId)
+        .select("id");
+
+      if (error) { showToast("Could not update: " + error.message, true); return; }
+      if (!data || data.length === 0) {
+        showToast(
+          "Update blocked — this card can only be edited before it is submitted for QC " +
+          `(current status: ${editStatus ?? "unknown"}).`,
+          true,
+        );
+        return;
+      }
+
+      void audit.flush(supabase, user.id, "job_card", editId);
+      showToast("Job card updated ✓");
+      cancelEdit();
+    } catch {
+      showToast("Network error — try again.", true);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -365,12 +491,17 @@ export default function PulveriserProductionPage() {
 
   return (
     <>
-      {/* Sub-tabs: New Job Card | Rejected Job Cards */}
+      {/* Sub-tabs: New Job Card | My Job Cards | Rejected Job Cards */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <button type="button"
           className={`chip${view === "new" ? " selected" : ""}`}
           onClick={() => setView("new")}>
-          New Pulveriser Job Card
+          {editId ? "Editing Job Card" : "New Pulveriser Job Card"}
+        </button>
+        <button type="button"
+          className={`chip${view === "mine" ? " selected" : ""}`}
+          onClick={() => setView("mine")}>
+          My Job Cards
         </button>
         <button type="button"
           className={`chip${view === "rejected" ? " selected" : ""}`}
@@ -386,17 +517,44 @@ export default function PulveriserProductionPage() {
         </button>
       </div>
 
+      {/* My Job Cards — click a started card to load it back into the form. */}
+      {view === "mine" && (
+        <MyJobCards onEdit={loadForEdit} editingId={editId} />
+      )}
+
       {/* Keep TriageQueue mounted so it always reports the live count for the
           badge, but only show its full UI on the Rejected tab. */}
       <TriageQueue onCount={setRejectedCount} hidden={view !== "rejected"} />
 
       {view === "new" && (
       <>
+      {editId && (
+        <div className="card" style={{
+          borderLeft: "4px solid var(--brand, #c0632f)", background: "#fff8f3",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 12, flexWrap: "wrap",
+        }}>
+          <div>
+            <strong>Editing a started job card</strong>
+            <div className="field-hint">
+              {jobNumber ? `Job ${jobNumber} · ` : ""}status: {editStatus ?? "—"}.
+              Correct the fields below and press Update. Editing is allowed in any
+              pre-QC stage; once a card is submitted for QC it becomes read-only.
+            </div>
+          </div>
+          <button type="button" className="btn btn-secondary"
+            style={{ width: "auto" }} disabled={submitting} onClick={cancelEdit}>
+            Cancel edit
+          </button>
+        </div>
+      )}
+
       <div className="card">
-        <h3>New Pulveriser Job Card</h3>
+        <h3>{editId ? "Edit Pulveriser Job Card" : "New Pulveriser Job Card"}</h3>
         <div className="field-hint" style={{ marginBottom: 12 }}>
-          One Job Number can hold up to {MAX_ENTRIES} entries (different Party/CODE).
-          Fill each entry fully, then add another or create.
+          {editId
+            ? "You are editing one existing entry. Multiple-entry editing is not supported — each entry is its own card."
+            : `One Job Number can hold up to ${MAX_ENTRIES} entries (different Party/CODE). Fill each entry fully, then add another or create.`}
         </div>
 
         <div className="row2">
@@ -632,16 +790,31 @@ export default function PulveriserProductionPage() {
       })}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button type="button" className="btn btn-ghost"
-          disabled={entries.length >= MAX_ENTRIES} onClick={addEntry}>
-          + Add entry ({entries.length}/{MAX_ENTRIES})
-        </button>
-        <button className="btn btn-primary" type="button"
-          disabled={submitting} onClick={handleCreate}>
-          {submitting
-            ? "Creating…"
-            : `Create Job Card${entries.length > 1 ? ` (${entries.length} entries)` : ""}`}
-        </button>
+        {!editId && (
+          <button type="button" className="btn btn-ghost"
+            disabled={entries.length >= MAX_ENTRIES} onClick={addEntry}>
+            + Add entry ({entries.length}/{MAX_ENTRIES})
+          </button>
+        )}
+        {editId ? (
+          <>
+            <button className="btn btn-primary" type="button"
+              disabled={submitting} onClick={handleUpdate}>
+              {submitting ? "Updating…" : "Update Job Card"}
+            </button>
+            <button className="btn btn-ghost" type="button"
+              disabled={submitting} onClick={cancelEdit}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className="btn btn-primary" type="button"
+            disabled={submitting} onClick={handleCreate}>
+            {submitting
+              ? "Creating…"
+              : `Create Job Card${entries.length > 1 ? ` (${entries.length} entries)` : ""}`}
+          </button>
+        )}
       </div>
       </>
       )}
@@ -860,6 +1033,138 @@ function TriageQueue({ onCount, hidden }: {
                     onClick={() => route(jc, "pending")}>
                     {routingId === jc.id ? "…" : "Send to Operator (re-run batch)"}
                   </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// MyJobCards — the production incharge's own created job cards.
+//
+// Lists the cards this user created (production_by = user.id), newest first,
+// grouped by job number. Clicking a card loads it back into the create form in
+// edit mode so a mistake can be corrected and re-saved.
+//
+// Status is shown on each row but no row is disabled: per the requirement,
+// editing is offered in general. The DB RLS (pulv_jc_update_production) is the
+// real gate — it only accepts updates while a card is still 'pending', and the
+// form's Update handler reports clearly if an update is blocked.
+// =============================================================================
+function MyJobCards({ onEdit, editingId }: {
+  onEdit: (jc: PulveriserJobCard) => void;
+  editingId: string | null;
+}) {
+  const { user } = useAuth();
+  const { activeFactory } = useModule();
+  const { showToast } = useToast();
+  const supabase = createClient();
+
+  const [cards, setCards]     = useState<PulveriserJobCard[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!activeFactory || !user) { setCards([]); setLoading(false); return; }
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("pulveriser_job_cards")
+      .select("*")
+      .eq("factory_id", activeFactory.id)
+      .eq("production_by", user.id)
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (error) { showToast("Job cards load nahi hue: " + error.message, true); setLoading(false); return; }
+    setCards((data ?? []) as PulveriserJobCard[]);
+    setLoading(false);
+  }, [supabase, activeFactory, user, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Human label + colour for each status. 'pending'/'pending_stores' are the
+  // stages where a Production edit will actually be accepted by RLS.
+  const statusMeta = (s: string): { label: string; editable: boolean } => {
+    switch (s) {
+      case "pending":           return { label: "At Production", editable: true };
+      case "pending_stores":    return { label: "With Stores",   editable: true };
+      case "pending_production": return { label: "Rejected — awaiting your decision", editable: true };
+      case "submitted_for_qc":  return { label: "Submitted for QC", editable: false };
+      case "finalized":         return { label: "Finalized (locked)", editable: false };
+      default:                  return { label: s, editable: false };
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="card">
+        <h3>My Job Cards</h3>
+        <div className="empty">Loading…</div>
+      </div>
+    );
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="card">
+        <h3>My Job Cards</h3>
+        <div className="empty">You haven&apos;t created any job cards yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <h3>My Job Cards</h3>
+      <div className="field-hint" style={{ marginBottom: 12 }}>
+        Click a card to load it back into the form and correct it. Cards in any
+        pre-QC stage can be saved; once submitted for QC they become read-only.
+      </div>
+
+      {groupByJobNumber(cards).map(group => (
+        <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
+            Job: {group.jobNumber ?? "—"}
+            {group.entries.length > 1 && ` · ${group.entries.length} entries`}
+          </div>
+          {group.entries.map((jc, i) => {
+            const meta = statusMeta(jc.status);
+            const isEditing = editingId === jc.id;
+            return (
+              <div
+                key={jc.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Edit entry ${i + 1} of job ${group.jobNumber ?? ""}`}
+                onClick={() => onEdit(jc)}
+                onKeyDown={ev => {
+                  if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onEdit(jc); }
+                }}
+                style={{
+                  border: "1px solid var(--line)", borderRadius: 8,
+                  padding: 12, marginBottom: 10, cursor: "pointer",
+                  outline: isEditing ? "2px solid var(--brand, #c0632f)" : undefined,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>
+                    Entry {i + 1} · {jc.machine_number ?? "—"} · Batch {jc.material_code ?? "—"}
+                    {" · "}Party/CODE {jc.party_code ?? "—"}
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12,
+                    background: meta.editable ? "var(--ok-soft)" : "#eee",
+                    color: meta.editable ? "var(--ok)" : "var(--ink-soft)",
+                  }}>
+                    {isEditing ? "editing…" : meta.label}
+                  </span>
+                </div>
+                <div className="field-hint" style={{ marginTop: 6 }}>
+                  {jc.job_date ?? "—"}
+                  {jc.shift ? ` · ${jc.shift}` : ""}
+                  {jc.planned_production_mt != null ? ` · planned ${(jc.planned_production_mt * 1000).toFixed(0)} kg` : ""}
                 </div>
               </div>
             );
