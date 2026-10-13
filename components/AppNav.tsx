@@ -93,11 +93,10 @@ export default function AppNav() {
       ];
     } else if (role === "production_incharge") {
       links = [
-        { href: "/pulveriser/production",     label: "New Pulveriser Job Card" },
-        { href: "/breakdown",                 label: "Breakdown Register" },
-        { href: "/maintenance",               label: "Preventive Maintenance" },
-        { href: "/pulveriser/my-submissions", label: "My submissions" },
-        { href: "/dashboard",                 label: "Dashboard" },
+        { href: "/pulveriser/production", label: "Pulveriser Job Cards" },
+        { href: "/breakdown",             label: "Breakdown Register" },
+        { href: "/maintenance",           label: "Preventive Maintenance" },
+        { href: "/dashboard",             label: "Dashboard" },
       ];
     } else if (role === "chemist" || role === "lab_manager") {
       links = [

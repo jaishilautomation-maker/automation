@@ -29,6 +29,8 @@ import {
   type PulveriserMachine,
   type VfdParameter,
   type PulveriserJobCard,
+  type PulveriserJobCardReview,
+  type PulveriserStatus,
   type Vendor,
   type SulphurLotRemaining,
 } from "@/lib/types";
@@ -501,7 +503,7 @@ export default function PulveriserProductionPage() {
         <button type="button"
           className={`chip${view === "mine" ? " selected" : ""}`}
           onClick={() => setView("mine")}>
-          My Job Cards
+          Job Cards
         </button>
         <button type="button"
           className={`chip${view === "rejected" ? " selected" : ""}`}
@@ -517,9 +519,9 @@ export default function PulveriserProductionPage() {
         </button>
       </div>
 
-      {/* My Job Cards — click a started card to load it back into the form. */}
+      {/* Job Cards — full factory list; click a card to load it for editing. */}
       {view === "mine" && (
-        <MyJobCards onEdit={loadForEdit} editingId={editId} />
+        <AllJobCards onEdit={loadForEdit} editingId={editId} />
       )}
 
       {/* Keep TriageQueue mounted so it always reports the live count for the
@@ -1044,63 +1046,83 @@ function TriageQueue({ onCount, hidden }: {
 }
 
 // =============================================================================
-// MyJobCards — the production incharge's own created job cards.
+// AllJobCards — the factory's pulveriser job cards (consolidated list).
 //
-// Lists the cards this user created (production_by = user.id), newest first,
-// grouped by job number. Clicking a card loads it back into the create form in
-// edit mode so a mistake can be corrected and re-saved.
+// Replaces the old separate "My submissions" page and the earlier "My Job
+// Cards" tab. Shows ALL job cards for the active factory (RLS still scopes to
+// factories the user can access), newest first, grouped by job number, with:
+//   • status badge
+//   • review/approval timeline (sent to Stores / oil issued / submitted for QC)
+//   • Lab review trail (OK / NOT OK remarks) from pulveriser_job_card_reviews
+//   • click-to-edit — loads the card back into the form (RLS gates pre-QC only)
 //
-// Status is shown on each row but no row is disabled: per the requirement,
-// editing is offered in general. The DB RLS (pulv_jc_update_production) is the
-// real gate — it only accepts updates while a card is still 'pending', and the
-// form's Update handler reports clearly if an update is blocked.
+// Rejected-card triage keeps its own tab (TriageQueue); this is the read +
+// edit list.
 // =============================================================================
-function MyJobCards({ onEdit, editingId }: {
+const JC_STATUS_META: Record<PulveriserStatus, { label: string; editable: boolean }> = {
+  pending:            { label: "At Production",       editable: true  },
+  pending_stores:     { label: "With Stores",         editable: true  },
+  pending_production: { label: "Rejected — in triage", editable: true  },
+  submitted_for_qc:   { label: "Submitted for QC",    editable: false },
+  finalized:          { label: "Finalized (locked)",  editable: false },
+};
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+function AllJobCards({ onEdit, editingId }: {
   onEdit: (jc: PulveriserJobCard) => void;
   editingId: string | null;
 }) {
-  const { user } = useAuth();
   const { activeFactory } = useModule();
   const { showToast } = useToast();
   const supabase = createClient();
 
   const [cards, setCards]     = useState<PulveriserJobCard[]>([]);
+  const [reviews, setReviews] = useState<Record<string, PulveriserJobCardReview[]>>({});
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!activeFactory || !user) { setCards([]); setLoading(false); return; }
+    if (!activeFactory) { setCards([]); setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("pulveriser_job_cards")
       .select("*")
       .eq("factory_id", activeFactory.id)
-      .eq("production_by", user.id)
       .order("created_at", { ascending: false })
-      .limit(60);
+      .limit(200);
     if (error) { showToast("Job cards load nahi hue: " + error.message, true); setLoading(false); return; }
-    setCards((data ?? []) as PulveriserJobCard[]);
+    const list = (data ?? []) as PulveriserJobCard[];
+    setCards(list);
+
+    // Load the Lab review trail for these cards.
+    if (list.length > 0) {
+      const { data: rev } = await supabase
+        .from("pulveriser_job_card_reviews")
+        .select("*")
+        .in("job_card_id", list.map(c => c.id))
+        .order("reviewed_at", { ascending: false });
+      const grouped: Record<string, PulveriserJobCardReview[]> = {};
+      for (const r of (rev ?? []) as PulveriserJobCardReview[]) {
+        (grouped[r.job_card_id] ??= []).push(r);
+      }
+      setReviews(grouped);
+    } else {
+      setReviews({});
+    }
     setLoading(false);
-  }, [supabase, activeFactory, user, showToast]);
+  }, [supabase, activeFactory, showToast]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Human label + colour for each status. 'pending'/'pending_stores' are the
-  // stages where a Production edit will actually be accepted by RLS.
-  const statusMeta = (s: string): { label: string; editable: boolean } => {
-    switch (s) {
-      case "pending":           return { label: "At Production", editable: true };
-      case "pending_stores":    return { label: "With Stores",   editable: true };
-      case "pending_production": return { label: "Rejected — awaiting your decision", editable: true };
-      case "submitted_for_qc":  return { label: "Submitted for QC", editable: false };
-      case "finalized":         return { label: "Finalized (locked)", editable: false };
-      default:                  return { label: s, editable: false };
-    }
-  };
 
   if (loading) {
     return (
       <div className="card">
-        <h3>My Job Cards</h3>
+        <h3>Job Cards</h3>
         <div className="empty">Loading…</div>
       </div>
     );
@@ -1109,28 +1131,32 @@ function MyJobCards({ onEdit, editingId }: {
   if (cards.length === 0) {
     return (
       <div className="card">
-        <h3>My Job Cards</h3>
-        <div className="empty">You haven&apos;t created any job cards yet.</div>
+        <h3>Job Cards</h3>
+        <div className="empty">No job cards yet.</div>
       </div>
     );
   }
 
   return (
     <div className="card">
-      <h3>My Job Cards</h3>
+      <div className="helper-row">
+        <h3 style={{ margin: 0 }}>Job Cards</h3>
+        <span className="count">{cards.length}</span>
+      </div>
       <div className="field-hint" style={{ marginBottom: 12 }}>
         Click a card to load it back into the form and correct it. Cards in any
         pre-QC stage can be saved; once submitted for QC they become read-only.
       </div>
 
       {groupByJobNumber(cards).map(group => (
-        <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 14 }}>
+        <div key={group.jobNumber ?? group.entries[0].id} style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", margin: "4px 2px" }}>
             Job: {group.jobNumber ?? "—"}
             {group.entries.length > 1 && ` · ${group.entries.length} entries`}
           </div>
           {group.entries.map((jc, i) => {
-            const meta = statusMeta(jc.status);
+            const meta  = JC_STATUS_META[jc.status] ?? { label: jc.status, editable: false };
+            const trail = reviews[jc.id] ?? [];
             const isEditing = editingId === jc.id;
             return (
               <div
@@ -1150,7 +1176,8 @@ function MyJobCards({ onEdit, editingId }: {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>
-                    Entry {i + 1} · {jc.machine_number ?? "—"} · Batch {jc.material_code ?? "—"}
+                    {group.entries.length > 1 ? `Entry ${i + 1} · ` : ""}
+                    {jc.machine_number ?? "—"} · Batch {jc.material_code ?? "—"}
                     {" · "}Party/CODE {jc.party_code ?? "—"}
                   </div>
                   <span style={{
@@ -1161,11 +1188,40 @@ function MyJobCards({ onEdit, editingId }: {
                     {isEditing ? "editing…" : meta.label}
                   </span>
                 </div>
+
                 <div className="field-hint" style={{ marginTop: 6 }}>
                   {jc.job_date ?? "—"}
                   {jc.shift ? ` · ${jc.shift}` : ""}
                   {jc.planned_production_mt != null ? ` · planned ${(jc.planned_production_mt * 1000).toFixed(0)} kg` : ""}
                 </div>
+
+                {/* Approval timeline */}
+                {(jc.production_at || jc.oil_issued_at || jc.operator_submitted_at) && (
+                  <div style={{ fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.8, marginTop: 6 }}>
+                    {jc.production_at && <div>📋 Sent to Stores: <b>{fmtDateTime(jc.production_at)}</b></div>}
+                    {jc.oil_issued_at && <div>🛢 Oil issued by Stores: <b>{fmtDateTime(jc.oil_issued_at)}</b></div>}
+                    {jc.operator_submitted_at && <div>✅ Submitted for QC: <b>{fmtDateTime(jc.operator_submitted_at)}</b></div>}
+                  </div>
+                )}
+
+                {/* Lab review trail */}
+                {trail.length > 0 && (
+                  <div style={{ marginTop: 8, paddingLeft: 10, borderLeft: "2px solid var(--line)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                      Review trail ({trail.length})
+                    </div>
+                    {trail.map(r => (
+                      <div key={r.id} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 4 }}>
+                        <span className={`badge ${r.result === "ok" ? "ok" : "warn"}`}>
+                          {r.result === "ok" ? "OK" : "NOT OK"}
+                        </span>{" "}
+                        {fmtDateTime(r.reviewed_at)}
+                        {r.rejected_stage && ` · reopened: ${r.rejected_stage}`}
+                        {r.remark && <div style={{ marginLeft: 4 }}>&ldquo;{r.remark}&rdquo;</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
