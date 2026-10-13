@@ -135,9 +135,24 @@ function getAllowlist(): string[] | null {
     .filter((s) => s.length > 0);
 }
 
-/** True when sends are globally enabled. Defaults to FALSE (safe). */
+/**
+ * True when sends are globally enabled. Defaults to FALSE (safe).
+ * Tolerant of surrounding quotes/whitespace and common truthy spellings
+ * (true / 1 / yes / on), since env values pasted into dashboards often pick up
+ * stray quotes or spaces.
+ */
 function isEnabled(): boolean {
-  return (process.env.WHATSAPP_NOTIFY_ENABLED ?? "false").toLowerCase() === "true";
+  const raw = (process.env.WHATSAPP_NOTIFY_ENABLED ?? "")
+    .trim()
+    .replace(/^["']|["']$/g, "") // strip wrapping quotes
+    .toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes" || raw === "on";
+}
+
+/** Raw value of the enable flag, for diagnostic logging (quotes/space-safe). */
+function enabledRaw(): string {
+  const v = process.env.WHATSAPP_NOTIFY_ENABLED;
+  return v === undefined ? "(unset)" : JSON.stringify(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +412,9 @@ async function handleRecipient(ctx: {
     error = "no phone number";
   } else if (!ctx.enabled) {
     status = "skipped";
-    error = "WHATSAPP_NOTIFY_ENABLED=false";
+    // Record the ACTUAL raw env value so a mis-set flag (quotes, spaces, wrong
+    // environment, stale deploy) is diagnosable from the log, not guessed.
+    error = `WHATSAPP_NOTIFY_ENABLED not truthy; raw=${enabledRaw()}`;
   } else if (ctx.allowlist && !ctx.allowlist.includes(phoneKey(phone))) {
     status = "skipped";
     error = "not in WHATSAPP_NOTIFY_ALLOWLIST";
