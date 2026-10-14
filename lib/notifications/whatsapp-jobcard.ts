@@ -136,6 +136,22 @@ function getAllowlist(): string[] | null {
 }
 
 /**
+ * Supervisor CC list — E.164 numbers (comma-separated in WHATSAPP_NOTIFY_CC)
+ * that receive an ENGLISH copy of EVERY job-card transition, in addition to
+ * the role recipients. Env-driven so supervisors can be added/removed without
+ * a code change and independent of their app role. Returns raw E.164 strings
+ * (not reduced to digits) so they can be sent and logged normally.
+ */
+function getCcNumbers(): string[] {
+  const raw = process.env.WHATSAPP_NOTIFY_CC;
+  if (!raw || raw.trim() === "") return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
  * True when sends are globally enabled. Defaults to FALSE (safe).
  * Tolerant of surrounding quotes/whitespace and common truthy spellings
  * (true / 1 / yes / on), since env values pasted into dashboards often pick up
@@ -299,16 +315,37 @@ export async function notifyJobCardWhatsApp(
     // The next role is Operator exactly when the resulting status is 'pending'.
     const toOperator = jc.status === "pending";
 
+    // English variant of this transition's message. The role recipients use
+    // the primary message below (which may be Hindi for the Operator step);
+    // supervisor CC recipients always use this English variant.
+    const englishMessage: { template: string; templateLang: string; bodyValues: string[] } =
+      isRejection
+        ? {
+            template: rejectedTemplate,
+            templateLang: "en",
+            bodyValues: [
+              jobNumberVar,
+              materialVar,
+              sanitizeVar(review?.remark, 120) || "No remark given",
+            ],
+          }
+        : {
+            template: actionTemplate,
+            templateLang: "en",
+            bodyValues: [
+              jobNumberVar,
+              materialVar,
+              sanitizeVar(previousStageName(event), 40),
+              sanitizeVar(stageLabel(jc.status), 40),
+            ],
+          };
+
     let template: string;
     let templateLang: string; // must match the language the template was approved in
     let bodyValues: string[];
     if (isRejection) {
       // jobcard_rejected: {{1}} job, {{2}} material, {{3}} Lab remark
-      template = rejectedTemplate;
-      templateLang = "en";
-      const remarkVar =
-        sanitizeVar(review?.remark, 120) || "No remark given";
-      bodyValues = [jobNumberVar, materialVar, remarkVar];
+      ({ template, templateLang, bodyValues } = englishMessage);
     } else if (toOperator) {
       // jobcard_action_required_hi (Devanagari): {{1}} job, {{2}} material,
       //   {{3}} previous stage name (Hindi), {{4}} this stage name (Hindi)
@@ -323,14 +360,7 @@ export async function notifyJobCardWhatsApp(
     } else {
       // jobcard_action_required (English): {{1}} job, {{2}} material,
       //   {{3}} previous stage name, {{4}} this stage name
-      template = actionTemplate;
-      templateLang = "en";
-      bodyValues = [
-        jobNumberVar,
-        materialVar,
-        sanitizeVar(previousStageName(event), 40),
-        sanitizeVar(stageLabel(jc.status), 40),
-      ];
+      ({ template, templateLang, bodyValues } = englishMessage);
     }
 
     // ── 7. Resolve recipients for every target role, dedupe, exclude submitter.
@@ -356,12 +386,74 @@ export async function notifyJobCardWhatsApp(
       }
     }
 
-    if (recipients.length === 0) return; // no one to notify
+    // Track role recipients' phone digits so a CC number that is ALSO a role
+    // recipient on this transition is not messaged twice.
+    const rolePhoneKeys = new Set(
+      recipients
+        .map((r) => (r.phone_number ? phoneKey(r.phone_number) : ""))
+        .filter((k) => k.length > 0),
+    );
+
+    // ── 7b. Supervisor CC recipients — English copy of every transition. ────
+    // Resolved to their profile user_id so each gets its own idempotent log row
+    // keyed by (event_key, recipient_user_id). A CC number with no matching
+    // profile is skipped (can't key the log safely) and noted in the console.
+    const ccRecipients: Recipient[] = [];
+    for (const ccPhone of getCcNumbers()) {
+      const key = phoneKey(ccPhone);
+      if (!key) continue;
+      if (rolePhoneKeys.has(key)) continue; // already a role recipient here
+
+      // Match tolerantly: profiles.phone_number may be stored with or without a
+      // leading '+'. Try the common formats, then fall back to a digits-suffix
+      // match so "+91999..." / "91999..." / "999..." all resolve to the user.
+      const digits = key; // phoneKey() already stripped non-digits
+      const candidates = Array.from(
+        new Set([ccPhone, `+${digits}`, digits, digits.slice(-10)].filter(Boolean)),
+      );
+      const { data: profRows, error: profErr } = await admin
+        .from("profiles")
+        .select("id, full_name, phone_number")
+        .in("phone_number", candidates);
+
+      if (profErr) {
+        console.error("[whatsapp-jobcard] CC profile lookup failed:", profErr.message);
+        continue;
+      }
+      const rows =
+        (profRows as unknown as
+          | { id: string; full_name: string | null; phone_number: string | null }[]
+          | null) ?? [];
+      // Prefer an exact digits match (handles the 10-digit fallback safely).
+      const p =
+        rows.find((r) => r.phone_number && phoneKey(r.phone_number) === digits) ??
+        rows.find(
+          (r) => r.phone_number && phoneKey(r.phone_number).slice(-10) === digits.slice(-10),
+        ) ??
+        null;
+      if (!p?.id) {
+        console.warn(
+          `[whatsapp-jobcard] CC number ${ccPhone} has no matching profile — skipped`,
+        );
+        continue;
+      }
+      if (seen.has(p.id)) continue; // already receiving as a role recipient
+      seen.add(p.id);
+      // Use the stored profile phone (authoritative E.164) for sending/logging.
+      ccRecipients.push({
+        user_id: p.id,
+        full_name: p.full_name,
+        phone_number: p.phone_number ?? ccPhone,
+      });
+    }
+
+    if (recipients.length === 0 && ccRecipients.length === 0) return; // no one
 
     // ── 8. Dispatch + log each recipient. ───────────────────────────────────
     const enabled = isEnabled();
     const allowlist = getAllowlist();
 
+    // Role recipients get the primary message (Hindi for the Operator step).
     for (const r of recipients) {
       await handleRecipient({
         admin,
@@ -372,6 +464,23 @@ export async function notifyJobCardWhatsApp(
         template,
         templateLang,
         bodyValues,
+        jobCardId: jc.id,
+        factoryId,
+        recipient: r,
+      });
+    }
+
+    // Supervisor CC recipients always get the ENGLISH variant.
+    for (const r of ccRecipients) {
+      await handleRecipient({
+        admin,
+        enabled,
+        allowlist,
+        event,
+        eventKey,
+        template: englishMessage.template,
+        templateLang: englishMessage.templateLang,
+        bodyValues: englishMessage.bodyValues,
         jobCardId: jc.id,
         factoryId,
         recipient: r,
