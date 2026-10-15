@@ -62,6 +62,16 @@ export default function AppNav() {
         { href: "/dashboard",      label: "Dashboard" },
       ];
     }
+    // Generate COA (JSCI/QC/17) — A-20/1 only, Lab (chemist) + admins. A COA is
+    // a customer certificate tied to a dispatch, so a person must type the
+    // invoice/truck numbers; this is the one deliberate report-generation tab.
+    // Inserted before "Dashboard" so it sits with the other Lab actions.
+    if (!isA20 && (role === "chemist" || role === "factory_admin" || role === "company_admin")) {
+      const dashIdx = links.findIndex((l) => l.href === "/dashboard");
+      const coaLink = { href: "/lab-qc/generate-coa", label: "Generate COA" };
+      if (dashIdx >= 0) links.splice(dashIdx, 0, coaLink);
+      else links.push(coaLink);
+    }
   } else if (isA20) {
     // ── A-20 job_card module ──
     // operator on A-20 handles all three production / packing modules

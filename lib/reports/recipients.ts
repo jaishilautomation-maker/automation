@@ -61,3 +61,28 @@ export function recipientsFor(formType: ReportFormType): string[] {
   const roleAddrs = FORM_TYPE_ROLES[formType].map((r) => ROLE_EMAILS[r]);
   return Array.from(new Set([AUTOMATION_EMAIL, ...roleAddrs]));
 }
+
+// ─── COA (JSCI/QC/17) recipients ────────────────────────────────────────────
+// A COA is a customer-facing certificate tied to a dispatch. It goes to the
+// internal mailboxes only — Lab forwards the PDF to the customer. There is no
+// notification_recipients table in this project; recipient routing lives here
+// in code (see the module header). The "Cc" is modelled as additional entries
+// in the recipients array, which is exactly how sendEmail() delivers them
+// (Gmail API sends one message per recipient). sendEmail also unions in its own
+// global TEMP_CC_EMAILS (which already includes chinmaythakker@) and the lab_qc_
+// eventType CC to qcdombivli@, so this list is deduped downstream.
+
+/** Primary "To" recipients for a COA. */
+export const COA_TO = [AUTOMATION_EMAIL, LAB_QC_EMAIL] as const; // automation@, qcdombivli@
+
+/** Explicit "Cc" for a COA (per the brief). */
+export const COA_CC = ["chinmaythakker@jaishilsulphur.com"] as const;
+
+/**
+ * Full deduplicated COA recipient list (To + Cc). Passed as sendEmail
+ * ({ recipients }). Keeping To and Cc separate above lets the email body show
+ * them distinctly if ever needed; the transport treats them as one list.
+ */
+export function coaRecipients(): string[] {
+  return Array.from(new Set<string>([...COA_TO, ...COA_CC]));
+}
