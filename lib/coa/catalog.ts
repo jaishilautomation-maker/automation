@@ -100,8 +100,12 @@ export const BATCH_HEADER_KEYS = {
   shift:   "shift",
 } as const;
 
-/** Max batches on one COA before the Actual columns get too narrow to print. */
-export const MAX_BATCHES_PER_COA = 4;
+/**
+ * Max batches on one COA. Real MRF certificates (e.g. #467 Kottayam) carry 5
+ * batches, so 5 is the hard cap. Beyond 3 the per-batch Actual columns get
+ * narrow; the PDF shrinks the actual-column font for 4–5 batches.
+ */
+export const MAX_BATCHES_PER_COA = 5;
 /** Soft warning threshold — most COAs are <= 3 batches. */
 export const BATCH_WARN_THRESHOLD = 3;
 

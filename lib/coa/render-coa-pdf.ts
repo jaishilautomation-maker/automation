@@ -162,6 +162,9 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
 
   // ── Parameter table ──────────────────────────────────────────────────────
   const nB = snap.batchNumbers.length;
+  // Per-batch actual value font shrinks as batch count grows so 4–5 narrow
+  // columns stay legible on A4.
+  const actualSize = nB >= 5 ? 5.5 : nB === 4 ? 6 : 7;
   // Column widths: Sr | Parameters | Actual(nB sub-cols) | Min | Max | Method | Remarks
   const wSr = 22;
   const wMin = 34, wMax = 34, wMethod = 50, wRemarks = 58;
@@ -192,10 +195,11 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   text(ctx, "NO.", xSr + 2, headTop - 17, 6.5, bold);
   text(ctx, "PARAMETERS", xParam + 4, headTop - 13, 7, bold);
   text(ctx, "ACTUAL REPORT", xActual + 3, headTop - 8, 6.5, bold);
-  // batch sub-labels
+  // batch sub-labels (shrink for 4–5 batches so "B-416" fits the narrow col)
+  const subLabelSize = nB >= 5 ? 5 : nB === 4 ? 5.5 : 6;
   for (let i = 0; i < nB; i++) {
     const bx = xActual + i * wActualCol;
-    text(ctx, "B-" + snap.batchNumbers[i], bx + 2, headTop - 18, 6, reg);
+    text(ctx, "B-" + snap.batchNumbers[i], bx + 2, headTop - 18, subLabelSize, reg);
     if (i > 0) vline(ctx, bx, headBot, headTop - 10, 0.5, faint);
   }
   text(ctx, "PARTY'S SPEC", xMin + 2, headTop - 8, 6, bold);
@@ -233,7 +237,7 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
     for (let i = 0; i < nB; i++) {
       const bx = xActual + i * wActualCol;
       const val = r.actuals[i] ?? "-";
-      text(ctx, val, bx + 2, baseY, 7, reg);
+      text(ctx, val, bx + 2, baseY, actualSize, reg);
       if (i > 0) vline(ctx, bx, bot, top, 0.4, faint);
     }
 

@@ -32,6 +32,7 @@ import {
   type CoaSpec,
   type ResolvedBatch,
 } from "./resolve-coa";
+import { MAX_BATCHES_PER_COA } from "./catalog";
 import { renderCoaPdf, type CoaSnapshot, type SnapshotRow } from "./render-coa-pdf";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -163,7 +164,7 @@ function buildSnapshot(
 export async function generateCoa(input: GenerateCoaInput): Promise<GenerateCoaResult> {
   // Basic input validation (defence in depth — the UI also guards).
   if (!input.batchNumbers.length) return { ok: false, code: "bad_input", message: "At least one batch is required." };
-  if (input.batchNumbers.length > 4) return { ok: false, code: "bad_input", message: "At most 4 batches per COA." };
+  if (input.batchNumbers.length > MAX_BATCHES_PER_COA) return { ok: false, code: "bad_input", message: `At most ${MAX_BATCHES_PER_COA} batches per COA.` };
   if (!input.shipTo.trim()) return { ok: false, code: "bad_input", message: "Ship-to address is required." };
   if (!Number.isFinite(input.quantityMt) || input.quantityMt <= 0) return { ok: false, code: "bad_input", message: "Quantity (MT) must be a positive number." };
 
