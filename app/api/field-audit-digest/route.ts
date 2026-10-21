@@ -40,16 +40,30 @@ function getAdmin() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Previous calendar day in UTC, as ISO date strings [start, end). */
+// IST offset (UTC+5:30) in milliseconds. The factory works on IST days, so the
+// digest's "previous day" must be the previous IST calendar day, not UTC —
+// otherwise a full IST working day straddles two UTC days and rows get missed.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+/**
+ * Previous IST calendar day, returned as UTC ISO strings [start, end) that
+ * bound that IST day. Example: for "Oct 20 IST" the window is
+ * 2026-10-19T18:30:00Z (= Oct 20 00:00 IST) -> 2026-10-20T18:30:00Z.
+ */
 function previousDayRange(): { start: string; end: string; label: string } {
-  const now   = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-  const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  return {
-    start: start.toISOString(),
-    end:   end.toISOString(),
-    label: start.toISOString().slice(0, 10),
-  };
+  const now = new Date();
+  // Shift "now" into IST, take the IST calendar date.
+  const istNow = new Date(now.getTime() + IST_OFFSET_MS);
+  const istMidnightToday = Date.UTC(
+    istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(),
+  );
+  // IST midnight (start of today IST) expressed as a real UTC instant.
+  const startOfTodayIstUtc = istMidnightToday - IST_OFFSET_MS;
+  const start = new Date(startOfTodayIstUtc - 24 * 60 * 60 * 1000); // yesterday IST 00:00
+  const end   = new Date(startOfTodayIstUtc);                        // today IST 00:00
+  // Label = the IST date of the covered day (YYYY-MM-DD).
+  const label = new Date(start.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+  return { start: start.toISOString(), end: end.toISOString(), label };
 }
 
 function fmtDuration(seconds: number): string {
@@ -72,13 +86,18 @@ function escapeCSV(v: unknown): string {
 // Main handler
 // ---------------------------------------------------------------------------
 export async function GET(req: NextRequest) {
-  // Optional ?date=YYYY-MM-DD for manual testing (defaults to yesterday UTC).
+  // Optional ?date=YYYY-MM-DD for manual testing — interpreted as an IST day
+  // (matches the daily digest's IST window). Defaults to the previous IST day.
   const dateParam = req.nextUrl.searchParams.get("date");
   const { start, end, label } = dateParam
     ? (() => {
-        const d = new Date(dateParam + "T00:00:00.000Z");
-        const next = new Date(d.getTime() + 86400000);
-        return { start: d.toISOString(), end: next.toISOString(), label: dateParam };
+        // Start of the given IST date, as a real UTC instant.
+        const istMidnight = new Date(dateParam + "T00:00:00.000Z").getTime() - IST_OFFSET_MS;
+        return {
+          start: new Date(istMidnight).toISOString(),
+          end:   new Date(istMidnight + 86400000).toISOString(),
+          label: dateParam,
+        };
       })()
     : previousDayRange();
   const admin = getAdmin();
