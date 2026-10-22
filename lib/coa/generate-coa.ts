@@ -153,6 +153,7 @@ function buildSnapshot(
     qty: `${input.quantityMt} MT`,
     batchNumbers: input.batchNumbers,
     mfgDates: resolved.mfgDates.map(toDdMmYyyy),
+    expiryDate: resolved.expiryDate ? toDdMmYyyy(resolved.expiryDate) : "-",
     customerName,
     shipTo: input.shipTo,
     rows,

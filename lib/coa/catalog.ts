@@ -118,7 +118,7 @@ export const COA_LETTERHEAD = {
     "Bhandup-Goregaon Link Rd., Near Fortis Hospital,",
     "Bhandup, Mumbai-400078.",
     "Phone: 61407900  FAX: 61407979",
-    "E-Mail: jaishil@vsnl.net / jaishila20@gmail.com",
+    "E-Mail: support@jaishilsulphur.com",
   ],
   factory: [
     "Factory: Plot No. A/20/1, Phase 1, M.I.D.C.,",

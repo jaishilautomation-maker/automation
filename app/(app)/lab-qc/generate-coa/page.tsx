@@ -49,6 +49,7 @@ interface PreviewResult {
   shipToOptions: Array<{ label: string; address: string }>;
   lotNos: string[];
   mfgDates: string[];
+  expiryDate: string | null;
   missingBatches: string[];
   gaps: Array<{ label: string; field: string }>;
   outOfSpec: Array<{ label: string; batchNumber: string; value: number }>;
@@ -454,7 +455,8 @@ export default function GenerateCoaPage() {
           <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-soft)" }}>
             <strong>COA Date:</strong> today &nbsp;·&nbsp;
             <strong>Lot No:</strong> {preview.lotNos.join(", ") || "-"} &nbsp;·&nbsp;
-            <strong>Mfg Date(s):</strong> {preview.mfgDates.join(", ") || "-"}
+            <strong>Mfg Date(s):</strong> {preview.mfgDates.join(", ") || "-"} &nbsp;·&nbsp;
+            <strong>Expiry:</strong> {preview.expiryDate || "-"} <span style={{ color: "var(--ink-soft)" }}>(mfg + 2 yrs)</span>
           </div>
         )}
 

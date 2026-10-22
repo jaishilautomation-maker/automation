@@ -36,6 +36,7 @@ export interface CoaSnapshot {
   qty:          string;        // e.g. "10.000 MT"
   batchNumbers: string[];      // e.g. ["347","349"]
   mfgDates:     string[];      // dd-mm-yyyy each
+  expiryDate:   string;        // dd-mm-yyyy (earliest mfg + 2 years), or "-"
   customerName: string;
   shipTo:       string;        // multi-line ship-to block
   rows:         SnapshotRow[];
@@ -145,6 +146,7 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
     ["QTY:", snap.qty || "-"],
     ["BATCH NO:", snap.batchNumbers.join(", ") || "-"],
     ["MFG DATE:", snap.mfgDates.join(", ") || "-"],
+    ["EXPIRY DATE:", snap.expiryDate || "-"],   // mfg + 2 years, directly below mfg date
   ];
   let my = ctx.y;
   for (const [k, v] of metaLeft) {

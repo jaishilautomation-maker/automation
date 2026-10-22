@@ -89,6 +89,12 @@ export interface ResolveResult {
   /** Lot no(s) and mfg date(s) collected from the batches. */
   lotNos:   string[];
   mfgDates: string[];
+  /**
+   * Expiry = EARLIEST mfg date + 2 years (ISO yyyy-mm-dd), or null if no mfg
+   * date resolved. Earliest (not latest) so the certificate never claims a
+   * longer shelf life than the oldest batch in the lot actually has.
+   */
+  expiryDate: string | null;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -178,6 +184,7 @@ export function resolveCoa(batches: ResolvedBatch[], specs: CoaSpec[]): ResolveR
     noSpecRows:   specs.length === 0,
     lotNos,
     mfgDates,
+    expiryDate:   expiryFromMfgDates(mfgDates),
   };
 }
 
@@ -230,6 +237,33 @@ function resolveSlot(
     needsVerification,
     rowStatus,
   };
+}
+
+/**
+ * Parse a date that may be ISO (yyyy-mm-dd) or dd-mm-yyyy into a Date (UTC), or
+ * null if unparseable.
+ */
+function parseFlexibleDate(s: string): Date | null {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return new Date(Date.UTC(+iso[1], +iso[2] - 1, +iso[3]));
+  const dmy = /^(\d{2})-(\d{2})-(\d{4})/.exec(s);
+  if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2] - 1, +dmy[1]));
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? null : new Date(t);
+}
+
+/**
+ * Expiry = EARLIEST mfg date + 2 years, returned as ISO yyyy-mm-dd. Earliest so
+ * the certificate never over-states shelf life for the oldest batch in the lot.
+ * Returns null if no mfg date parses.
+ */
+export function expiryFromMfgDates(mfgDates: string[]): string | null {
+  const parsed = mfgDates.map(parseFlexibleDate).filter((d): d is Date => d != null);
+  if (parsed.length === 0) return null;
+  const earliest = parsed.reduce((a, b) => (a.getTime() <= b.getTime() ? a : b));
+  const exp = new Date(Date.UTC(earliest.getUTCFullYear() + 2, earliest.getUTCMonth(), earliest.getUTCDate()));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${exp.getUTCFullYear()}-${p(exp.getUTCMonth() + 1)}-${p(exp.getUTCDate())}`;
 }
 
 /** Pull lot_no / mfg_date out of a batch_analysis.test_results JSONB blob. */

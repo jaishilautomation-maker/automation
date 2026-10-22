@@ -47,6 +47,7 @@ export interface CoaPreviewResult {
   shipToOptions: Array<{ label: string; address: string }>;
   lotNos: string[];
   mfgDates: string[];
+  expiryDate: string | null;   // earliest mfg + 2 years (ISO), null if no mfg date
   // guard flags
   missingBatches: string[];
   gaps: Array<{ label: string; field: string }>;
@@ -141,6 +142,7 @@ export async function resolveCoaPreview(
     shipToOptions: (shipTos.data ?? []) as Array<{ label: string; address: string }>,
     lotNos: resolved.lotNos,
     mfgDates: resolved.mfgDates,
+    expiryDate: resolved.expiryDate,
     missingBatches: resolved.missingBatches,
     gaps: resolved.gaps,
     outOfSpec: resolved.outOfSpec,
