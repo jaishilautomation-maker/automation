@@ -106,35 +106,74 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const supabase = createClient();
+    let done = false;   // guards against the safety timeout racing a real result
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session) await loadProfile(session);
+    // Safety net: if getSession()/loadProfile hangs (e.g. an expired refresh
+    // token after a long idle period never resolves), never leave the app stuck
+    // on the loading spinner forever. After 10s, stop loading and treat the user
+    // as signed-out so the app redirects to /login instead of hanging.
+    const safety = setTimeout(() => {
+      if (done) return;
+      done = true;
+      console.warn("[auth-context] session resolution timed out — treating as signed out");
+      setUser(null);
+      setProfile(null);
       setLoading(false);
-    });
+    }, 10_000);
+
+    // Initial session load. Wrapped so setLoading(false) ALWAYS runs even if
+    // getSession rejects or loadProfile throws (the previous version left the
+    // spinner up forever on either failure).
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (done) return;
+        setUser(session?.user ?? null);
+        if (session) await loadProfile(session);
+      } catch (err) {
+        console.error("[auth-context] initial session load failed:", err);
+        setUser(null);
+        setProfile(null);
+      } finally {
+        if (!done) {
+          done = true;
+          clearTimeout(safety);
+          setLoading(false);
+        }
+      }
+    })();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         // SIGNED_IN fires after verifyOtp — this is when we load the profile.
         // TOKEN_REFRESHED also carries a valid session.
-        // Ignore other events to prevent re-entrant calls.
-        if (event === "SIGNED_OUT") {
+        // SIGNED_OUT / expired refresh token → clear everything and stop loading.
+        try {
+          if (event === "SIGNED_OUT" || !session) {
+            setUser(null);
+            setProfile(null);
+            return;
+          }
+          setUser(session.user);
+          await loadProfile(session);
+        } catch (err) {
+          console.error("[auth-context] auth state change failed:", err);
           setUser(null);
           setProfile(null);
+        } finally {
+          // Any auth event is a definitive resolution — stop the spinner and
+          // cancel the safety timeout.
+          done = true;
+          clearTimeout(safety);
           setLoading(false);
-          return;
         }
-        if (!session) {
-          setLoading(false);
-          return;
-        }
-        setUser(session.user);
-        await loadProfile(session);
-        setLoading(false);
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(safety);
+      subscription.unsubscribe();
+    };
   }, [loadProfile]);
 
   const signOut = useCallback(async () => {
