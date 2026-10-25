@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { sendEmail } from "@/lib/notifications/send-email";
-import { loadQcPhotoAttachments, buildPhotoHtml } from "@/lib/notifications/qc-photo-attachments";
+import { loadQcPhotos, photosToAttachments, buildPhotoHtml } from "@/lib/notifications/qc-photo-attachments";
 import {
   notifyJobCardWhatsApp,
   type JobCardNotifyEvent,
@@ -90,18 +90,23 @@ export async function POST(req: NextRequest) {
   await Promise.all([
     wantsEmail
       ? (async () => {
-          // Lab QC submissions embed any uploaded photos INLINE in the email so
-          // the recipient sees them in the body (the bucket is private, so we
-          // send the image bytes and reference them via cid:).
-          const attachments = eventType.startsWith("lab_qc_")
-            ? await loadQcPhotoAttachments(referenceId)
+          // Lab QC submissions show any uploaded photos in the email (Option 3):
+          //   • INLINE preview via a short-lived SIGNED URL (<img src=https://…>)
+          //     — keeps the HTML body tiny so Gmail never clips the message
+          //     (the old cid:/base64 inline path bloated the HTML past Gmail's
+          //     ~102 KB limit, hiding the photos behind "View entire message").
+          //   • PERMANENT download: the same images are attached as files, so
+          //     they remain retrievable after the 7-day signed URL expires.
+          const photos = eventType.startsWith("lab_qc_")
+            ? await loadQcPhotos(referenceId)
             : [];
-          const finalHtml = attachments.length
-            ? html! + buildPhotoHtml(attachments)
+          const finalHtml = photos.length
+            ? html! + buildPhotoHtml(photos)
             : html!;
+          const attachments = photos.length ? photosToAttachments(photos) : undefined;
           await sendEmail({
             eventType, subject: subject!, html: finalHtml, factoryId, referenceId, recipients,
-            attachments: attachments.length ? attachments : undefined,
+            attachments,
           });
         })()
       : Promise.resolve(),

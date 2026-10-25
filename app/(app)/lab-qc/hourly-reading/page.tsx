@@ -251,8 +251,21 @@ export default function HourlyReadingPage() {
 
       if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
 
-      // Flush pending photo uploads
-      await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+      // Flush pending photo uploads. Wrapped separately so an upload failure is
+      // reported distinctly (not mislabelled as the generic "Network error"
+      // below) and does NOT abort the save + email that already succeeded —
+      // but the chemist is clearly told the photo did not attach so they know
+      // the emailed record will be missing its image.
+      const uploaders = Object.values(uploaderRefs.current).filter(Boolean);
+      try {
+        await Promise.all(uploaders.map(r => r!.flush(newRow.id)));
+      } catch (photoErr) {
+        console.error("[hourly-reading] photo upload failed:", photoErr);
+        showToast(
+          "Reading saved, but the photo failed to upload — the email will not include it. Please re-add the photo and save again.",
+          true,
+        );
+      }
 
       // Fire-and-forget email
       const nowISO = new Date().toISOString();

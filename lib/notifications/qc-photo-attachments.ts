@@ -42,9 +42,29 @@ function mimeFor(path: string): { contentType: string; ext: string } {
  * Each returned attachment carries a `cid` so it can be embedded in the HTML
  * via `<img src="cid:...">`. Never throws — returns [] on any error.
  */
-export async function loadQcPhotoAttachments(
+/** Signed-URL validity: 7 days. The email is read soon after sending; after a
+ *  week the inline preview stops loading but the attached file (Option 3) is
+ *  always available as a permanent download. */
+const SIGNED_URL_TTL_S = 7 * 24 * 60 * 60;
+
+/** One resolved QC photo: both a signed URL (inline preview) and the raw bytes
+ *  (permanent downloadable attachment). */
+export interface QcPhoto {
+  filename:    string;
+  contentType: string;
+  content:     Buffer;
+  signedUrl:   string | null;
+}
+
+/**
+ * Load a QC record's photos, resolving BOTH a signed URL (for an inline <img>
+ * preview that keeps the HTML tiny so Gmail never clips it) AND the file bytes
+ * (attached as a permanent download). `recordId` is attachments.entity_id
+ * (== notifyEvent referenceId). Never throws — returns [] on any error.
+ */
+export async function loadQcPhotos(
   recordId: string | null | undefined,
-): Promise<EmailAttachment[]> {
+): Promise<QcPhoto[]> {
   if (!recordId) return [];
   try {
     const supabase = admin();
@@ -57,7 +77,7 @@ export async function loadQcPhotoAttachments(
       .limit(MAX_PHOTOS);
     if (error || !rows || rows.length === 0) return [];
 
-    const out: EmailAttachment[] = [];
+    const out: QcPhoto[] = [];
     let i = 0;
     for (const row of rows as { storage_path: string; file_name: string | null; mime_type: string | null }[]) {
       i++;
@@ -75,11 +95,16 @@ export async function loadQcPhotoAttachments(
           ? row.file_name
           : `photo-${i}.${ext}`;
 
+      // Signed URL for the inline preview (keeps the HTML body tiny).
+      const { data: signed } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(row.storage_path, SIGNED_URL_TTL_S);
+
       out.push({
         filename,
         contentType: row.mime_type || contentType,
         content: Buffer.from(arrayBuf),
-        cid: `qcphoto${i}@jsci`,
+        signedUrl: signed?.signedUrl ?? null,
       });
     }
     return out;
@@ -90,19 +115,42 @@ export async function loadQcPhotoAttachments(
 }
 
 /**
- * Build an HTML block that renders the inline photos (referenced by their cids)
- * so recipients see the images in the email body. Returns "" when there are
- * no photos.
+ * Convert resolved photos to EmailAttachment[] as PERMANENT DOWNLOADABLE files
+ * (no `cid` — they are NOT inlined as base64, which is what previously bloated
+ * the HTML and triggered Gmail's ~102 KB clip). The inline preview is handled
+ * separately by buildPhotoHtml() using the signed URLs.
  */
-export function buildPhotoHtml(attachments: EmailAttachment[]): string {
-  const inline = attachments.filter(a => a.cid);
-  if (inline.length === 0) return "";
-  const imgs = inline
+export function photosToAttachments(photos: QcPhoto[]): EmailAttachment[] {
+  return photos.map((p) => ({
+    filename:    p.filename,
+    contentType: p.contentType,
+    content:     p.content,
+    // no cid → downloadable attachment, not inline base64
+  }));
+}
+
+/**
+ * Build the inline-photo HTML block using SIGNED URLs (not cid:/base64), so the
+ * HTML stays tiny and Gmail does not clip the message. Returns "" when there
+ * are no photos with a usable URL.
+ */
+export function buildPhotoHtml(photos: QcPhoto[]): string {
+  const withUrl = photos.filter((p) => p.signedUrl);
+  if (withUrl.length === 0) return "";
+  const imgs = withUrl
     .map(
-      a => `<img src="cid:${a.cid}" alt="${a.filename}" style="max-width:260px;max-height:260px;` +
-           `border:1px solid #e0e0e0;border-radius:8px;margin:6px 8px 0 0;object-fit:contain" />`,
+      (p) => `<a href="${p.signedUrl}" target="_blank" style="text-decoration:none">` +
+             `<img src="${p.signedUrl}" alt="${escapeAttr(p.filename)}" ` +
+             `style="max-width:260px;max-height:260px;border:1px solid #e0e0e0;` +
+             `border-radius:8px;margin:6px 8px 0 0;object-fit:contain" /></a>`,
     )
     .join("");
-  return `<h4 style="margin:20px 0 8px;font-size:14px">Photos (${inline.length})</h4>` +
-         `<div>${imgs}</div>`;
+  return `<h4 style="margin:20px 0 8px;font-size:14px">Photos (${withUrl.length})</h4>` +
+         `<div>${imgs}</div>` +
+         `<p style="margin:6px 0 0;font-size:11px;color:#999">` +
+         `Inline previews expire in 7 days; the full images are attached to this email.</p>`;
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 }
