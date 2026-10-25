@@ -25,6 +25,7 @@ import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildHourlyReadingEmail } from "@/lib/notifications/lab-qc-emails";
+import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
 
 // ---------------------------------------------------------------------------
 // Recent reading row (for the "today's readings" summary below the form)
@@ -251,21 +252,12 @@ export default function HourlyReadingPage() {
 
       if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
 
-      // Flush pending photo uploads. Wrapped separately so an upload failure is
-      // reported distinctly (not mislabelled as the generic "Network error"
-      // below) and does NOT abort the save + email that already succeeded —
-      // but the chemist is clearly told the photo did not attach so they know
-      // the emailed record will be missing its image.
-      const uploaders = Object.values(uploaderRefs.current).filter(Boolean);
-      try {
-        await Promise.all(uploaders.map(r => r!.flush(newRow.id)));
-      } catch (photoErr) {
-        console.error("[hourly-reading] photo upload failed:", photoErr);
-        showToast(
-          "Reading saved, but the photo failed to upload — the email will not include it. Please re-add the photo and save again.",
-          true,
-        );
-      }
+      // Flush pending photo uploads. A failure here is reported distinctly (not
+      // mislabelled as the generic "Network error" below) and does NOT abort the
+      // save + email that already succeeded — the chemist is told the photo did
+      // not attach so they know the emailed record will be missing its image.
+      const photoOk = await flushPhotoUploads(Object.values(uploaderRefs.current), newRow.id);
+      if (!photoOk) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
 
       // Fire-and-forget email
       const nowISO = new Date().toISOString();

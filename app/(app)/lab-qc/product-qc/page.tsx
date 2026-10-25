@@ -25,6 +25,7 @@ import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { evalFormula } from "@/lib/formula";
 import { notifyQcFinalized } from "@/lib/qc-exchange/notify";
+import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
 import QcFieldRenderer, { type PhotoUploadProps } from "@/components/QcFieldRenderer";
 import type { PhotoUploaderHandle } from "@/components/PhotoUploader";
 import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types";
@@ -394,7 +395,7 @@ export default function ProductQcPage() {
           .eq("id", existingRecord.id);
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
-        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingRecord.id)));
+        if (!await flushPhotoUploads(Object.values(uploaderRefs.current), existingRecord.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
         {
           const { data: fresh } = await supabase
             .from("product_qc").select("overall_result").eq("id", existingRecord.id).maybeSingle();
@@ -482,7 +483,7 @@ export default function ProductQcPage() {
           .single();
 
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
-        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        if (!await flushPhotoUploads(Object.values(uploaderRefs.current), newRow.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
         {
           const { data: fresh } = await supabase
             .from("product_qc").select("overall_result").eq("id", newRow.id).maybeSingle();

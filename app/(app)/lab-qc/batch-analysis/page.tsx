@@ -30,6 +30,7 @@ import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 import { paramsForParty } from "@/lib/reports/batch-analysis-params";
 import { useFieldAudit } from "@/lib/use-field-audit";
+import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
 
 interface PartyOption {
   party_code: string;
@@ -465,7 +466,7 @@ export default function BatchAnalysisPage() {
           .eq("id", existingAnalysis.id);
 
     if (error) { showToast("Update failed: " + error.message, true); return; }
-        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(existingAnalysis.id)));
+        if (!await flushPhotoUploads(Object.values(uploaderRefs.current), existingAnalysis.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
         // Flush field-level audit log (one batched INSERT)
         await audit.flush(supabase, user.id, "batch_analysis", existingAnalysis.id);
         // Fire-and-forget: mail Final Inspection (all party params filled + pass)
@@ -548,7 +549,7 @@ export default function BatchAnalysisPage() {
         // page kept showing "Batch found — no analysis yet" after a
         // successful save (existingAnalysis was never populated post-insert).
         setExistingAnalysis(newRow as BatchAnalysis);
-        await Promise.all(Object.values(uploaderRefs.current).filter(Boolean).map(r => r!.flush(newRow.id)));
+        if (!await flushPhotoUploads(Object.values(uploaderRefs.current), newRow.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
         // Flush field-level audit log (one batched INSERT)
         await audit.flush(supabase, user.id, "batch_analysis", newRow.id);
         // Fire-and-forget: mail Final Inspection (all party params filled + pass)

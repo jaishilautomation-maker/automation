@@ -30,6 +30,7 @@ import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 import { useFieldAudit } from "@/lib/use-field-audit";
+import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -649,9 +650,7 @@ export default function RmQcPage() {
         showToast("Could not save: " + (error?.message ?? "unknown"), true); return;
       }
 
-      const flushPromises = Object.values(uploaderRefs.current)
-        .filter(Boolean).map(ref => ref!.flush(newRow.id));
-      await Promise.all(flushPromises);
+      if (!await flushPhotoUploads(Object.values(uploaderRefs.current), newRow.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
       // Flush field-level audit log (one batched INSERT)
       await audit.flush(supabase, user.id, "rm_qc", newRow.id);
 

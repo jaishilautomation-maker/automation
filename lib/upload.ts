@@ -169,3 +169,46 @@ export async function getSignedUrl(storagePath: string): Promise<string | null> 
   if (error || !data) return null;
   return data.signedUrl;
 }
+
+// ---------------------------------------------------------------------------
+// 5. Flush all pending photo uploaders for a saved QC record
+// ---------------------------------------------------------------------------
+
+/**
+ * Flush every pending PhotoUploader against a freshly-saved QC record id, and
+ * report success/failure so the caller can surface a clear message.
+ *
+ * Why this exists: every Lab QC form used to do
+ *   `await Promise.all(Object.values(uploaderRefs.current)...flush(id))`
+ * directly inside the submit try-block, so an upload failure was swallowed by
+ * the generic "Network error" catch — the record saved and the email fired
+ * without the photo, with nothing telling the chemist. This centralises the
+ * flush so a failed photo upload is reported distinctly everywhere, without
+ * aborting the save/email that already succeeded.
+ *
+ * `uploaders` is the ref map's values (PhotoUploaderHandle | null). We accept
+ * `unknown`-ish handles to avoid a circular import with the component; each is
+ * expected to expose `flush(id): Promise<void>`.
+ *
+ * Returns true if all uploads succeeded (or there was nothing to upload),
+ * false if any failed. Never throws.
+ */
+export async function flushPhotoUploads(
+  uploaders: Array<{ flush: (id: string) => Promise<void> } | null>,
+  recordId: string,
+): Promise<boolean> {
+  const pending = uploaders.filter(Boolean) as Array<{ flush: (id: string) => Promise<void> }>;
+  if (pending.length === 0) return true;
+  try {
+    await Promise.all(pending.map((r) => r.flush(recordId)));
+    return true;
+  } catch (err) {
+    console.error("[flushPhotoUploads] photo upload failed:", err);
+    return false;
+  }
+}
+
+/** Standard message shown when a photo upload fails after the record saved. */
+export const PHOTO_UPLOAD_FAILED_MSG =
+  "Record saved, but a photo failed to upload — the email will not include it. " +
+  "Please re-add the photo and save again.";
