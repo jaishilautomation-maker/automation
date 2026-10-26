@@ -155,6 +155,12 @@ const PhotoUploader = forwardRef<PhotoUploaderHandle, Props>(function PhotoUploa
       setState("error");
       setError(err instanceof Error ? err.message : "Upload failed");
       setProgress("");
+      // Re-throw so a deferred flush() (called by the form on submit) rejects
+      // and the page's flushPhotoUploads() reports the failure. Without this,
+      // a failed Storage upload or attachments-row insert was swallowed here
+      // and the form thought the photo saved. The inline error state above
+      // still shows on the widget for the immediate-upload path.
+      throw err instanceof Error ? err : new Error("Upload failed");
     }
   }
 
