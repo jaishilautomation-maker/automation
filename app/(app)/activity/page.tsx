@@ -73,12 +73,15 @@ function todayISO() {
 }
 
 const MODULE_LABELS: Record<string, string> = {
-  batch_analysis: "Batch Analysis",
-  rm_receipt:     "RM Receipt",
-  rm_qc:          "RM QC",
-  job_card:       "Job Card",
-  breakdown:      "Breakdown",
-  pm:             "Preventive Maintenance",
+  batch_analysis:    "Batch Analysis",
+  rm_receipt:        "RM Receipt",
+  rm_qc:             "RM QC",
+  job_card:          "Job Card",
+  breakdown:         "Breakdown",
+  pm:                "Preventive Maintenance",
+  hourly_reading:    "Hourly Reading",
+  stores_oil_issue:  "Stores — Oil Issue",
+  coa:               "COA Generation",
 };
 
 export default function ActivityPage() {

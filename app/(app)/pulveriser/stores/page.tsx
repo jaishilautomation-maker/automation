@@ -21,6 +21,7 @@ import { useToast } from "@/lib/toast-context";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildStoresEmail } from "@/lib/notifications/pulveriser-emails";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 export default function PulveriserStoresPage() {
   const { user, profile } = useAuth();
@@ -32,6 +33,7 @@ export default function PulveriserStoresPage() {
   const [active, setActive]           = useState<PulveriserJobCard | null>(null);
   const [oilIssued, setOilIssued]     = useState("");
   const [submitting, setSubmitting]   = useState(false);
+  const audit = useFieldAudit();
 
   const loadPending = useCallback(async () => {
     setLoadingList(true);
@@ -52,7 +54,7 @@ export default function PulveriserStoresPage() {
     setActive(jc);
     setOilIssued(jc.oil_issued_kg?.toString() ?? "");
   };
-  const goBack = () => { setActive(null); setOilIssued(""); };
+  const goBack = () => { setActive(null); setOilIssued(""); audit.reset(); };
 
   const canSubmit = oilIssued.trim() !== "" && Number.isFinite(Number(oilIssued));
 
@@ -78,6 +80,11 @@ export default function PulveriserStoresPage() {
         showToast("Save blocked — factory access ya card status jaanchein.", true);
         return;
       }
+
+      // Flush field-level audit log (one batched INSERT, keyed to this job card).
+      // Fallback record in case the field was never blurred (e.g. Enter to submit).
+      audit.record("oil_issued_kg", oilIssued);
+      await audit.flush(supabase, user.id, "stores_oil_issue", active.id);
 
       // Fire-and-forget email notification
       const nowISO = new Date().toISOString();
@@ -173,7 +180,8 @@ export default function PulveriserStoresPage() {
         <h3>Oil issue</h3>
         <label>Oil issued (kg) *</label>
         <input type="number" min="0" step="0.001" placeholder="0"
-          value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
+          value={oilIssued} onChange={e => setOilIssued(e.target.value)}
+          onBlur={() => audit.record("oil_issued_kg", oilIssued)} />
         <div className="field-hint" style={{ marginTop: 6 }}>
           Issue karte hi card operator ke liye khul jaayega.
         </div>

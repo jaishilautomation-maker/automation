@@ -26,6 +26,7 @@ import type { QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildHourlyReadingEmail } from "@/lib/notifications/lab-qc-emails";
 import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
+import { useFieldAudit } from "@/lib/use-field-audit";
 
 // ---------------------------------------------------------------------------
 // Recent reading row (for the "today's readings" summary below the form)
@@ -83,6 +84,7 @@ export default function HourlyReadingPage() {
   const [remarks, setRemarks]         = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]   = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+  const audit = useFieldAudit();
 
   // Autosave the live form state on every change (debounced inside the hook).
   const draftSave = draft.save;
@@ -252,6 +254,9 @@ export default function HourlyReadingPage() {
 
       if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
 
+      // Flush field-level audit log (one batched INSERT)
+      await audit.flush(supabase, user.id, "hourly_reading", newRow.id);
+
       // Flush pending photo uploads. A failure here is reported distinctly (not
       // mislabelled as the generic "Network error" below) and does NOT abort the
       // save + email that already succeeded — the chemist is told the photo did
@@ -298,6 +303,7 @@ export default function HourlyReadingPage() {
       setRemarks("");
       setMachine("M1");
       setReadingTime(new Date().toISOString().slice(0, 16));
+      audit.reset();
       draft.clear();
       resolveBatch(batchNumber);
     } catch {
@@ -340,6 +346,7 @@ export default function HourlyReadingPage() {
         <select
           value={machine}
           onChange={e => setMachine(e.target.value as MachineOption)}
+          onBlur={e => audit.record("machine", e.target.value)}
         >
           {MACHINE_OPTIONS.map(m => (
             <option key={m} value={m}>{m}</option>
@@ -351,6 +358,7 @@ export default function HourlyReadingPage() {
           type="datetime-local"
           value={readingTime}
           onChange={e => setReadingTime(e.target.value)}
+          onBlur={() => audit.record("reading_time", readingTime)}
         />
       </div>
 
@@ -371,6 +379,7 @@ export default function HourlyReadingPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  onBlur={(key, val) => audit.record(key, val)}
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,
@@ -389,6 +398,7 @@ export default function HourlyReadingPage() {
                 placeholder="Optional notes for this reading"
                 value={remarks}
                 onChange={e => setRemarks(e.target.value)}
+                onBlur={() => audit.record("remarks", remarks)}
               />
             </div>
           )}
