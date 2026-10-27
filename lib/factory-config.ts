@@ -14,17 +14,47 @@
 // Both MUST have NEXT_PUBLIC_ prefix — they are embedded into the client
 // bundle at build time (safe: factory name/code are not secrets).
 //
-// If the env vars are absent (local dev, CI, or old deployment without them),
-// the defaults below keep the existing A-20/1 behaviour unchanged.
+// LOCAL DEV (no env vars set):
+//   The process-select page stores the developer's choice in sessionStorage
+//   under the key "jsci_local_process". This file reads that value at runtime
+//   so the rest of the app behaves as if the env var were set.
+//   Falls back to "A20_1" if neither the env var nor sessionStorage is set.
 // =============================================================================
 
+const LOCAL_PROCESS_KEY = "jsci_local_process";
+
+/**
+ * Resolve the factory code: env var (build-time) → sessionStorage (local dev).
+ * The sessionStorage read is guarded so it never throws in SSR / Node contexts.
+ */
+function resolveFactoryCode(): string {
+  if (process.env.NEXT_PUBLIC_FACTORY_CODE) {
+    return process.env.NEXT_PUBLIC_FACTORY_CODE;
+  }
+  // Runtime fallback for local dev — sessionStorage is browser-only
+  if (typeof window !== "undefined") {
+    const saved = sessionStorage.getItem(LOCAL_PROCESS_KEY);
+    if (saved) return saved;
+  }
+  return "A20_1";
+}
+
+function resolveFactoryName(code: string): string {
+  if (process.env.NEXT_PUBLIC_FACTORY_NAME) {
+    return process.env.NEXT_PUBLIC_FACTORY_NAME;
+  }
+  const names: Record<string, string> = {
+    A20_1: "Dombivli A-20/1",
+    A20:   "Dombivli A-20",
+  };
+  return names[code] ?? code;
+}
+
 /** Internal factory code. Matches the `code` column in the `factories` table. */
-export const FACTORY_CODE: string =
-  process.env.NEXT_PUBLIC_FACTORY_CODE ?? "A20_1";
+export const FACTORY_CODE: string = resolveFactoryCode();
 
 /** Human-readable factory name shown in the header and login screen. */
-export const FACTORY_NAME: string =
-  process.env.NEXT_PUBLIC_FACTORY_NAME ?? "Dombivli A-20/1";
+export const FACTORY_NAME: string = resolveFactoryName(FACTORY_CODE);
 
 /**
  * Returns true if this deployment is for the given factory code.

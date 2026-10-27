@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:a20_1": "node -e \"require('fs').cpSync('.env.a20_1','.env.local')\" && next dev -p 3000",
+    "dev:a20": "node -e \"require('fs').cpSync('.env.a20','.env.local')\" && next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

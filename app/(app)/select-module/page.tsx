@@ -27,14 +27,42 @@ import {
   factoriesForModule,
   modulesForUser,
 } from "@/lib/module-context";
-import { FACTORY_CODE, FACTORY_NAME, DB_FACTORY_CODE } from "@/lib/factory-config";
+import { FACTORY_NAME } from "@/lib/factory-config";
 import type { ActivityModule, AppRole, Factory } from "@/lib/types";
 
-// Is this a factory-scoped deployment?
-const IS_FACTORY_SCOPED = !!(
+// ---------------------------------------------------------------------------
+// Local-dev process resolution
+//
+// On Vercel, NEXT_PUBLIC_FACTORY_CODE is set at build time → IS_FACTORY_SCOPED=true.
+// In local dev it is not set, so we fall back to sessionStorage which is written
+// by process-select/page.tsx when the developer picks A-20/1 or A-20.
+// We cannot use the module-level FACTORY_CODE constant here because it is
+// evaluated once at bundle load time (during SSR, before the browser sets
+// sessionStorage), so we read sessionStorage directly inside the component.
+// ---------------------------------------------------------------------------
+
+// True on Vercel deployments; false in local dev.
+const IS_FACTORY_SCOPED_ENV = !!(
   process.env.NEXT_PUBLIC_FACTORY_CODE &&
   process.env.NEXT_PUBLIC_FACTORY_CODE !== ""
 );
+
+const LOCAL_PROCESS_KEY = "jsci_local_process";
+
+/** Returns the effective factory code: env var (build-time) or sessionStorage (local dev). */
+function getEffectiveFactoryCode(): string {
+  if (process.env.NEXT_PUBLIC_FACTORY_CODE) return process.env.NEXT_PUBLIC_FACTORY_CODE;
+  if (typeof window !== "undefined") {
+    const saved = sessionStorage.getItem(LOCAL_PROCESS_KEY);
+    if (saved) return saved;
+  }
+  return "";
+}
+
+/** True if a specific factory has been selected (either via env var or local sessionStorage). */
+function getIsFactoryScoped(): boolean {
+  return !!getEffectiveFactoryCode();
+}
 
 // ---------------------------------------------------------------------------
 // Demo role helpers (factory_admin only) — exported for AppHeader
@@ -68,9 +96,10 @@ const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string;
 // ---------------------------------------------------------------------------
 // Landing route per role per module
 // ---------------------------------------------------------------------------
-function landingPath(module: ActivityModule, role: AppRole | null): string {
+function landingPath(module: ActivityModule, role: AppRole | null, factoryCode?: string): string {
+  const code = factoryCode ?? getEffectiveFactoryCode();
   if (module === "job_card") {
-    if (FACTORY_CODE === "A20") return "/production-job-card";
+    if (code === "A20") return "/production-job-card";
     if (role === "operator")                          return "/pulveriser/operator";
     if (role === "stores")                            return "/stores";
     if (role === "production_incharge")               return "/pulveriser/production";
@@ -113,6 +142,14 @@ export default function SelectModulePage() {
   const [step, setStep] = useState<"module" | "factory">("module");
   const [pickedModule, setPickedModule] = useState<ActivityModule | null>(null);
 
+  // Read factory scope from sessionStorage (covers local dev process selection).
+  // Must be state so it re-evaluates after the component mounts in the browser
+  // — the module-level constant IS_FACTORY_SCOPED_ENV is always false in local dev.
+  const [IS_FACTORY_SCOPED, setIsFactoryScoped] = useState(IS_FACTORY_SCOPED_ENV);
+  useEffect(() => {
+    setIsFactoryScoped(getIsFactoryScoped());
+  }, []);
+
   const loading = authLoading || moduleLoading;
   const role    = profile?.role ?? null;
   const isAdmin = role === "factory_admin" || role === "company_admin";
@@ -142,12 +179,17 @@ export default function SelectModulePage() {
   }, [router, setActiveModule]);
 
   // ──────────────────────────────────────────────────────────────────────────
-  // FAST PATH: deployment-scoped factory
+  // FAST PATH: deployment-scoped factory (Vercel env var OR local sessionStorage)
   // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (loading) return;
     if (!IS_FACTORY_SCOPED) return;
-    if (!activeFactory) return;
+
+    // On Vercel the module-context populates activeFactory from the DB.
+    // In local dev (sessionStorage selection) there is no env var so the
+    // module-context fast path is skipped and activeFactory stays null.
+    // We only gate on activeFactory when we're in a true Vercel deployment.
+    if (IS_FACTORY_SCOPED_ENV && !activeFactory) return;
 
     // factory_admin / company_admin → show role picker (rendered below)
     if (isAdmin) return;
@@ -164,7 +206,7 @@ export default function SelectModulePage() {
       router.replace(landingPath(modules[0], role));
       return;
     }
-  }, [loading, activeFactory, role, isAdmin, modules, router, setActiveModule]);
+  }, [loading, IS_FACTORY_SCOPED, activeFactory, role, isAdmin, modules, router, setActiveModule]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // STANDARD PATH: multi-factory deployment auto-advance
@@ -194,7 +236,7 @@ export default function SelectModulePage() {
   // Render states
   // ──────────────────────────────────────────────────────────────────────────
 
-  if (loading || (IS_FACTORY_SCOPED && !activeFactory)) {
+  if (loading || (IS_FACTORY_SCOPED_ENV && IS_FACTORY_SCOPED && !activeFactory)) {
     return (
       <div className="module-wrap">
         <div className="empty">Loading…</div>

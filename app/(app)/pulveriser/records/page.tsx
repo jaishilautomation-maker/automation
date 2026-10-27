@@ -395,14 +395,16 @@ export default function PulveriserRecordsPage() {
                   </Section>
                 )}
 
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ marginTop: 16 }}
-                  onClick={() => setSelected(null)}
-                >
-                  {t.close}
-                </button>
+                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => setSelected(null)}
+                  >
+                    {t.close}
+                  </button>
+                </div>
               </>
             );
           })()}

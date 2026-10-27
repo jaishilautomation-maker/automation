@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Keep the per-factory template files in git (they have no real secrets on first commit)
+# Fill in real credentials locally; .env.local (active file) is always ignored.
+!.env.a20_1
+!.env.a20
 
 # vercel
 .vercel

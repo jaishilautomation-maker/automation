@@ -56,6 +56,11 @@ export default function LoginPage() {
   const router = useRouter();
   const { profileError } = useAuth();
 
+  // Preserve ?process= param through the login flow for local dev
+  const processParam = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("process") ?? ""
+    : "";
+
   // ── Form state ────────────────────────────────────────────────────────────
   const [step, setStep]       = useState<"phone" | "otp">("phone");
   const [phone, setPhone]     = useState("");     // raw user input
@@ -145,7 +150,8 @@ export default function LoginPage() {
       }
 
       // Session is live — navigate to root which server-redirects to /select-module
-      router.push("/");
+      // Pass the process param so the server gate is satisfied in local dev
+      router.push(processParam ? `/?process=${encodeURIComponent(processParam)}` : "/");
       router.refresh();
     } catch {
       setError("Could not reach the server. Check your internet connection.");

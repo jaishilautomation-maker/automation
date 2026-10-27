@@ -21,9 +21,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useModule } from "@/lib/module-context";
 import { useEffectiveRole } from "@/lib/use-effective-role";
-import { FACTORY_CODE, FACTORY_NAME } from "@/lib/factory-config";
+import { FACTORY_NAME } from "@/lib/factory-config";
 
-const isA20 = FACTORY_CODE === "A20";
+// Read the effective factory code at runtime so local dev sessionStorage picks
+// are honoured. The module-level FACTORY_CODE constant is frozen at SSR time.
+const LOCAL_PROCESS_KEY = "jsci_local_process";
+function getRuntimeFactoryCode(): string {
+  if (process.env.NEXT_PUBLIC_FACTORY_CODE) return process.env.NEXT_PUBLIC_FACTORY_CODE;
+  if (typeof window !== "undefined") {
+    const saved = sessionStorage.getItem(LOCAL_PROCESS_KEY);
+    if (saved) return saved;
+  }
+  return "A20_1";
+}
 
 export default function AppNav() {
   const pathname = usePathname();
@@ -32,6 +42,9 @@ export default function AppNav() {
   // so the nav reflects exactly what that role sees.
   const { effectiveRole, isAdmin } = useEffectiveRole();
   const role = effectiveRole;
+
+  // Evaluate per render so local dev process picks take effect immediately.
+  const isA20 = getRuntimeFactoryCode() === "A20";
 
   // Hide nav on the module/factory selector itself
   if (pathname === "/select-module") return null;
