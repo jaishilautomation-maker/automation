@@ -65,7 +65,7 @@ export interface CoaPreviewResult {
 async function loadSpecs(client: DB, partyCode: string): Promise<CoaSpec[]> {
   const { data, error } = await client
     .from("coa_customer_specs")
-    .select("parameter, parameter_label, unit, min_value, max_value, target_value, test_method, remarks, sort_order, needs_verification")
+    .select("parameter, parameter_label, unit, min_value, max_value, target_value, test_method, remarks, sort_order, needs_verification, display_as_passing")
     .eq("party_code", partyCode)
     .eq("is_active", true);
   if (error) throw error;

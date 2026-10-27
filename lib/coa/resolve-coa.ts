@@ -32,6 +32,13 @@ export interface CoaSpec {
   remarks:          string | null;
   sort_order:       number | null;
   needs_verification: boolean;
+  /**
+   * When true, the ACTUAL for this (mesh) row is printed as % PASSING
+   * (= 100 - retained) instead of the % retained stored in batch_analysis, and
+   * the spec min/max are compared on that passing basis. Used by MRF. Optional
+   * so callers that don't select the column still type-check.
+   */
+  display_as_passing?: boolean;
 }
 
 /** A resolved batch: its number + the batch_analysis.test_results JSONB. */
@@ -207,12 +214,24 @@ function resolveSlot(
   const remarks = spec?.remarks ?? null;
   const hasSpec = !!spec;
   const needsVerification = spec?.needs_verification ?? false;
+  // MRF mesh rows report % PASSING = 100 - retained. Transform both the printed
+  // value and the raw used for averaging; min/max are already on the passing
+  // basis in the spec, so pass/fail compares the transformed value directly.
+  const asPassing = spec?.display_as_passing === true;
+  const toDisplay = (raw: unknown): { value: number | null; rawForAvg: unknown } => {
+    const retained = num(raw);
+    if (!asPassing) return { value: retained, rawForAvg: raw };
+    if (retained == null) return { value: null, rawForAvg: raw };
+    const passing = 100 - retained;
+    // keep source precision: 100 - retained preserves decimals of retained
+    return { value: passing, rawForAvg: passing };
+  };
 
   const rawPerBatch: unknown[] = [];
   const actuals: ResolvedActual[] = batches.map((b) => {
     const raw = field && b.testResults ? b.testResults[field] : undefined;
-    rawPerBatch.push(raw);
-    const value = num(raw);
+    const { value, rawForAvg } = toDisplay(raw);
+    rawPerBatch.push(rawForAvg);
     return { batchNumber: b.batchNumber, value, status: statusFor(value, min, max) };
   });
 
