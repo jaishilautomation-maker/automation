@@ -31,6 +31,7 @@ import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 import { paramsForParty } from "@/lib/reports/batch-analysis-params";
 import { useFieldAudit } from "@/lib/use-field-audit";
 import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
+import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
 
 interface PartyOption {
   party_code: string;
@@ -110,6 +111,9 @@ export default function BatchAnalysisPage() {
   const [srNo, setSrNo]                 = useState(d0?.srNo ?? "");
   const [shift, setShift]               = useState(d0?.shift ?? "");   // "day" | "night" | ""
   const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
+  // Who physically ran the analysis (login user stays authoritative as chemist_id).
+  // Stored in test_results.analysis_by.
+  const [analysisBy, setAnalysisBy]     = useState("");
   const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
   const [reworkAction, setReworkAction] = useState<ReworkAction | "">(d0?.reworkAction ?? "");
   const [submitting, setSubmitting]     = useState(false);
@@ -322,6 +326,7 @@ export default function BatchAnalysisPage() {
           setMfgDate(trh.mfg_date != null ? String(trh.mfg_date) : new Date().toISOString().slice(0, 10));
           setShift(trh.shift != null ? String(trh.shift) : "");
           setLotNo(trh.lot_no != null ? String(trh.lot_no) : "");
+          setAnalysisBy(trh[ANALYSIS_BY_KEY] != null ? String(trh[ANALYSIS_BY_KEY]) : "");
         }
         setReworkAction(
           ((existing as BatchAnalysis & { rework_action?: ReworkAction | null }).rework_action ?? "") as ReworkAction | ""
@@ -355,6 +360,7 @@ export default function BatchAnalysisPage() {
     setMfgDate(new Date().toISOString().slice(0, 10));
     setShift("");
     setLotNo("");
+    setAnalysisBy("");
     audit.reset();
     draft.clear();
   };
@@ -442,6 +448,7 @@ export default function BatchAnalysisPage() {
       if (srNo.trim())   testResults["sr_no"]  = srNo.trim();
       if (shift)         testResults["shift"]  = shift;
       if (lotNo.trim())  testResults["lot_no"] = lotNo.trim();
+      if (analysisBy)    testResults[ANALYSIS_BY_KEY] = analysisBy;
       if (mfgDate)       testResults["mfg_date"] = mfgDate;
 
       const appearanceVal = values["colour_appearance"] ?? null;
@@ -705,6 +712,17 @@ export default function BatchAnalysisPage() {
                 />
               </div>
             </div>
+            <label>Analysis By</label>
+            <select
+              value={analysisBy}
+              onChange={e => setAnalysisBy(e.target.value)}
+              onBlur={e => audit.record(ANALYSIS_BY_KEY, e.target.value)}
+            >
+              <option value="">— Select —</option>
+              {ANALYSIS_BY_OPTIONS.map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
             <div className="row2">
               <div>
                 <label>Manufacturing Date *</label>

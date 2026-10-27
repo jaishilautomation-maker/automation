@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
+import { statusLabel, stageRoleLabel } from "@/lib/pulveriser/job-card-stage";
 import type { FactoryQcSummary } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ type ProdSource = "job_card" | "breakdown" | "preventive";
 
 interface JobCardRow {
   id: string;
-  status: "pending_stores" | "pending" | "submitted_for_qc" | "finalized";
+  status: "pending_stores" | "pending" | "submitted_for_qc" | "pending_production" | "finalized";
   machine_number: string | null;
   job_date: string | null;
   shift: string | null;
@@ -429,6 +430,15 @@ export default function DashboardPage() {
   const jcPending   = jobCards.filter(j => j.status !== "finalized").length;
   const bdOngoing   = breakdowns.filter(b => !b.finish_at).length;
 
+  // How many in-progress job cards are waiting on each role (for the summary
+  // strip). Uses the same status→role mapping as the WhatsApp notifier.
+  const waitingByRole = jobCards.reduce<Record<string, number>>((acc, j) => {
+    const role = stageRoleLabel(j.status);
+    if (role) acc[role] = (acc[role] ?? 0) + 1;
+    return acc;
+  }, {});
+  const WAITING_ROLE_ORDER = ["Stores", "Operator", "Lab QC", "Production"];
+
   return (
     <>
       {/* Source filter */}
@@ -471,6 +481,23 @@ export default function DashboardPage() {
               <div className="lbl">In progress</div>
             </div>
           </div>
+
+          {/* Waiting-on-role summary: how many in-progress cards sit at each stage */}
+          {!loadingProd && jcPending > 0 && (
+            <div className="card" style={{ padding: "10px 16px", marginBottom: 12 }}>
+              <div className="helper-row" style={{ margin: 0, flexWrap: "wrap", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>Waiting on</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {WAITING_ROLE_ORDER.filter(r => waitingByRole[r]).map(r => (
+                    <span key={r} className="badge warn" style={{ fontSize: 12 }}>
+                      {r}: {waitingByRole[r]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="card">
             <div className="helper-row"><h3 style={{ margin: 0 }}>Pulveriser job cards</h3></div>
             <div style={{ overflowX: "auto" }}>
@@ -489,7 +516,7 @@ export default function DashboardPage() {
                       <td>{j.party_code ?? "—"}</td>
                       <td>
                         <span className={`badge ${j.status === "finalized" ? "ok" : "warn"}`}>
-                          {j.status === "finalized" ? "Finalized" : j.status === "submitted_for_qc" ? "Submitted" : j.status === "pending_stores" ? "Awaiting Stores" : "Pending"}
+                          {statusLabel(j.status)}
                         </span>
                       </td>
                     </tr>

@@ -31,6 +31,7 @@ import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildRmQcEmail } from "@/lib/notifications/lab-qc-emails";
 import { useFieldAudit } from "@/lib/use-field-audit";
 import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
+import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -179,6 +180,9 @@ export default function RmQcPage() {
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [values, setValues]           = useState<Record<string, string>>({});
   const [testDate, setTestDate]       = useState(d0?.testDate ?? new Date().toISOString().slice(0, 10));
+  // Who physically ran the analysis (login user stays authoritative as chemist_id).
+  // Stored in test_results.analysis_by.
+  const [analysisBy, setAnalysisBy]   = useState("");
   // Chemist name is taken from the logged-in user (profile.full_name) — no
   // manual entry. Used only for email/sheet display; chemist_id = user.id
   // remains the authoritative identity on the record.
@@ -627,6 +631,8 @@ export default function RmQcPage() {
 
       // Crude Sulphur: persist the auto-determined IS-6655 grade alongside the
       // raw values so it flows to the DB, email, and sheet.
+      if (analysisBy) testResults[ANALYSIS_BY_KEY] = analysisBy;
+
       const isCrudeSulphur = isA20_1 && qcRmType === "crude_sulphur";
       if (isCrudeSulphur && crudeGrade) {
         testResults["incoming_grade"] = crudeGrade;
@@ -716,6 +722,7 @@ export default function RmQcPage() {
       setCrudeInvoiceNumber("");
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
+      setAnalysisBy("");
       audit.reset();
       draft.clear();
     } catch {
@@ -847,6 +854,17 @@ export default function RmQcPage() {
                     <p className="field-hint" style={{ marginTop: 4 }}>From your login</p>
                   </div>
                 </div>
+                <label>Analysis By</label>
+                <select
+                  value={analysisBy}
+                  onChange={e => setAnalysisBy(e.target.value)}
+                  onBlur={e => audit.record(ANALYSIS_BY_KEY, e.target.value)}
+                >
+                  <option value="">— Select —</option>
+                  {ANALYSIS_BY_OPTIONS.map(n => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
                 {crudeSpecs.length === 0 && (
                   <p className="field-hint" style={{ marginTop: 6, color: "var(--warn)" }}>
                     No IS-6655 specs on file — run migration 048 to enable the
@@ -1295,6 +1313,17 @@ export default function RmQcPage() {
                     <p className="field-hint" style={{ marginTop: 4 }}>From your login</p>
                   </div>
                 </div>
+                <label>Analysis By</label>
+                <select
+                  value={analysisBy}
+                  onChange={e => setAnalysisBy(e.target.value)}
+                  onBlur={e => audit.record(ANALYSIS_BY_KEY, e.target.value)}
+                >
+                  <option value="">— Select —</option>
+                  {ANALYSIS_BY_OPTIONS.map(n => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
               </div>
 
               {loadingDefs ? (

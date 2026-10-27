@@ -26,6 +26,7 @@ import type { QcTestDefinition } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildHourlyReadingEmail } from "@/lib/notifications/lab-qc-emails";
 import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
+import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
 import { useFieldAudit } from "@/lib/use-field-audit";
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,10 @@ export default function HourlyReadingPage() {
 
   // Machine selection (M1 / M2) — stored inside test_results.machine
   const [machine, setMachine] = useState<MachineOption>(d0?.machine ?? "M1");
+
+  // Who physically ran the analysis (in addition to the login user, which stays
+  // authoritative as recorded_by). Stored in test_results.analysis_by.
+  const [analysisBy, setAnalysisBy] = useState("");
 
   // Test definitions
   const [testDefs, setTestDefs]       = useState<QcTestDefinition[]>([]);
@@ -231,6 +236,8 @@ export default function HourlyReadingPage() {
       const testResults: Record<string, number | string> = {};
       // Record the selected machine (M1 / M2) alongside the test values.
       testResults.machine = machine;
+      // Record who ran the analysis (login user stays authoritative as recorded_by).
+      if (analysisBy) testResults[ANALYSIS_BY_KEY] = analysisBy;
       testDefs.forEach(d => {
         const raw = values[d.test_key];
         if (!raw) return;
@@ -302,6 +309,7 @@ export default function HourlyReadingPage() {
       setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
       setRemarks("");
       setMachine("M1");
+      setAnalysisBy("");
       setReadingTime(new Date().toISOString().slice(0, 16));
       audit.reset();
       draft.clear();
@@ -350,6 +358,18 @@ export default function HourlyReadingPage() {
         >
           {MACHINE_OPTIONS.map(m => (
             <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+
+        <label>Analysis By</label>
+        <select
+          value={analysisBy}
+          onChange={e => setAnalysisBy(e.target.value)}
+          onBlur={e => audit.record(ANALYSIS_BY_KEY, e.target.value)}
+        >
+          <option value="">— Select —</option>
+          {ANALYSIS_BY_OPTIONS.map(n => (
+            <option key={n} value={n}>{n}</option>
           ))}
         </select>
 
