@@ -595,7 +595,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                     <td style={tdS}>{r.orderNo}</td>
                     <td style={{ ...tdS, fontWeight: 600 }}>{r.componentName}</td>
                     <td style={{ ...tdS, padding: "4px 6px" }}>
-                      <input type="text" placeholder=t("colBatchNoLower") value={r.rmBatchNo}
+                      <input type="text" placeholder={t("colBatchNoLower")} value={r.rmBatchNo}
                         onChange={e => updateRow(r.formulaItemId, "rmBatchNo", e.target.value)}
                         style={{ width: 90 }} />
                     </td>

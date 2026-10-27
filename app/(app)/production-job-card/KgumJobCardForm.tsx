@@ -262,7 +262,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
       signOperator, signChemist, signManager, draftSave, isEdit]);
 
   // ── Row updater ───────────────────────────────────────────────────────────
-  type RowField = "addedQty" | "rmBatchNo" | t("colRemark");
+  type RowField = "addedQty" | "rmBatchNo" | "remark";
   const updateRow = (id: string, field: RowField, val: string) =>
     setRows(prev => prev.map(r => r.formulaItemId === id ? { ...r, [field]: val } : r));
 

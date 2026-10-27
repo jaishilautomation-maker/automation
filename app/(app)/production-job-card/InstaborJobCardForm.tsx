@@ -52,15 +52,6 @@ import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
-
-// ---------------------------------------------------------------------------
-import { useEffect, useState, useCallback } from "react";
-import { usePathname } from "next/navigation";
-import DateField from "@/components/DateField";
-import { createClient } from "@/lib/supabase-browser";
-import { useToast } from "@/lib/toast-context";
-import { useFormDraft, draftKey } from "@/lib/use-form-draft";
-import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
 
@@ -594,7 +585,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
                   <td style={tdS}>{r.orderNo}</td>
                   <td style={{ ...tdS, fontWeight: 600 }}>{r.componentName}</td>
                   <td style={{ ...tdS, padding: "4px 6px" }}>
-                    <input type="text" placeholder=t("colBatchNo") value={r.rmBatchNo}
+                    <input type="text" placeholder={t("colBatchNo")} value={r.rmBatchNo}
                       onChange={e => updater(r.formulaItemId, "rmBatchNo", e.target.value)}
                       style={{ width: 90 }} />
                   </td>

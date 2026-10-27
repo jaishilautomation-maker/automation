@@ -566,7 +566,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
                     {isReturn && <span style={{ marginLeft: 6, fontSize: 11, color: "#e65100", fontWeight: 700 }}>← 573 kg only</span>}
                   </td>
                   <td style={{ ...tdS, padding: "4px 6px" }}>
-                    <input type="text" placeholder=t("colBatchNo") value={r.rmBatchNo}
+                    <input type="text" placeholder={t("colBatchNo")} value={r.rmBatchNo}
                       onChange={e => updateRow(r.formulaItemId, "rmBatchNo", e.target.value)}
                       style={{ width: 90 }} />
                   </td>
