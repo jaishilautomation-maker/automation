@@ -577,14 +577,14 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: ACCENT + "10", borderBottom: `2px solid ${ACCENT}40` }}>
-              <th style={thStyle}>Order</th>
-              <th style={thStyle}>Component</th>
-              <th style={thStyle}>Material Code</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Instructed (kg)</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Added (kg)</th>
-              <th style={thStyle}>RM Batch No</th>
-              <th style={thStyle}>Drum / Bag No</th>
-              {phase === "A" && <th style={thStyle}>TDS / Note</th>}
+              <th style={thStyle}>{t("colOrder")}</th>
+              <th style={thStyle}>{t("colComponent")}</th>
+              <th style={thStyle}>{t("colMaterialCode")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("colInstructedKg")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("colAddedKg")}</th>
+              <th style={thStyle}>{t("colRmBatchNo")}</th>
+              <th style={thStyle}>{t("colDrumBagNo")}</th>
+              {phase === "A" && <th style={thStyle}>{t("colTdsNote")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -602,7 +602,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                       <select value={jsc3Selection} onChange={e => setJsc3Selection(e.target.value)}
                         style={{ fontSize: 13, padding: "3px 6px", borderRadius: 4,
                           border: !jsc3Selection ? "2px solid var(--warn)" : "1px solid var(--line)" }}>
-                        <option value="">— select —</option>
+                        <option value="">{t("selectOption")}</option>
                         {JSC3_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : (
@@ -686,7 +686,9 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             <input type="number" step="any" value={batchSize} onChange={e => setBatchSize(e.target.value)} />
             {parseFloat(batchSize) !== REF_BATCH_KG && (
               <div className="field-hint" style={{ color: "#1565c0" }}>
-                Template batch: {REF_BATCH_KG} kg · quantities scaled proportionally
+                {lang === "hi"
+                  ? `टेम्पलेट बैच: ${REF_BATCH_KG} kg · मात्राएँ अनुपात में बदली गई हैं`
+                  : `Template batch: ${REF_BATCH_KG} kg · quantities scaled proportionally`}
               </div>
             )}
           </div>
@@ -716,7 +718,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           <div className="empty">{t("loadingFormula")}</div>
         ) : rowsA.length === 0 ? (
           <div className="field-hint" style={{ color: "var(--warn)" }}>
-            No Phase A formula items found. Run migration 013 on the A-20 Supabase project.
+            {lang === "hi" ? "फेज़ A के लिए कोई फॉर्मूला आइटम नहीं मिला।" : "No Phase A formula items found. Run migration 013 on the A-20 Supabase project."}
           </div>
         ) : renderTable(rowsA, updateRowA, "A")}
       </div>
@@ -725,15 +727,17 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
       <div className="card">
         <SectionHeader title={t("secSulphurBagDetails")} />
         <div className="field-hint" style={{ marginBottom: 12 }}>
-          Enter weight of each Sulphur bag. Total is calculated automatically.
+          {lang === "hi"
+            ? "प्रत्येक सल्फर बैग का वज़न दर्ज करें। कुल स्वचालित रूप से गणना होगी।"
+            : "Enter weight of each Sulphur bag. Total is calculated automatically."}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {[0, 10].map(offset => (
             <table key={offset} style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: ACCENT + "10" }}>
-                  <th style={thStyle}>Bag No.</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Weight (kg)</th>
+                  <th style={thStyle}>{t("colBagNo")}</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>{t("colWeightKg")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -754,7 +758,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <div style={{ marginTop: 14, padding: "10px 14px", background: ACCENT + "08", borderRadius: 8,
           display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ fontSize: 13 }}>
-            <span style={{ color: "var(--ink-soft)" }}>Bag weight total:</span>{" "}
+            <span style={{ color: "var(--ink-soft)" }}>{t("bagWeightTotal")}</span>{" "}
             <b style={{ color: ACCENT }}>{bagWeightTotal.toFixed(2)} kg</b>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -767,8 +771,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8,
             background: "var(--warn-soft)", border: "1px solid var(--warn)",
             fontSize: 13, color: "var(--warn)", fontWeight: 600 }}>
-            ⚠ Sulphur Added ({sulphurAddedKg} kg) differs from bag weight total ({bagWeightTotal.toFixed(2)} kg).
-            Reconcile before saving.
+            {t("valSulphurMismatch")}
           </div>
         )}
       </div>
@@ -807,7 +810,9 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         {loadingFormula ? (
           <div className="empty">{t("loadingFormula")}</div>
         ) : rowsB.length === 0 ? (
-          <div className="field-hint" style={{ color: "var(--warn)" }}>No Phase B formula items found.</div>
+          <div className="field-hint" style={{ color: "var(--warn)" }}>
+            {lang === "hi" ? "फेज़ B के लिए कोई फॉर्मूला आइटम नहीं मिला।" : "No Phase B formula items found."}
+          </div>
         ) : renderTable(rowsB, updateRowB, "B")}
         <div className="row2" style={{ marginTop: 14 }}>
           <div>
@@ -857,7 +862,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             {t("saveAsDraft")}
           </button>
         )}
-        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>{t(t("cancel"))}</button>
+        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>{t("cancel")}</button>
       </div>
     </>
   );
