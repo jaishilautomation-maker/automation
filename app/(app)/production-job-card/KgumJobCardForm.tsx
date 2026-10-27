@@ -445,7 +445,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
                           <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>TDS ↓</span>
                         ) : (
                           <input type="text" placeholder={t("placeholderRemark")} value={r.remark}
-                            onChange={e => updateRow(r.formulaItemId, t("colRemark"), e.target.value)}
+                            onChange={e => updateRow(r.formulaItemId, "remark", e.target.value)}
                             style={{ width: 110 }} />
                         )}
                       </td>
@@ -535,7 +535,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
           </button>
         )}
         <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>
-          {t(t("cancel"))}
+          {t("cancel")}
         </button>
       </div>
     </>

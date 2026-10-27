@@ -880,7 +880,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
           </button>
         )}
         <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>
-          {t(t("cancel"))}
+          {t("cancel")}
         </button>
       </div>
     </>
