@@ -49,6 +49,64 @@ function toE164(raw: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Brand logo — the Jaishil mark, served from public/favicon.ico (which is the
+// Jaishil logo). Falls back to the inline SVG recreation only if the image
+// fails to load, so the card never renders empty.
+// ---------------------------------------------------------------------------
+function JaishilLogo() {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (!imgFailed) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/favicon.ico"
+          alt="Jaishil"
+          width={72}
+          height={72}
+          style={{ objectFit: "contain" }}
+          onError={() => setImgFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  // Inline SVG fallback (crisp at any size, no asset required).
+  return (
+    <div style={{ display: "flex", justifyContent: "center" }}>
+      <svg width="72" height="72" viewBox="0 0 120 120" role="img" aria-label="Jaishil">
+        <rect x="6" y="6" width="108" height="108" rx="16" fill="#fff" stroke="#e4e4e7" />
+        {/* black swoosh monogram */}
+        <path
+          d="M78 24 L52 86 q-3 8 -12 8 h-6 l20 -50 q3 -8 -3 -8 h-8 l4 -10 q2 -6 9 -6 h14 q10 0 7 12 z"
+          fill="#111"
+        />
+        {/* green bar */}
+        <rect x="30" y="74" width="60" height="9" rx="2" fill="#1a9e5f" />
+        <text
+          x="60" y="106" textAnchor="middle"
+          fontFamily="Arial, sans-serif" fontWeight="700" fontSize="15" fill="#1a9e5f"
+          letterSpacing="1"
+        >
+          JAISHIL
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+/** WhatsApp glyph for the Send-OTP button. */
+function WhatsAppIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+      style={{ marginRight: 8, verticalAlign: "-3px" }}>
+      <path d="M12.04 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.75.46 3.45 1.32 4.95L2 22l5.3-1.39c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.9-4.44 9.9-9.9S17.5 2 12.04 2zm0 18.02c-1.48 0-2.93-.4-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.24-8.23 2.2 0 4.27.86 5.83 2.42a8.19 8.19 0 0 1 2.41 5.82c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.17.25-.64.81-.79.98-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.14.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43l-.48-.01c-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28z"/>
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -183,10 +241,20 @@ export default function LoginPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="auth-wrap">
-      <div className="auth-card">
+      <div className="auth-card auth-card-centered">
 
-        <h2>Sign in / लॉगिन</h2>
-        <div className="auth-sub">JSCI · {FACTORY_NAME}</div>
+        <JaishilLogo />
+
+        <h2 style={{ textAlign: "center", fontSize: 22, marginTop: 14 }}>Sign in / लॉगिन</h2>
+        <div
+          className="auth-brand"
+          style={{ textAlign: "center", color: "var(--clay)", fontWeight: 700, fontSize: 14, marginTop: 2 }}
+        >
+          JSCI — {FACTORY_NAME}
+        </div>
+        <div className="auth-sub" style={{ textAlign: "center", marginBottom: 20 }}>
+          Plot No. A/20/1, MIDC, Dombivli (East)
+        </div>
 
         {error && <div className="auth-error">{error}</div>}
 
@@ -230,18 +298,19 @@ export default function LoginPage() {
             </div>
 
             <button
-              className="btn btn-primary"
+              className="btn btn-whatsapp"
               type="button"
-              style={{ marginTop: 16 }}
+              style={{ marginTop: 16, width: "100%" }}
               disabled={loading}
               onClick={handleSendOtp}
             >
-              {loading ? "Sending…" : "Send OTP via WhatsApp"}
+              <WhatsAppIcon />
+              {loading ? "Sending…" : "Send OTP on WhatsApp"}
             </button>
 
-            <div className="small-note" style={{ marginTop: 14 }}>
-              You will receive a 6-digit code on WhatsApp.
-              Accounts are set up by your admin — contact admin if you can&apos;t log in.
+            <div className="small-note" style={{ marginTop: 14, textAlign: "center" }}>
+              6-digit OTP will be sent to your WhatsApp.<br />
+              खाता पंजीकृत होने पर लॉगिन कर सकते हैं।
             </div>
           </>
         )}
