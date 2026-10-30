@@ -7,7 +7,7 @@
 //    ellipsis or other multi-byte Unicode) to prevent Turbopack parse errors.
 // =============================================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { createClient } from "@/lib/supabase-browser";
@@ -1133,11 +1133,11 @@ const PARTICULARS_NAMES = [
 ] as const;
 
 /**
- * Autocomplete text input.
- * - Shows matching suggestions from `suggestions` list as the user types.
- * - Matches from 2+ characters (case-insensitive, any position in the name).
- * - If the user types something not in the list, it is accepted as a free entry.
- * - Selecting a suggestion fills the input and closes the dropdown.
+ * Autocomplete text input with full keyboard navigation.
+ * - ArrowDown/ArrowUp: move highlighted suggestion
+ * - Enter: select highlighted suggestion (prevents form submit)
+ * - Escape: close suggestion list
+ * - Mouse click still works as before
  */
 function AutocompleteInput({
  value,
@@ -1151,6 +1151,8 @@ function AutocompleteInput({
  placeholder?: string;
 }) {
  const [open, setOpen] = useState(false);
+ const [activeIdx, setActiveIdx] = useState(-1);
+ const listRef = useRef<HTMLDivElement>(null);
 
  const filtered = value.trim().length >= 1
   ? suggestions.filter(s =>
@@ -1158,34 +1160,76 @@ function AutocompleteInput({
    )
   : [];
 
+ // Reset highlight whenever the filtered list changes
+ useEffect(() => { setActiveIdx(-1); }, [value]);
+
+ const scrollItemIntoView = (idx: number) => {
+  if (!listRef.current) return;
+  const items = listRef.current.querySelectorAll<HTMLDivElement>("[data-acitem]");
+  items[idx]?.scrollIntoView({ block: "nearest" });
+ };
+
+ const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (!open || filtered.length === 0) {
+   if (e.key === "Escape") setOpen(false);
+   return;
+  }
+  if (e.key === "ArrowDown") {
+   e.preventDefault();
+   const next = activeIdx < filtered.length - 1 ? activeIdx + 1 : 0;
+   setActiveIdx(next);
+   scrollItemIntoView(next);
+  } else if (e.key === "ArrowUp") {
+   e.preventDefault();
+   const prev = activeIdx > 0 ? activeIdx - 1 : filtered.length - 1;
+   setActiveIdx(prev);
+   scrollItemIntoView(prev);
+  } else if (e.key === "Enter") {
+   if (activeIdx >= 0 && activeIdx < filtered.length) {
+    e.preventDefault(); // stop form submission
+    onChange(filtered[activeIdx]);
+    setOpen(false);
+    setActiveIdx(-1);
+   }
+  } else if (e.key === "Escape") {
+   e.preventDefault();
+   setOpen(false);
+   setActiveIdx(-1);
+  }
+ };
+
  return (
   <div style={{ position: "relative" }}>
    <input
     type="text"
     placeholder={placeholder ?? "Start typing..."}
     value={value}
-    onChange={e => { onChange(e.target.value); setOpen(true); }}
+    onChange={e => { onChange(e.target.value); setOpen(true); setActiveIdx(-1); }}
     onFocus={() => setOpen(true)}
     onBlur={() => setTimeout(() => setOpen(false), 150)}
+    onKeyDown={handleKeyDown}
     autoComplete="off"
    />
    {open && filtered.length > 0 && (
-    <div style={{
+    <div ref={listRef} style={{
      position: "absolute", top: "100%", left: 0, right: 0, zIndex: 300,
      background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
      boxShadow: "0 4px 16px rgba(0,0,0,.12)",
      maxHeight: 220, overflowY: "auto",
     }}>
-     {filtered.map(s => (
+     {filtered.map((s, i) => (
       <div key={s}
-       onMouseDown={() => { onChange(s); setOpen(false); }}
+       data-acitem
+       onMouseDown={() => { onChange(s); setOpen(false); setActiveIdx(-1); }}
+       onMouseEnter={() => setActiveIdx(i)}
+       onMouseLeave={() => setActiveIdx(-1)}
        style={{
         padding: "9px 14px", cursor: "pointer", fontSize: 13,
-        background: s === value ? "var(--clay-soft)" : undefined,
-        color: s === value ? "var(--clay)" : "var(--ink)",
+        background: i === activeIdx
+         ? "var(--clay-soft)"
+         : s === value ? "var(--clay-soft)" : undefined,
+        color: i === activeIdx || s === value ? "var(--clay)" : "var(--ink)",
        }}
-       onMouseEnter={e => (e.currentTarget.style.background = "var(--clay-soft)")}
-       onMouseLeave={e => (e.currentTarget.style.background = s === value ? "var(--clay-soft)" : "")}
       >
        {/* Highlight the matching part */}
        {(() => {
@@ -1215,7 +1259,7 @@ function AutocompleteInput({
 // SHARED -- Searchable Code dropdown (used by both Received and Supplied)
 // =============================================================================
 
-/** Reusable searchable single-select dropdown for Code fields */
+/** Reusable searchable single-select dropdown for Code fields — with keyboard navigation */
 function CodeDropdown({
  codes,
  value,
@@ -1229,12 +1273,63 @@ function CodeDropdown({
 }) {
  const [search, setSearch]  = useState("");
  const [open, setOpen]    = useState(false);
+ const [activeIdx, setActiveIdx] = useState(-1);
+ const listRef = useRef<HTMLDivElement>(null);
+
  const filtered = search.trim()
   ? codes.filter(c => c.toLowerCase().includes(search.toLowerCase()))
   : codes;
+
+ // Index 0 = "(Blanks) -- Clear", indices 1..N = filtered items
+ const totalItems = 1 + filtered.length;
+
+ useEffect(() => { setActiveIdx(-1); }, [search]);
+
+ const scrollItemIntoView = (idx: number) => {
+  if (!listRef.current) return;
+  const items = listRef.current.querySelectorAll<HTMLDivElement>("[data-cditem]");
+  items[idx]?.scrollIntoView({ block: "nearest" });
+ };
+
+ const selectByIdx = (idx: number) => {
+  if (idx === 0) {
+   onChange(""); setOpen(false); setSearch("");
+  } else {
+   onChange(filtered[idx - 1]); setOpen(false); setSearch("");
+  }
+  setActiveIdx(-1);
+ };
+
+ const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === "ArrowDown") {
+   e.preventDefault();
+   const next = activeIdx < totalItems - 1 ? activeIdx + 1 : 0;
+   setActiveIdx(next);
+   scrollItemIntoView(next);
+  } else if (e.key === "ArrowUp") {
+   e.preventDefault();
+   const prev = activeIdx > 0 ? activeIdx - 1 : totalItems - 1;
+   setActiveIdx(prev);
+   scrollItemIntoView(prev);
+  } else if (e.key === "Enter") {
+   e.preventDefault();
+   if (activeIdx >= 0) {
+    selectByIdx(activeIdx);
+   } else if (filtered.length === 1) {
+    // Auto-select the only remaining result on Enter
+    selectByIdx(1);
+   }
+  } else if (e.key === "Escape") {
+   e.preventDefault();
+   setOpen(false); setSearch(""); setActiveIdx(-1);
+  }
+ };
+
+ const isActive = (idx: number) => idx === activeIdx;
+
  return (
   <div style={{ position: "relative" }}>
-   <div onClick={() => setOpen(p => !p)} style={{
+   <div onClick={() => { setOpen(p => !p); setSearch(""); setActiveIdx(-1); }} style={{
     width: "100%", padding: "10px 12px",
     border: "1px solid var(--line)", borderRadius: 8,
     fontSize: 15, background: "#fff", cursor: "pointer",
@@ -1251,23 +1346,31 @@ function CodeDropdown({
     }}>
      <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
       <input autoFocus type="text" placeholder="Search..."
-       value={search} onChange={e => setSearch(e.target.value)}
+       value={search}
+       onChange={e => setSearch(e.target.value)}
        onClick={e => e.stopPropagation()}
+       onKeyDown={handleSearchKeyDown}
        style={{ width: "100%", padding: "6px 10px",
         border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }} />
      </div>
-     <div style={{ overflowY: "auto", flex: 1 }}>
-      <div onClick={() => { onChange(""); setOpen(false); setSearch(""); }}
+     <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
+      <div data-cditem
+       onClick={() => { onChange(""); setOpen(false); setSearch(""); }}
+       onMouseEnter={() => setActiveIdx(0)}
+       onMouseLeave={() => setActiveIdx(-1)}
        style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
         color: "var(--ink-soft)", borderBottom: "1px solid var(--line)",
-        background: !value ? "var(--clay-soft)" : undefined }}>
+        background: isActive(0) || !value ? "var(--clay-soft)" : undefined }}>
        (Blanks) -- Clear
       </div>
-      {filtered.map(c => (
-       <div key={c} onClick={() => { onChange(c); setOpen(false); setSearch(""); }}
+      {filtered.map((c, i) => (
+       <div key={c} data-cditem
+        onClick={() => { onChange(c); setOpen(false); setSearch(""); }}
+        onMouseEnter={() => setActiveIdx(i + 1)}
+        onMouseLeave={() => setActiveIdx(-1)}
         style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13,
-         background: value === c ? "var(--clay-soft)" : undefined,
-         color: value === c ? "var(--clay)" : "var(--ink)" }}>
+         background: isActive(i + 1) || value === c ? "var(--clay-soft)" : undefined,
+         color: isActive(i + 1) || value === c ? "var(--clay)" : "var(--ink)" }}>
         {c}
        </div>
      ))}
@@ -1283,7 +1386,7 @@ function CodeDropdown({
 );
 }
 
-/** Reusable multi-select filter dropdown for history table */
+/** Reusable multi-select filter dropdown for history table — with keyboard navigation */
 function CodeFilterDropdown({
  codes,
  selected,
@@ -1298,9 +1401,52 @@ function CodeFilterDropdown({
  onClose: () => void;
 }) {
  const [search, setSearch] = useState("");
+ const [activeIdx, setActiveIdx] = useState(-1);
+ const listRef = useRef<HTMLDivElement>(null);
+
  const filtered = search.trim()
   ? codes.filter(c => c.toLowerCase().includes(search.toLowerCase()))
   : codes;
+
+ // Index layout: 0 = "(Select All)", 1 = "(Blanks)", 2..N = filtered items
+ const totalItems = 2 + filtered.length;
+
+ useEffect(() => { setActiveIdx(-1); }, [search]);
+
+ const scrollItemIntoView = (idx: number) => {
+  if (!listRef.current) return;
+  const items = listRef.current.querySelectorAll<HTMLElement>("[data-cfditem]");
+  items[idx]?.scrollIntoView({ block: "nearest" });
+ };
+
+ const toggleByIdx = (idx: number) => {
+  if (idx === 0) onClear();
+  else if (idx === 1) onToggle("");
+  else onToggle(filtered[idx - 2]);
+ };
+
+ const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === "ArrowDown") {
+   e.preventDefault();
+   const next = activeIdx < totalItems - 1 ? activeIdx + 1 : 0;
+   setActiveIdx(next);
+   scrollItemIntoView(next);
+  } else if (e.key === "ArrowUp") {
+   e.preventDefault();
+   const prev = activeIdx > 0 ? activeIdx - 1 : totalItems - 1;
+   setActiveIdx(prev);
+   scrollItemIntoView(prev);
+  } else if (e.key === "Enter") {
+   e.preventDefault();
+   if (activeIdx >= 0) toggleByIdx(activeIdx);
+  } else if (e.key === "Escape") {
+   e.preventDefault();
+   onClose();
+  }
+ };
+
+ const isActive = (idx: number) => idx === activeIdx;
+
  return (
   <div style={{
    position: "absolute", top: "100%", right: 0,
@@ -1311,27 +1457,40 @@ function CodeFilterDropdown({
    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
     <input autoFocus type="text" placeholder="Search..."
      value={search} onChange={e => setSearch(e.target.value)}
+     onKeyDown={handleSearchKeyDown}
      style={{ width: "100%", padding: "6px 10px",
       border: "1px solid var(--line)", borderRadius: 6, fontSize: 13 }} />
    </div>
-   <div style={{ overflowY: "auto", flex: 1 }}>
-    <label style={{ display: "flex", alignItems: "center", gap: 8,
-     padding: "9px 14px", cursor: "pointer", fontSize: 13,
-     fontWeight: 700, borderBottom: "1px solid var(--line)" }}>
+   <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
+    <label data-cfditem
+     onMouseEnter={() => setActiveIdx(0)}
+     onMouseLeave={() => setActiveIdx(-1)}
+     style={{ display: "flex", alignItems: "center", gap: 8,
+      padding: "9px 14px", cursor: "pointer", fontSize: 13,
+      fontWeight: 700, borderBottom: "1px solid var(--line)",
+      background: isActive(0) ? "var(--clay-soft)" : undefined }}>
      <input type="checkbox" checked={selected.length === 0}
       onChange={() => onClear()} />
      (Select All)
    </label>
-    <label style={{ display: "flex", alignItems: "center", gap: 8,
-     padding: "9px 14px", cursor: "pointer", fontSize: 13,
-     borderBottom: "1px solid var(--line)" }}>
+    <label data-cfditem
+     onMouseEnter={() => setActiveIdx(1)}
+     onMouseLeave={() => setActiveIdx(-1)}
+     style={{ display: "flex", alignItems: "center", gap: 8,
+      padding: "9px 14px", cursor: "pointer", fontSize: 13,
+      borderBottom: "1px solid var(--line)",
+      background: isActive(1) ? "var(--clay-soft)" : undefined }}>
      <input type="checkbox" checked={selected.includes("")}
       onChange={() => onToggle("")} />
      (Blanks)
    </label>
-    {filtered.map(c => (
-     <label key={c} style={{ display: "flex", alignItems: "center", gap: 8,
-      padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
+    {filtered.map((c, i) => (
+     <label key={c} data-cfditem
+      onMouseEnter={() => setActiveIdx(i + 2)}
+      onMouseLeave={() => setActiveIdx(-1)}
+      style={{ display: "flex", alignItems: "center", gap: 8,
+       padding: "8px 14px", cursor: "pointer", fontSize: 13,
+       background: isActive(i + 2) ? "var(--clay-soft)" : undefined }}>
       <input type="checkbox" checked={selected.includes(c)}
        onChange={() => onToggle(c)} />
       {c}
@@ -1393,11 +1552,11 @@ interface ReceivedEntry {
  material_type: "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
  material_type_other: string;  // free text when material_type === "Other"
 }
-interface SavedReceivedRow extends ReceivedEntry { id: string; }
+interface SavedReceivedRow extends ReceivedEntry { id: string; _edited?: boolean; }
 
-function blankReceivedEntry(): ReceivedEntry {
+function blankReceivedEntry(date?: string): ReceivedEntry {
  return {
-  date: today(), particular: "", transport: "", materials: "",
+  date: date ?? today(), particular: "", transport: "", materials: "",
   vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
   inv_chl_no: "", code: "", remarks: "", po_no: "",
   material_type: "", material_type_other: "",
@@ -1419,24 +1578,48 @@ function ReceivedSection() {
  const [histLoading, setHistLoading] = useState(true);
  const [filterCodes, setFilterCodes] = useState<string[]>([]);
  const [filterDropOpen, setFilterDropOpen] = useState(false);
+ // Edit state
+ const [editId, setEditId] = useState<string | null>(null);
 
  const setField = (k: keyof ReceivedEntry, v: string) =>
   setEntry(prev => ({ ...prev, [k]: v }));
 
+ const startEdit = (row: SavedReceivedRow) => {
+  setEditId(row.id);
+  setEntry({
+   date: row.date, particular: row.particular, transport: row.transport,
+   materials: row.materials, vehicle_no: row.vehicle_no, o_wt: row.o_wt,
+   f_wt: row.f_wt, bags_loose: row.bags_loose, inv_chl_no: row.inv_chl_no,
+   code: row.code, remarks: row.remarks, po_no: row.po_no,
+   material_type: row.material_type, material_type_other: row.material_type_other,
+  });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
+
+ const cancelEdit = () => {
+  setEditId(null);
+  setEntry(blankReceivedEntry(entry.date));
+  draft.clear();
+ };
+
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
+  // Only fetch logbook rows (qty all zero) to avoid showing duplicate stock-update rows
   const { data, error } = await supabase
    .from("stores_stock_ledger")
-   .select("id, transaction_date, remark")
+   .select("id, transaction_date, remark, created_at")
    .eq("reference_type", "received_entry")
+   .eq("qty_received", 0)
+   .eq("qty_issued", 0)
+   .eq("dispatch_qty", 0)
    .order("transaction_date", { ascending: false })
    .order("created_at", { ascending: false })
    .limit(500);
   if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
   const rows: SavedReceivedRow[] = [];
-  for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+  for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null; created_at: string }[]) {
    try {
-    const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry>;
+    const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry> & { _edited?: boolean };
     rows.push({
      id: row.id, date: row.transaction_date,
      particular: p.particular ?? "", transport: p.transport ?? "",
@@ -1447,6 +1630,7 @@ function ReceivedSection() {
      remarks: p.remarks ?? "", po_no: p.po_no ?? "",
      material_type: (p.material_type as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "") ?? "",
      material_type_other: (p.material_type_other as string) ?? "",
+     _edited: p._edited ?? false,
     });
    } catch { /* skip */ }
   }
@@ -1458,6 +1642,44 @@ function ReceivedSection() {
  const histFiltered = filterCodes.length === 0
   ? history
   : history.filter(r => filterCodes.includes(r.code));
+
+ const handleUpdate = async () => {
+  if (!editId) return;
+  if (!entry.date) { showToast("Enter a date.", true); return; }
+  if (!entry.particular.trim() && !entry.materials.trim()) {
+   showToast("Enter at least Particular or Materials.", true); return;
+  }
+  if (!user) return;
+  setSubmitting(true);
+  try {
+   const payload: ReceivedEntry & { _edited: boolean } = {
+    date: entry.date, particular: entry.particular.trim(),
+    transport: entry.transport.trim(), materials: entry.materials.trim(),
+    vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
+    f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
+    inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
+    remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
+    material_type: entry.material_type,
+    material_type_other: entry.material_type_other.trim(),
+    _edited: true,
+   };
+   const { error } = await supabase
+    .from("stores_stock_ledger")
+    .update({
+     transaction_date: entry.date,
+     remark: JSON.stringify(payload),
+    })
+    .eq("id", editId);
+   if (error) { showToast("Update failed: " + error.message, true); return; }
+   showToast("Received entry updated.");
+   setEditId(null);
+   draft.clear();
+   setEntry(blankReceivedEntry(entry.date));
+   loadHistory();
+  } catch (e: unknown) {
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+  } finally { setSubmitting(false); }
+ };
 
  const handleSave = async () => {
   if (!entry.date) { showToast("Enter a date.", true); return; }
@@ -1568,16 +1790,25 @@ function ReceivedSection() {
 
    showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
    draft.clear();
-   setEntry(blankReceivedEntry()); loadHistory();
+   setEntry(blankReceivedEntry(entry.date)); loadHistory();
   } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
   } finally { setSubmitting(false); }
  };
 
  return (
   <>
    <div className="card">
-    <h3>Received Entry Book</h3>
+    <h3>{editId ? "Edit Received Entry" : "Received Entry Book"}</h3>
+    {editId && (
+     <div style={{
+      background: "#fff8e1", border: "1px solid #f57f17", borderRadius: 8,
+      padding: "8px 14px", marginBottom: 12, fontSize: 13, color: "#e65100",
+      fontWeight: 600,
+     }}>
+      Editing existing record. Save to update, or cancel to discard changes.
+     </div>
+    )}
     <div className="row3">
      <div>
       <label>Date *</label>
@@ -1682,9 +1913,16 @@ function ReceivedSection() {
    </div>
 
    <button className="btn btn-primary" type="button"
-    disabled={submitting} onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Received Entry"}
+    disabled={submitting} onClick={editId ? handleUpdate : handleSave}>
+    {submitting ? "Saving..." : editId ? "Update Received Entry" : "Save Received Entry"}
    </button>
+   {editId && (
+    <button className="btn btn-ghost" type="button"
+     style={{ marginLeft: 10 }}
+     onClick={cancelEdit} disabled={submitting}>
+     Cancel Edit
+    </button>
+   )}
 
    <div className="card" style={{ marginTop: 16 }}>
     <div className="helper-row">
@@ -1727,12 +1965,22 @@ function ReceivedSection() {
           <th style={{ textAlign: "right" }}>F/Wt</th>
           <th>Bags/Loose</th><th>INV/CHL No.</th>
           <th>Code</th><th>Remarks</th><th>PO No.</th>
+          <th>Action</th>
          </tr>
         </thead>
         <tbody>
          {histFiltered.map(row => (
-          <tr key={row.id}>
-           <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+          <tr key={row.id} style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
+           <td style={{ whiteSpace: "nowrap" }}>
+            {fmtDate(row.date)}
+            {row._edited && (
+             <span style={{
+              display: "inline-block", marginLeft: 5,
+              fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
+              background: "#e3f2fd", color: "#1565c0",
+             }}>Edited</span>
+            )}
+           </td>
            <td>
             {row.material_type ? (
              <span style={{
@@ -1769,6 +2017,19 @@ function ReceivedSection() {
            <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>{nilText(row.code)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
+           <td>
+            <button type="button"
+             onClick={() => startEdit(row)}
+             style={{
+              padding: "4px 10px", fontSize: 11, fontWeight: 700,
+              border: "1px solid var(--clay)", borderRadius: 6,
+              background: editId === row.id ? "var(--clay)" : "#fff",
+              color: editId === row.id ? "#fff" : "var(--clay)",
+              cursor: "pointer", whiteSpace: "nowrap",
+             }}>
+             {editId === row.id ? "Editing..." : "Edit"}
+            </button>
+           </td>
           </tr>
         ))}
         </tbody>
@@ -1823,11 +2084,11 @@ interface SuppliedEntry {
  material_type: "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
  material_type_other: string;
 }
-interface SavedSuppliedRow extends SuppliedEntry { id: string; }
+interface SavedSuppliedRow extends SuppliedEntry { id: string; _edited?: boolean; }
 
-function blankSuppliedEntry(): SuppliedEntry {
+function blankSuppliedEntry(date?: string): SuppliedEntry {
  return {
-  date: today(), particular: "", transport: "", materials: "",
+  date: date ?? today(), particular: "", transport: "", materials: "",
   vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
   inv_chl_no: "", code: "", remarks: "", po_no: "",
   material_type: "", material_type_other: "",
@@ -1850,24 +2111,48 @@ function SuppliedSection() {
  const [filterCodes, setFilterCodes] = useState<string[]>([]);
  const [filterDropOpen, setFilterDropOpen] = useState(false);
  const [filterDate, setFilterDate] = useState("");
+ // Edit state
+ const [editId, setEditId] = useState<string | null>(null);
 
  const setField = (k: keyof SuppliedEntry, v: string) =>
   setEntry(prev => ({ ...prev, [k]: v }));
 
+ const startEdit = (row: SavedSuppliedRow) => {
+  setEditId(row.id);
+  setEntry({
+   date: row.date, particular: row.particular, transport: row.transport,
+   materials: row.materials, vehicle_no: row.vehicle_no, o_wt: row.o_wt,
+   f_wt: row.f_wt, bags_loose: row.bags_loose, inv_chl_no: row.inv_chl_no,
+   code: row.code, remarks: row.remarks, po_no: row.po_no,
+   material_type: row.material_type, material_type_other: row.material_type_other,
+  });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+ };
+
+ const cancelEdit = () => {
+  setEditId(null);
+  setEntry(blankSuppliedEntry(entry.date));
+  draft.clear();
+ };
+
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
+  // Only fetch logbook rows (qty all zero) to avoid showing duplicate stock-update rows
   const { data, error } = await supabase
    .from("stores_stock_ledger")
-   .select("id, transaction_date, remark")
+   .select("id, transaction_date, remark, created_at")
    .eq("reference_type", "supplied_entry")
+   .eq("qty_received", 0)
+   .eq("qty_issued", 0)
+   .eq("dispatch_qty", 0)
    .order("transaction_date", { ascending: false })
    .order("created_at", { ascending: false })
    .limit(500);
   if (error) { showToast("Could not load: " + error.message, true); setHistLoading(false); return; }
   const rows: SavedSuppliedRow[] = [];
-  for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null }[]) {
+  for (const row of (data ?? []) as { id: string; transaction_date: string; remark: string | null; created_at: string }[]) {
    try {
-    const p = JSON.parse(row.remark ?? "{}") as Partial<SuppliedEntry>;
+    const p = JSON.parse(row.remark ?? "{}") as Partial<SuppliedEntry> & { _edited?: boolean };
     rows.push({
      id: row.id, date: row.transaction_date,
      particular: p.particular ?? "", transport: p.transport ?? "",
@@ -1877,6 +2162,7 @@ function SuppliedSection() {
      code: p.code ?? "", remarks: p.remarks ?? "", po_no: p.po_no ?? "",
      material_type: (p.material_type as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "") ?? "",
      material_type_other: (p.material_type_other as string) ?? "",
+     _edited: p._edited ?? false,
     });
    } catch { /* skip */ }
   }
@@ -1890,6 +2176,44 @@ function SuppliedSection() {
   if (filterDate && r.date !== filterDate) return false;
   return true;
  });
+
+ const handleUpdate = async () => {
+  if (!editId) return;
+  if (!entry.date) { showToast("Enter a date.", true); return; }
+  if (!entry.particular.trim() && !entry.materials.trim()) {
+   showToast("Enter at least Particular or Materials.", true); return;
+  }
+  if (!user) return;
+  setSubmitting(true);
+  try {
+   const payload: SuppliedEntry & { _edited: boolean } = {
+    date: entry.date, particular: entry.particular.trim(),
+    transport: entry.transport.trim(), materials: entry.materials.trim(),
+    vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
+    f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
+    inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
+    remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
+    material_type: entry.material_type,
+    material_type_other: entry.material_type_other.trim(),
+    _edited: true,
+   };
+   const { error } = await supabase
+    .from("stores_stock_ledger")
+    .update({
+     transaction_date: entry.date,
+     remark: JSON.stringify(payload),
+    })
+    .eq("id", editId);
+   if (error) { showToast("Update failed: " + error.message, true); return; }
+   showToast("Supplied entry updated.");
+   setEditId(null);
+   draft.clear();
+   setEntry(blankSuppliedEntry(entry.date));
+   loadHistory();
+  } catch (e: unknown) {
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
+  } finally { setSubmitting(false); }
+ };
 
  const handleSave = async () => {
   if (!entry.date) { showToast("Enter a date.", true); return; }
@@ -2000,16 +2324,25 @@ function SuppliedSection() {
 
    showToast("Supplied entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
    draft.clear();
-   setEntry(blankSuppliedEntry()); loadHistory();
+   setEntry(blankSuppliedEntry(entry.date)); loadHistory();
   } catch (e: unknown) {
-   showToast("Error: " + (e instanceof Error ? e.message : String), true);
+   showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
   } finally { setSubmitting(false); }
  };
 
  return (
   <>
    <div className="card">
-    <h3>Supplied Entry Book</h3>
+    <h3>{editId ? "Edit Supplied Entry" : "Supplied Entry Book"}</h3>
+    {editId && (
+     <div style={{
+      background: "#fff8e1", border: "1px solid #f57f17", borderRadius: 8,
+      padding: "8px 14px", marginBottom: 12, fontSize: 13, color: "#e65100",
+      fontWeight: 600,
+     }}>
+      Editing existing record. Save to update, or cancel to discard changes.
+     </div>
+    )}
     <div className="row3">
      <div>
       <label>Date *</label>
@@ -2114,9 +2447,16 @@ function SuppliedSection() {
    </div>
 
    <button className="btn btn-primary" type="button"
-    disabled={submitting} onClick={handleSave}>
-    {submitting ? "Saving..." : "Save Supplied Entry"}
+    disabled={submitting} onClick={editId ? handleUpdate : handleSave}>
+    {submitting ? "Saving..." : editId ? "Update Supplied Entry" : "Save Supplied Entry"}
    </button>
+   {editId && (
+    <button className="btn btn-ghost" type="button"
+     style={{ marginLeft: 10 }}
+     onClick={cancelEdit} disabled={submitting}>
+     Cancel Edit
+    </button>
+   )}
 
    <div className="card" style={{ marginTop: 16 }}>
     <div className="helper-row">
@@ -2189,12 +2529,22 @@ function SuppliedSection() {
           <th style={{ textAlign: "right" }}>F/Wt</th>
           <th>Bags/Loose</th><th>INV/CHL No.</th>
           <th>Code</th><th>Remarks</th><th>PO No.</th>
+          <th>Action</th>
          </tr>
         </thead>
         <tbody>
          {histFiltered.map(row => (
-          <tr key={row.id}>
-           <td style={{ whiteSpace: "nowrap" }}>{fmtDate(row.date)}</td>
+          <tr key={row.id} style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
+           <td style={{ whiteSpace: "nowrap" }}>
+            {fmtDate(row.date)}
+            {row._edited && (
+             <span style={{
+              display: "inline-block", marginLeft: 5,
+              fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
+              background: "#e3f2fd", color: "#1565c0",
+             }}>Edited</span>
+            )}
+           </td>
            <td>
             {row.material_type ? (
              <span style={{
@@ -2231,6 +2581,19 @@ function SuppliedSection() {
            <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>{nilText(row.code)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
+           <td>
+            <button type="button"
+             onClick={() => startEdit(row)}
+             style={{
+              padding: "4px 10px", fontSize: 11, fontWeight: 700,
+              border: "1px solid var(--clay)", borderRadius: 6,
+              background: editId === row.id ? "var(--clay)" : "#fff",
+              color: editId === row.id ? "#fff" : "var(--clay)",
+              cursor: "pointer", whiteSpace: "nowrap",
+             }}>
+             {editId === row.id ? "Editing..." : "Edit"}
+            </button>
+           </td>
           </tr>
         ))}
         </tbody>
