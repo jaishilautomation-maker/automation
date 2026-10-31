@@ -84,6 +84,10 @@ const USERS = [
   { full_name: "Ganesh Rathod",    phone: "+918369629433", role: "chemist" },       // Chemist
   { full_name: "Sachin Kochre",    phone: "+918308769077", role: "chemist" },       // Chemist
   { full_name: "Sagar Pawse",      phone: "+919653106564", role: "chemist" },       // Chemist
+
+  // ── Additional admins ──
+  { full_name: "Chinmay Thakker",  phone: "+919930660536", role: "factory_admin" },
+  { full_name: "Samir Thakkar",    phone: "+919821087507", role: "factory_admin" },
 ];
 
 const admin = createClient(URL, SERVICE_KEY, { auth: { persistSession: false } });
