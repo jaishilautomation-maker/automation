@@ -1639,9 +1639,17 @@ function ReceivedSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
+ const [showAll, setShowAll] = useState(false);
+
  const histFiltered = filterCodes.length === 0
   ? history
   : history.filter(r => filterCodes.includes(r.code));
+
+ // Default: show only the 10 most recent rows. Expand when showAll or when
+ // the row being edited is outside the first 10 (so it stays visible).
+ const editIdxInFiltered = editId ? histFiltered.findIndex(r => r.id === editId) : -1;
+ const needsExpand = editIdxInFiltered >= 10;
+ const histVisible = (showAll || needsExpand) ? histFiltered : histFiltered.slice(0, 10);
 
  const handleUpdate = async () => {
   if (!editId) return;
@@ -1955,6 +1963,7 @@ function ReceivedSection() {
     {histLoading ? <div className="empty">Loading...</div>
      : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
      : (
+      <>
       <div style={{ overflowX: "auto" }}>
        <table className="dash" style={{ minWidth: 1200 }}>
         <thead>
@@ -1969,7 +1978,7 @@ function ReceivedSection() {
          </tr>
         </thead>
         <tbody>
-         {histFiltered.map(row => (
+         {histVisible.map(row => (
           <tr key={row.id} style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
            <td style={{ whiteSpace: "nowrap" }}>
             {fmtDate(row.date)}
@@ -2035,6 +2044,30 @@ function ReceivedSection() {
         </tbody>
        </table>
       </div>
+      {histFiltered.length > 10 && (
+       <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+        {!showAll && !needsExpand ? (
+         <button type="button" onClick={() => setShowAll(true)}
+          style={{
+           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+           border: "1px solid var(--clay)", borderRadius: 8,
+           background: "var(--clay-soft)", color: "var(--clay)",
+          }}>
+          View All History ({histFiltered.length} records)
+         </button>
+        ) : (
+         <button type="button" onClick={() => setShowAll(false)}
+          style={{
+           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+           border: "1px solid var(--line)", borderRadius: 8,
+           background: "#fff", color: "var(--ink-soft)",
+          }}>
+          Show Less
+         </button>
+        )}
+       </div>
+      )}
+      </>
     )}
    </div>
   </>
@@ -2171,11 +2204,19 @@ function SuppliedSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
+ const [showAll, setShowAll] = useState(false);
+
  const histFiltered = history.filter(r => {
   if (filterCodes.length > 0 && !filterCodes.includes(r.code)) return false;
   if (filterDate && r.date !== filterDate) return false;
   return true;
  });
+
+ // Default: show only the 10 most recent rows. Expand when showAll or when
+ // the row being edited is outside the first 10 (so it stays visible).
+ const editIdxInFiltered = editId ? histFiltered.findIndex(r => r.id === editId) : -1;
+ const needsExpand = editIdxInFiltered >= 10;
+ const histVisible = (showAll || needsExpand) ? histFiltered : histFiltered.slice(0, 10);
 
  const handleUpdate = async () => {
   if (!editId) return;
@@ -2519,6 +2560,7 @@ function SuppliedSection() {
     {histLoading ? <div className="empty">Loading...</div>
      : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
      : (
+      <>
       <div style={{ overflowX: "auto" }}>
        <table className="dash" style={{ minWidth: 1200 }}>
         <thead>
@@ -2533,7 +2575,7 @@ function SuppliedSection() {
          </tr>
         </thead>
         <tbody>
-         {histFiltered.map(row => (
+         {histVisible.map(row => (
           <tr key={row.id} style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
            <td style={{ whiteSpace: "nowrap" }}>
             {fmtDate(row.date)}
@@ -2599,6 +2641,30 @@ function SuppliedSection() {
         </tbody>
        </table>
       </div>
+      {histFiltered.length > 10 && (
+       <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+        {!showAll && !needsExpand ? (
+         <button type="button" onClick={() => setShowAll(true)}
+          style={{
+           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+           border: "1px solid var(--clay)", borderRadius: 8,
+           background: "var(--clay-soft)", color: "var(--clay)",
+          }}>
+          View All History ({histFiltered.length} records)
+         </button>
+        ) : (
+         <button type="button" onClick={() => setShowAll(false)}
+          style={{
+           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+           border: "1px solid var(--line)", borderRadius: 8,
+           background: "#fff", color: "var(--ink-soft)",
+          }}>
+          Show Less
+         </button>
+        )}
+       </div>
+      )}
+      </>
     )}
    </div>
   </>

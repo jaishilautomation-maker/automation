@@ -5,7 +5,14 @@
 // Uses the Supabase service-role key — never expose this to the browser.
 //
 // GET    — list all users (profiles + latest role + phone)
-// POST   — create a new user (phone + name + role)
+// POST   — create a new user (phone + name + role).
+//           If Supabase reports "User already registered" for the phone, the
+//           handler checks whether the auth.users row is an orphan (no matching
+//           profiles row).  If it is, it reconciles — restoring profiles and
+//           user_roles against the existing UUID instead of creating a duplicate
+//           auth account.  This resolves the common scenario where a user was
+//           removed via the fallback-delete path (profiles+user_roles deleted but
+//           auth.users survived) and the admin tries to re-add the same phone.
 // PATCH  — update a user's name, phone, or role
 // DELETE — permanently delete a user (removes auth.users row → cascades)
 // =============================================================================
@@ -132,7 +139,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ users });
 }
 
-// ── POST — create user ────────────────────────────────────────────────────────
+// ── POST — create user (with orphan-reconciliation) ──────────────────────────
 export async function POST(req: NextRequest) {
   const check = await requireAdmin(req);
   if (check instanceof NextResponse) return check;
@@ -151,36 +158,135 @@ export async function POST(req: NextRequest) {
 
   const admin = getAdminClient();
 
-  // Create auth user with phone (Supabase phone user, no password)
-  // phone must be E.164 format e.g. +919876543210
+  // Normalise to E.164 with leading + (Supabase admin API expects it).
+  // auth.users stores without + internally but the admin createUser API
+  // accepts either; we normalise consistently here.
+  let normPhone = phone_number.trim();
+  if (!normPhone.startsWith("+")) normPhone = "+91" + normPhone.replace(/^0/, "");
+
+  // ── Attempt 1: create a brand-new auth user ─────────────────────────────
   const { data: authData, error: authErr } = await admin.auth.admin.createUser({
-    phone:             phone_number.trim(),
-    phone_confirm:     true,   // skip OTP verification for admin-created users
-    user_metadata:     { full_name: full_name.trim(), role },
+    phone:         normPhone,
+    phone_confirm: true,   // skip OTP verification for admin-created users
+    user_metadata: { full_name: full_name.trim(), role },
   });
 
-  if (authErr || !authData.user) {
-    return NextResponse.json(
-      { error: authErr?.message ?? "Failed to create auth user" },
-      { status: 400 }
+  let userId: string;
+
+  if (authErr || !authData?.user) {
+    // ── Attempt 2: detect orphaned auth.users row ──────────────────────────
+    // Supabase returns "User already registered" (or a duplicate-key variant)
+    // when auth.users already has a row for this phone.  This happens when the
+    // fallback-delete path removed profiles+user_roles but left auth.users
+    // intact.  We look up the existing auth user by phone and reconcile.
+    const isAlreadyRegistered =
+      authErr?.message?.toLowerCase().includes("already registered") ||
+      authErr?.message?.toLowerCase().includes("already been registered") ||
+      authErr?.message?.toLowerCase().includes("duplicate") ||
+      authErr?.message?.toLowerCase().includes("unique constraint") ||
+      authErr?.code === "phone_exists";
+
+    if (!isAlreadyRegistered) {
+      // Some other error — surface it directly.
+      return NextResponse.json(
+        { error: authErr?.message ?? "Failed to create auth user" },
+        { status: 400 }
+      );
+    }
+
+    // Look up the existing auth.users row by phone.
+    // Supabase admin listUsers supports filtering by phone.
+    // We try both with and without the leading + because Supabase stores
+    // the number without + in auth.users.phone internally.
+    const phoneVariants = [
+      normPhone,                           // "+919082877083"
+      normPhone.replace(/^\+/, ""),        // "919082877083"
+    ];
+
+    let existingUser: { id: string } | null = null;
+
+    for (const variant of phoneVariants) {
+      const { data: listData } = await admin.auth.admin.listUsers({ perPage: 1000 });
+      const found = (listData?.users ?? []).find(
+        (u) => u.phone === variant || u.phone === normPhone || u.phone === normPhone.replace(/^\+/, "")
+      );
+      if (found) { existingUser = found; break; }
+    }
+
+    if (!existingUser) {
+      // auth.users row exists (Supabase said so) but we couldn't find it —
+      // surface the original error rather than guessing.
+      return NextResponse.json(
+        { error: authErr?.message ?? "User already registered and could not be located for reconciliation." },
+        { status: 400 }
+      );
+    }
+
+    userId = existingUser.id;
+
+    // Check whether this is a true orphan (no profiles row).
+    const { data: existingProfile } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existingProfile) {
+      // profiles row exists — user is fully registered, not an orphan.
+      // Re-surface the original error so the admin knows the account is active.
+      return NextResponse.json(
+        { error: "This phone number is already registered to an active user. Use Edit to update their details." },
+        { status: 400 }
+      );
+    }
+
+    // ── Orphan confirmed — reconcile ─────────────────────────────────────
+    // The auth.users row survives; we recreate profiles + user_roles against
+    // the same UUID.  We also update auth user_metadata so the name is current.
+    console.log(
+      "[admin/users] Reconciling orphaned auth user",
+      userId,
+      "for phone", normPhone.replace(/.(?=.{4})/g, "*")   // log with masked phone
     );
+
+    await admin.auth.admin.updateUserById(userId, {
+      user_metadata: { full_name: full_name.trim(), role },
+    });
+
+  } else {
+    userId = authData.user.id;
   }
 
-  const userId = authData.user.id;
-
-  // Set phone_number on profiles (trigger sets full_name but not phone_number)
-  await admin
+  // ── Restore / set profiles row ───────────────────────────────────────────
+  // Use upsert so this works for both the fresh-create path and the reconcile
+  // path (where the profiles row may or may not exist).
+  const { error: profileErr } = await admin
     .from("profiles")
-    .update({ full_name: full_name.trim(), phone_number: phone_number.trim() })
-    .eq("id", userId);
+    .upsert(
+      { id: userId, full_name: full_name.trim(), phone_number: normPhone },
+      { onConflict: "id" }
+    );
 
-  // Upsert role in user_roles (trigger may have already inserted one)
-  await admin.from("user_roles").upsert(
-    { user_id: userId, role, factory_id: factory_id ?? null },
-    { onConflict: "user_id,role,factory_id,module" }
-  );
+  if (profileErr) {
+    console.error("[admin/users] profiles upsert error:", profileErr.message);
+    return NextResponse.json({ error: "Failed to set user profile: " + profileErr.message }, { status: 500 });
+  }
 
-  return NextResponse.json({ success: true, userId });
+  // ── Restore / set user_roles row ─────────────────────────────────────────
+  // Delete any stale role rows first, then insert the requested role cleanly.
+  await admin.from("user_roles").delete().eq("user_id", userId);
+  const { error: roleInsertErr } = await admin.from("user_roles").insert({
+    user_id:    userId,
+    role,
+    factory_id: factory_id ?? null,
+  });
+
+  if (roleInsertErr) {
+    console.error("[admin/users] user_roles insert error:", roleInsertErr.message);
+    return NextResponse.json({ error: "Failed to set user role: " + roleInsertErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, userId, reconciled: !authData?.user });
 }
 
 // ── PATCH — update user ───────────────────────────────────────────────────────
@@ -286,10 +392,15 @@ export async function DELETE(req: NextRequest) {
   // created outside the normal OTP flow). Fall back to manual cleanup:
   // delete the app-level rows so the user no longer appears in the admin list,
   // even if the auth.users row persists (they cannot log in without a profile).
+  //
+  // NOTE: When this fallback path is taken, the auth.users row survives.
+  // If the admin later tries to re-add the same phone number, the POST handler
+  // will detect the orphan and reconcile automatically instead of erroring.
   console.warn(
-    "[admin/users] auth.admin.deleteUser failed, falling back to manual cleanup:",
-    authDeleteErr.message,
-    "userId:", userId
+    "[admin/users] auth.admin.deleteUser failed — taking fallback path.",
+    "The auth.users row for", userId, "may persist.",
+    "The POST handler will reconcile automatically if this phone is re-added.",
+    "Original error:", authDeleteErr.message
   );
 
   const errors: string[] = [];
