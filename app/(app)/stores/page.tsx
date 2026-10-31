@@ -1878,13 +1878,13 @@ function ReceivedSection() {
       <input type="text" placeholder="e.g. MH05EL3625"
        value={entry.vehicle_no} onChange={e => setField("vehicle_no", e.target.value)} />
      </div>
+    </div>
+    <div className="row3">
      <div>
       <label>O/WT</label>
       <input type="text" placeholder="e.g. 2034.000"
        value={entry.o_wt} onChange={e => setField("o_wt", e.target.value)} />
      </div>
-    </div>
-    <div className="row3">
      <div>
       <label>F/Wt</label>
       <input type="text" placeholder="e.g. 2034 Nos"
@@ -1895,13 +1895,13 @@ function ReceivedSection() {
       <input type="text" placeholder="e.g. Size 20x32 Printed"
        value={entry.bags_loose} onChange={e => setField("bags_loose", e.target.value)} />
      </div>
+    </div>
+    <div className="row3">
      <div>
       <label>INV / CHL No.</label>
       <input type="text" placeholder="e.g. AP/0049/2026-27"
        value={entry.inv_chl_no} onChange={e => setField("inv_chl_no", e.target.value)} />
      </div>
-    </div>
-    <div className="row3">
      <div>
       <label>Code</label>
       <CodeDropdown codes={RECEIVED_CODES} value={entry.code}
@@ -2445,13 +2445,13 @@ function SuppliedSection() {
       <input type="text" placeholder="e.g. MH05EL3625"
        value={entry.vehicle_no} onChange={e => setField("vehicle_no", e.target.value)} />
      </div>
+    </div>
+    <div className="row3">
      <div>
       <label>O/WT</label>
       <input type="text" placeholder="e.g. 2034.000"
        value={entry.o_wt} onChange={e => setField("o_wt", e.target.value)} />
      </div>
-    </div>
-    <div className="row3">
      <div>
       <label>F/Wt</label>
       <input type="text" placeholder="e.g. 2034 Nos"
@@ -2462,13 +2462,13 @@ function SuppliedSection() {
       <input type="text" placeholder="e.g. Size 20x32 Printed"
        value={entry.bags_loose} onChange={e => setField("bags_loose", e.target.value)} />
      </div>
+    </div>
+    <div className="row3">
      <div>
       <label>INV / CHL No.</label>
       <input type="text" placeholder="e.g. AP/0049/2026-27"
        value={entry.inv_chl_no} onChange={e => setField("inv_chl_no", e.target.value)} />
      </div>
-    </div>
-    <div className="row3">
      <div>
       <label>Code</label>
       <CodeDropdown codes={SUPPLIED_CODES} value={entry.code}
