@@ -119,6 +119,7 @@ const A20_RM_CODES = [
   "CALCIUM_CHLORIDE",
   "TEBUCONAZOLE",
   "BORIC_POWDER",
+  "K_GUM",
 ];
 
 export default function RmQcPage() {
@@ -458,7 +459,7 @@ export default function RmQcPage() {
     setValues(prev => {
       const next = { ...prev, [key]: val };
       testDefs.filter(d => d.is_calculated && d.formula).forEach(d => {
-        const result = evalFormula(d.formula!, next);
+        const result = evalFormula(d.formula!, next, d.unit);
         next[d.test_key] = result !== null ? String(result) : "";
       });
       return next;
@@ -889,6 +890,7 @@ export default function RmQcPage() {
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
                       onBlur={(key, val) => audit.record(key, val)}
+                      allValues={values}
                       specBadge={crudeSpecs.length > 0 ? buildCrudeSpecBadge(def.test_key) : null}
                       photoUploadProps={photoProps}
                     />
@@ -1350,6 +1352,7 @@ export default function RmQcPage() {
                       value={values[def.test_key] ?? ""}
                       onChange={handleChange}
                       onBlur={(key, val) => audit.record(key, val)}
+                      allValues={values}
                       photoUploadProps={photoProps}
                     />
                   ))}

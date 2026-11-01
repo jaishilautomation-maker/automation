@@ -43,6 +43,9 @@ interface BatchOption {
 // Products that have Phase A + B
 const PHASE_AWARE_CODES = ["SULPHUR_SC", "ZINC_SC"];
 
+// Calculated fields that support "Enter manually" toggle (item 7)
+const MANUAL_OVERRIDE_KEYS = new Set(["calcium_content", "boron_content"]);
+
 export default function ProductQcPage() {
   const { user, profile } = useAuth();
   const { showToast } = useToast();
@@ -87,6 +90,12 @@ export default function ProductQcPage() {
   // A-20 direct batch entry (no batch-analysis / hourly-reading in this factory)
   const [directBatchNumber, setDirectBatchNumber] = useState(d0?.directBatchNumber ?? "");
   const [directLotNumber, setDirectLotNumber]     = useState(d0?.directLotNumber ?? "");
+  // A-20: debounced batch lookup state
+  const [batchLookupState, setBatchLookupState] = useState<
+    "idle" | "searching" | "found" | "not_found"
+  >("idle");
+  const [lookedUpBatch, setLookedUpBatch] = useState<BatchOption | null>(null);
+  const batchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Test definitions for selected product + phase
   const [testDefs, setTestDefs]         = useState<QcTestDefinition[]>([]);
@@ -147,6 +156,8 @@ export default function ProductQcPage() {
     setBatchId("");
     setDirectBatchNumber("");
     setDirectLotNumber("");
+    setBatchLookupState("idle");
+    setLookedUpBatch(null);
     setExistingRecord(null);
     setValues({});
     setRemarks("");
@@ -225,8 +236,42 @@ export default function ProductQcPage() {
   }, [productId, phase, supabase, initialDraft]);
 
   // -------------------------------------------------------------------------
-  // Check for existing record when batch+product+phase all known
+  // A-20: debounced batch number lookup — 400 ms after last keystroke
+  // Batch MUST already exist (never auto-created from Product QC).
   // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!isA20 || !productId || !activeFactory) return;
+    const bn = directBatchNumber.trim();
+    if (!bn) {
+      setBatchLookupState("idle");
+      setLookedUpBatch(null);
+      setBatchId("");
+      return;
+    }
+    setBatchLookupState("searching");
+    if (batchDebounceRef.current) clearTimeout(batchDebounceRef.current);
+    batchDebounceRef.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from("batches")
+        .select("id, batch_number, lot_number, production_date")
+        .eq("factory_id", activeFactory.id)
+        .eq("product_id", productId)
+        .eq("batch_number", bn)
+        .maybeSingle();
+      if (data) {
+        setLookedUpBatch(data as BatchOption);
+        setBatchId(data.id);
+        setBatchLookupState("found");
+      } else {
+        setLookedUpBatch(null);
+        setBatchId("");
+        setBatchLookupState("not_found");
+      }
+    }, 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directBatchNumber, productId, activeFactory]);
+
+  // Clear lookup when product changes (already resets directBatchNumber above)
   useEffect(() => {
     if (!batchId || !productId) { setExistingRecord(null); return; }
 
@@ -254,7 +299,8 @@ export default function ProductQcPage() {
           testDefs
             .filter(d => d.is_calculated && d.formula)
             .forEach(d => {
-              const result = evalFormula(d.formula!, prefill);
+              if (prefill[d.test_key + "_manual_mode"] === "1") return;
+              const result = evalFormula(d.formula!, prefill, d.unit);
               if (result !== null) prefill[d.test_key] = String(result);
             });
           setValues(prefill);
@@ -279,7 +325,9 @@ export default function ProductQcPage() {
         testDefs
           .filter(d => d.is_calculated && d.formula)
           .forEach(d => {
-            const result = evalFormula(d.formula!, next);
+            // Skip fields in manual-override mode (sidecar key = test_key + "_manual_mode")
+            if (next[d.test_key + "_manual_mode"] === "1") return;
+            const result = evalFormula(d.formula!, next, d.unit);
             next[d.test_key] = result !== null ? String(result) : "";
           });
         return next;
@@ -295,56 +343,24 @@ export default function ProductQcPage() {
     if (!user || !activeFactory)       { showToast("Session error — refresh.", true); return; }
     if (!productId)                    { showToast("Select a product.", true); return; }
     if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
-    if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
+    if (isA20 && batchLookupState !== "found") {
+      showToast("Enter a valid batch number that already exists.", true); return;
+    }
     if (!chemistName.trim() && !existingRecord) {
       showToast("Enter chemist name.", true); return;
     }
 
     setSubmitting(true);
     try {
-      // A-20: resolve (or create) the fg batch from the typed batch/lot number.
-      // The chemist enters these directly since batch analysis / hourly reading
-      // do not exist in this factory.
+      // A-20: batch must already exist — looked up via debounced search.
+      // Never auto-create from Product QC.
       let effectiveBatchId = batchId;
       if (isA20) {
-        const bn = directBatchNumber.trim();
-        const ln = directLotNumber.trim() || null;
-
-        const { data: existingBatch } = await supabase
-          .from("batches")
-          .select("id")
-          .eq("factory_id", activeFactory.id)
-          .eq("product_id", productId)
-          .eq("batch_number", bn)
-          .maybeSingle();
-
-        if (existingBatch) {
-          effectiveBatchId = existingBatch.id;
-        } else {
-          const { data: newBatch, error: batchErr } = await supabase
-            .from("batches")
-            .insert({
-              batch_number:    bn,
-              lot_number:      ln,
-              factory_id:      activeFactory.id,
-              material_id:     null,
-              product_id:      productId,
-              batch_type:      "fg",
-              production_date: testDate,
-              quantity:        null,
-              unit:            null,
-              source_batch_id: null,
-              created_by:      user.id,
-            })
-            .select("id")
-            .single();
-
-          if (batchErr || !newBatch) {
-            showToast("Could not create batch: " + (batchErr?.message ?? "unknown"), true);
-            setSubmitting(false);
-            return;
-          }
-          effectiveBatchId = newBatch.id;
+        // batchId was set by the debounced lookup (lookedUpBatch.id)
+        if (!effectiveBatchId) {
+          showToast("Batch not found — cannot save.", true);
+          setSubmitting(false);
+          return;
         }
 
         // Guard against a duplicate QC record for this batch/product/phase.
@@ -366,7 +382,7 @@ export default function ProductQcPage() {
       testDefs.forEach(d => {
         const raw = values[d.test_key];
         if (raw === "" || raw === undefined) return;
-        if (d.input_type === "number") {
+        if (d.input_type === "number" && !(d.is_calculated && values[d.test_key + "_manual_mode"] === "1")) {
           const n = parseFloat(raw);
           if (!isNaN(n)) testResults[d.test_key] = n;
         } else if (d.input_type === "boolean") {
@@ -374,6 +390,11 @@ export default function ProductQcPage() {
         } else {
           testResults[d.test_key] = raw;
         }
+        // Persist sidecar keys: manual mode flag and "Other" free-text
+        const manualKey = d.test_key + "_manual_mode";
+        if (values[manualKey]) testResults[manualKey] = values[manualKey];
+        const otherKey = d.test_key + "_other";
+        if (values[otherKey]) testResults[otherKey] = values[otherKey];
       });
 
       const appearanceOkRaw = values["appearance_ok"];
@@ -506,7 +527,7 @@ export default function ProductQcPage() {
 
         // Fire-and-forget email (INSERT path)
         const pqcInsISO = new Date().toISOString();
-        const batchNum = isA20 ? directBatchNumber.trim() : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
+        const batchNum = isA20 ? (lookedUpBatch?.batch_number ?? directBatchNumber.trim()) : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
         const { subject: pqcInsSubj, html: pqcInsHtml } = buildProductQcEmail({
           productName:     selectedProduct?.name ?? "Product",
           batchNumber:     batchNum,
@@ -553,6 +574,8 @@ export default function ProductQcPage() {
         setBatchId("");
         setDirectBatchNumber("");
         setDirectLotNumber("");
+        setBatchLookupState("idle");
+        setLookedUpBatch(null);
         setExistingRecord(null);
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
@@ -607,32 +630,38 @@ export default function ProductQcPage() {
         )}
       </div>
 
-      {/* Step 3 (A-20): direct batch number + lot number entry.
-          No batch analysis / hourly reading exists in this factory, so the
-          chemist enters the batch and lot numbers straight from the product. */}
+      {/* Step 3 (A-20): debounced batch number lookup.
+          Batch must already exist (created via Production Job Card flow).
+          On match: show lot/date. On no match: block with error.           */}
       {isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
-          <div className="row2">
-            <div>
-              <label>Batch Number *</label>
-              <input
-                type="text"
-                placeholder="e.g. SSC-260824-001"
-                value={directBatchNumber}
-                onChange={e => setDirectBatchNumber(e.target.value)}
-              />
+          <label>Batch Number *</label>
+          <input
+            type="text"
+            placeholder="e.g. SSC-260824-001"
+            value={directBatchNumber}
+            onChange={e => {
+              setDirectBatchNumber(e.target.value);
+              setBatchLookupState("idle");
+            }}
+          />
+          {batchLookupState === "searching" && (
+            <div className="field-hint">Searching…</div>
+          )}
+          {batchLookupState === "not_found" && directBatchNumber.trim() && (
+            <div className="field-hint" style={{ color: "var(--warn)" }}>
+              ✕ Batch &ldquo;{directBatchNumber.trim()}&rdquo; not found for this product.
+              Create the batch via Production Job Card first.
             </div>
-            <div>
-              <label>Lot Number</label>
-              <input
-                type="text"
-                placeholder="e.g. LOT-01"
-                value={directLotNumber}
-                onChange={e => setDirectLotNumber(e.target.value)}
-              />
+          )}
+          {batchLookupState === "found" && lookedUpBatch && (
+            <div className="readonly-block" style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 8 }}>
+              ✓ {lookedUpBatch.batch_number}
+              {lookedUpBatch.lot_number ? ` · Lot ${lookedUpBatch.lot_number}` : ""}
+              {" · "}{lookedUpBatch.production_date}
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -678,7 +707,7 @@ export default function ProductQcPage() {
       )}
 
       {/* Step 4: form */}
-      {productId && (isA20 ? directBatchNumber.trim() !== "" : (batchId && !checkingExisting)) && (
+      {productId && (isA20 ? batchLookupState === "found" : (batchId && !checkingExisting)) && (
         <>
           <div className="card">
             <h3>Test Details</h3>
@@ -726,6 +755,8 @@ export default function ProductQcPage() {
                   def={def}
                   value={values[def.test_key] ?? ""}
                   onChange={handleChange}
+                  allValues={values}
+                  manualOverrideKeys={MANUAL_OVERRIDE_KEYS}
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,

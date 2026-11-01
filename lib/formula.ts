@@ -21,12 +21,15 @@
  *
  * @param formula  Expression string, e.g. "(v1 - v2) * n * 0.049 / m * 100"
  * @param values   Current key→value map from the form state (string inputs)
- * @returns        Numeric result rounded to 4 decimal places, or null if any
- *                 operand is missing / expression throws.
+ * @param unit     Optional unit string from qc_test_definitions — used to
+ *                 determine rounding precision.  "%" results round to 2 d.p.;
+ *                 all others round to 4 d.p.
+ * @returns        Numeric result, or null if any operand is missing / expression throws.
  */
 export function evalFormula(
   formula: string,
-  values: Record<string, string>
+  values: Record<string, string>,
+  unit?: string | null,
 ): number | null {
   if (!formula) return null;
 
@@ -38,9 +41,8 @@ export function evalFormula(
       if (!isNaN(n)) numericVars[key] = n;
     }
 
-    // Check that all variables referenced in the formula are present
-    // Simple heuristic: extract word tokens and check each one that
-    // looks like an identifier (not a number, operator, or keyword)
+    // Check that all variables referenced in the formula are present.
+    // Simple heuristic: extract word tokens and check each identifier.
     const tokens = formula.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
     for (const token of tokens) {
       if (!(token in numericVars)) return null; // missing input
@@ -55,7 +57,11 @@ export function evalFormula(
     const result = fn(...paramValues) as number;
 
     if (!isFinite(result)) return null;
-    return Math.round(result * 10000) / 10000; // 4 d.p.
+
+    // % results → 2 d.p. (match A-20/1 convention); everything else → 4 d.p.
+    const isPercent = unit?.trim() === "%";
+    const factor = isPercent ? 100 : 10000;
+    return Math.round(result * factor) / factor;
   } catch {
     return null;
   }
