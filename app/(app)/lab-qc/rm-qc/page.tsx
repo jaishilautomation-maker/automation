@@ -158,8 +158,13 @@ export default function RmQcPage() {
   const [loadingMats, setLoadingMats] = useState(true);
   const [materialId, setMaterialId]   = useState("");
   const [batchId, setBatchId]         = useState("");
-  const [batches, setBatches]         = useState<BatchOption[]>([]);
-  const [loadingBatches, setLoadingBatches] = useState(false);
+  // A-20: debounced batch number lookup (replaces dropdown)
+  const [batchNumber, setBatchNumber]   = useState("");
+  const [batchLookupState, setBatchLookupState] = useState<
+    "idle" | "searching" | "found" | "not_found"
+  >("idle");
+  const [lookedUpBatch, setLookedUpBatch] = useState<BatchOption | null>(null);
+  const batchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // A-20/1 Crude Sulphur: invoice number resolved against rm_receipts.
   // No auto-create — the chemist must enter an invoice that was already
   // registered in the RM Receipt activity.
@@ -271,37 +276,40 @@ export default function RmQcPage() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Load batches (for A-20/1 crude sulphur these are invoice-number entries)
+  // A-20: debounced batch lookup — 400 ms after last keystroke.
+  // Batch MUST already exist (created in RM Receipt). Never auto-created here.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!activeFactory) { setBatches([]); setBatchId(""); return; }
-    if (!isA20_1 && (!materialId || isSulphurPowder)) {
-      setBatches([]); setBatchId(""); return;
+    if (isA20_1 || !materialId || isSulphurPowder || !activeFactory) return;
+    const bn = batchNumber.trim();
+    if (!bn) {
+      setBatchLookupState("idle");
+      setLookedUpBatch(null);
+      setBatchId("");
+      return;
     }
-    // For A-20/1: skip if oil type is selected
-    if (isA20_1 && qcRmType !== "crude_sulphur") {
-      setBatches([]); setBatchId(""); return;
-    }
-    setLoadingBatches(true);
-
-    let query = supabase.from("batches")
-      .select("id, batch_number, lot_number, production_date")
-      .eq("factory_id", activeFactory.id)
-      .eq("batch_type", "rm")
-      .order("production_date", { ascending: false })
-      .limit(50);
-
-    // For A-20 (non A-20/1), filter by material
-    if (!isA20_1 && materialId) {
-      query = query.eq("material_id", materialId);
-    }
-
-    query.then(({ data }) => {
-        setBatches((data ?? []) as BatchOption[]);
+    setBatchLookupState("searching");
+    if (batchDebounceRef.current) clearTimeout(batchDebounceRef.current);
+    batchDebounceRef.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from("batches")
+        .select("id, batch_number, lot_number, production_date")
+        .eq("factory_id", activeFactory.id)
+        .eq("material_id", materialId)
+        .eq("batch_number", bn)
+        .maybeSingle();
+      if (data) {
+        setLookedUpBatch(data as BatchOption);
+        setBatchId(data.id);
+        setBatchLookupState("found");
+      } else {
+        setLookedUpBatch(null);
         setBatchId("");
-        setLoadingBatches(false);
-      });
-  }, [materialId, activeFactory, isSulphurPowder, supabase, qcRmType]);
+        setBatchLookupState("not_found");
+      }
+    }, 400);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchNumber, materialId, activeFactory, isSulphurPowder]);
 
   // ---------------------------------------------------------------------------
   // Load test definitions
@@ -613,7 +621,7 @@ export default function RmQcPage() {
   const handleSubmit = async () => {
     if (!user || !activeFactory) { showToast("Session error — refresh.", true); return; }
     if (!materialId) { showToast("Select a material.", true); return; }
-    if (!batchId)    { showToast("Select a batch.", true); return; }
+    if (!batchId)    { showToast("Enter a valid batch number.", true); return; }
 
     setSubmitting(true);
     try {
@@ -677,7 +685,7 @@ export default function RmQcPage() {
 
       // Fire-and-forget email
       const nowISO = new Date().toISOString();
-      const selectedBatch = batches.find(b => b.id === batchId);
+      const selectedBatch = lookedUpBatch;
       const { subject: rmqcSubj, html: rmqcHtml } = buildRmQcEmail({
         materialName:    selectedMaterial?.name ?? "Raw Material",
         batchNumber:     selectedBatch?.batch_number,
@@ -718,6 +726,9 @@ export default function RmQcPage() {
 
       showToast("QC results saved ✓");
       setBatchId("");
+      setBatchNumber("");
+      setBatchLookupState("idle");
+      setLookedUpBatch(null);
       setLinkedReceipt(null);
       setReceiptLinkError(null);
       setCrudeInvoiceNumber("");
@@ -772,7 +783,8 @@ export default function RmQcPage() {
               <select value={materialId} onChange={e => {
                 setMaterialId(e.target.value);
                 setSpImport(null); setSpNotFound(false); setSpBatchSearch(""); setSpImportedBatchId(null);
-                setBatchId(""); setValues({});
+                setBatchId(""); setBatchNumber(""); setBatchLookupState("idle"); setLookedUpBatch(null);
+                setValues({});
               }}>
                 <option value="">— Select raw material —</option>
                 {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -1278,28 +1290,39 @@ export default function RmQcPage() {
       {/* ── Standard dynamic QC form for non-Sulphur-Powder materials (A-20 only) ── */}
       {!isA20_1 && materialId && !isSulphurPowder && (
         <>
-          {/* Batch selector (shows invoice number for A-20/1 crude sulphur) */}
+          {/* Batch — debounced typed lookup. Batch must already exist (created in RM Receipt). */}
           <div className="card">
-            <label>{isA20_1 ? "Invoice Number" : "Batch"} *</label>
-            {loadingBatches ? <div className="field-hint">Loading…</div>
-              : batches.length === 0 ? (
-                <div className="field-hint" style={{ color: "var(--warn)" }}>
-                  No receipts found.{" "}
-                  <Link href="/lab-qc/rm-receipt" style={{ color: "var(--clay)" }}>Create a receipt first →</Link>
-                </div>
-              ) : (
-                <select value={batchId} onChange={e => setBatchId(e.target.value)}>
-                  <option value="">{isA20_1 ? "— Select invoice —" : "— Select batch —"}</option>
-                  {batches.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.batch_number}{b.lot_number ? ` · Lot ${b.lot_number}` : ""} · {b.production_date}
-                    </option>
-                  ))}
-                </select>
-              )}
+            <label>Batch Number *</label>
+            <input
+              type="text"
+              placeholder="e.g. B-10"
+              value={batchNumber}
+              onChange={e => {
+                setBatchNumber(e.target.value);
+                setBatchLookupState("idle");
+              }}
+            />
+            {batchLookupState === "searching" && (
+              <div className="field-hint">Searching…</div>
+            )}
+            {batchLookupState === "not_found" && batchNumber.trim() && (
+              <div className="field-hint" style={{ color: "var(--warn)" }}>
+                ✕ Batch &ldquo;{batchNumber.trim()}&rdquo; not found for {selectedMaterial?.name}.
+                {" "}<Link href="/lab-qc/rm-receipt" style={{ color: "var(--clay)" }}>
+                  Create a receipt first →
+                </Link>
+              </div>
+            )}
+            {batchLookupState === "found" && lookedUpBatch && (
+              <div className="readonly-block" style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 8 }}>
+                ✓ {lookedUpBatch.batch_number}
+                {lookedUpBatch.lot_number ? ` · Lot ${lookedUpBatch.lot_number}` : ""}
+                {" · "}{lookedUpBatch.production_date}
+              </div>
+            )}
           </div>
 
-          {batchId && (
+          {batchLookupState === "found" && (
             <>
               <div className="card">
                 <h3>Test Details</h3>
