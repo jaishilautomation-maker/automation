@@ -453,5 +453,3 @@ WHERE pqc.batch_id = b.id
 -- 5. Grant service_role access (already done in migration 019 globally,
 --    but be explicit for the new column)
 GRANT SELECT, INSERT, UPDATE ON public.product_qc TO service_role;
-
-RAISE NOTICE 'Migration 022 Part B (product_qc batch_id nullable + batch_no) complete';
