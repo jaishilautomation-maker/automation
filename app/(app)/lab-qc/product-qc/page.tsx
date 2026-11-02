@@ -87,10 +87,12 @@ export default function ProductQcPage() {
   const [batchId, setBatchId]           = useState(d0?.batchId ?? "");
   const [loadingBatches, setLoadingBatches] = useState(false);
 
-  // A-20 direct batch entry (no batch-analysis / hourly-reading in this factory)
+  // A-20 direct batch entry — plain required text field, no blocking lookup.
+  // A silent background lookup runs to link to an existing batches row when
+  // available; if no match the record is saved with batch_id=null + batch_no.
   const [directBatchNumber, setDirectBatchNumber] = useState(d0?.directBatchNumber ?? "");
   const [directLotNumber, setDirectLotNumber]     = useState(d0?.directLotNumber ?? "");
-  // A-20: debounced batch lookup state
+  // Silent background lookup state (non-blocking)
   const [batchLookupState, setBatchLookupState] = useState<
     "idle" | "searching" | "found" | "not_found"
   >("idle");
@@ -112,6 +114,8 @@ export default function ProductQcPage() {
   const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
+  // Per-field warnings: retained > sample (sieve inputs)
+  const [sieveWarnings, setSieveWarnings] = useState<Record<string, string>>({});
 
   // Autosave the live form state on every change (debounced inside the hook).
   const draftSave = draft.save;
@@ -161,6 +165,7 @@ export default function ProductQcPage() {
     setExistingRecord(null);
     setValues({});
     setRemarks("");
+    setSieveWarnings({});
   }, [productId, isPhaseAware]);
 
   // -------------------------------------------------------------------------
@@ -236,8 +241,10 @@ export default function ProductQcPage() {
   }, [productId, phase, supabase, initialDraft]);
 
   // -------------------------------------------------------------------------
-  // A-20: debounced batch number lookup — 400 ms after last keystroke
-  // Batch MUST already exist (never auto-created from Product QC).
+  // A-20: silent background batch lookup — 400 ms debounce.
+  // NEVER blocks the form. Just tries to link to an existing batches row.
+  // If found → batchId is set (used as FK when saving).
+  // If not found → batchId stays empty; record saves with batch_no only.
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!isA20 || !productId || !activeFactory) return;
@@ -316,8 +323,17 @@ export default function ProductQcPage() {
   }, [batchId, productId, phase, supabase]);
 
   // -------------------------------------------------------------------------
-  // Field change with live formula recalculation
+  // Field change with live formula recalculation + sieve retained>sample warn
   // -------------------------------------------------------------------------
+  // Pairs of (retained_key, sample_key) for retained>sample validation
+  const SIEVE_PAIRS: [string, string][] = [
+    ["wet_sieve200_residue",  "wet_sieve200_sample"],
+    ["wet_sieve325_residue",  "wet_sieve325_sample"],
+    ["sieve100_retained",     "sieve100_sample"],
+    ["sieve200_retained",     "sieve200_sample"],
+    ["sieve325_retained",     "sieve325_sample"],
+  ];
+
   const handleChange = useCallback(
     (key: string, val: string) => {
       setValues(prev => {
@@ -332,8 +348,27 @@ export default function ProductQcPage() {
           });
         return next;
       });
+      // Sieve retained > sample warnings (warn only, never block)
+      setSieveWarnings(prev => {
+        const next = { ...prev };
+        for (const [retKey, sampleKey] of SIEVE_PAIRS) {
+          // Only recheck the pair that contains the changed key
+          if (key !== retKey && key !== sampleKey) continue;
+          setValues(vals => {
+            const retained = parseFloat(key === retKey ? val : (vals[retKey] ?? ""));
+            const sample   = parseFloat(key === sampleKey ? val : (vals[sampleKey] ?? ""));
+            if (!isNaN(retained) && !isNaN(sample) && retained > sample) {
+              next[retKey] = `Retained (${retained} g) > Sample (${sample} g) — check values`;
+            } else {
+              delete next[retKey];
+            }
+            return vals; // no state change, just reading
+          });
+        }
+        return next;
+      });
     },
-    [testDefs]
+    [testDefs], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // -------------------------------------------------------------------------
@@ -343,35 +378,37 @@ export default function ProductQcPage() {
     if (!user || !activeFactory)       { showToast("Session error — refresh.", true); return; }
     if (!productId)                    { showToast("Select a product.", true); return; }
     if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
-    if (isA20 && batchLookupState !== "found") {
-      showToast("Enter a valid batch number that already exists.", true); return;
-    }
+    if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
     if (!chemistName.trim() && !existingRecord) {
       showToast("Enter chemist name.", true); return;
     }
 
     setSubmitting(true);
     try {
-      // A-20: batch must already exist — looked up via debounced search.
-      // Never auto-create from Product QC.
-      let effectiveBatchId = batchId;
-      if (isA20) {
-        // batchId was set by the debounced lookup (lookedUpBatch.id)
-        if (!effectiveBatchId) {
-          showToast("Batch not found — cannot save.", true);
-          setSubmitting(false);
-          return;
-        }
+      // A-20: batch_no is always stored as typed. batch_id links to the
+      // batches table only when a match was found via the silent background
+      // lookup. No auto-create, no blocking if unlinked.
+      const effectiveBatchId = batchId || null;  // null when not linked
+      const effectiveBatchNo = directBatchNumber.trim();
 
-        // Guard against a duplicate QC record for this batch/product/phase.
-        const { data: dup } = await supabase
+      if (isA20) {
+        // Guard against duplicate QC record for this batch/product/phase.
+        // Check by batch_id (linked) or batch_no+factory (unlinked).
+        let dupQuery = supabase
           .from("product_qc")
           .select("id")
-          .eq("batch_id", effectiveBatchId)
           .eq("product_id", productId)
           .eq("phase", phase)
-          .maybeSingle();
-        if (dup) {
+          .eq("factory_id", activeFactory.id);
+
+        if (effectiveBatchId) {
+          dupQuery = dupQuery.eq("batch_id", effectiveBatchId);
+        } else {
+          dupQuery = dupQuery.eq("batch_no", effectiveBatchNo).is("batch_id", null);
+        }
+
+        const { data: dup } = await dupQuery.maybeSingle();
+        if (dup && !existingRecord) {
           showToast("A QC record already exists for this batch, product and phase.", true);
           setSubmitting(false);
           return;
@@ -424,7 +461,7 @@ export default function ProductQcPage() {
             sourceTable:   "product_qc",
             sourceRecordId: existingRecord.id,
             factoryId:     activeFactory.id,
-            batchId:       existingRecord.batch_id,
+            batchId:       existingRecord.batch_id ?? existingRecord.batch_no ?? "",
             phase,
             overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
             testDate:      testDate,
@@ -490,6 +527,7 @@ export default function ProductQcPage() {
           .from("product_qc")
           .insert({
             batch_id:      effectiveBatchId,
+            batch_no:      isA20 ? effectiveBatchNo : undefined,
             factory_id:    activeFactory.id,
             product_id:    productId,
             phase,
@@ -512,7 +550,7 @@ export default function ProductQcPage() {
             sourceTable:   "product_qc",
             sourceRecordId: newRow.id,
             factoryId:     activeFactory.id,
-            batchId:       effectiveBatchId,
+            batchId:       effectiveBatchId ?? effectiveBatchNo,
             phase,
             overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
             testDate:      testDate,
@@ -527,7 +565,7 @@ export default function ProductQcPage() {
 
         // Fire-and-forget email (INSERT path)
         const pqcInsISO = new Date().toISOString();
-        const batchNum = isA20 ? (lookedUpBatch?.batch_number ?? directBatchNumber.trim()) : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
+        const batchNum = isA20 ? (lookedUpBatch?.batch_number ?? effectiveBatchNo) : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
         const { subject: pqcInsSubj, html: pqcInsHtml } = buildProductQcEmail({
           productName:     selectedProduct?.name ?? "Product",
           batchNumber:     batchNum,
@@ -577,6 +615,7 @@ export default function ProductQcPage() {
         setBatchLookupState("idle");
         setLookedUpBatch(null);
         setExistingRecord(null);
+        setSieveWarnings({});
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
         setChemistName("");
@@ -630,9 +669,9 @@ export default function ProductQcPage() {
         )}
       </div>
 
-      {/* Step 3 (A-20): debounced batch number lookup.
-          Batch must already exist (created via Production Job Card flow).
-          On match: show lot/date. On no match: block with error.           */}
+      {/* Step 3 (A-20): plain batch number input. No lookup requirement.
+          A silent background search links to an existing batch when found.
+          Never blocks — saves with batch_no even if no batches row exists.  */}
       {isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
@@ -646,20 +685,15 @@ export default function ProductQcPage() {
               setBatchLookupState("idle");
             }}
           />
-          {batchLookupState === "searching" && (
-            <div className="field-hint">Searching…</div>
-          )}
-          {batchLookupState === "not_found" && directBatchNumber.trim() && (
-            <div className="field-hint" style={{ color: "var(--warn)" }}>
-              ✕ Batch &ldquo;{directBatchNumber.trim()}&rdquo; not found for this product.
-              Create the batch via Production Job Card first.
+          {batchLookupState === "found" && lookedUpBatch && (
+            <div className="field-hint" style={{ color: "var(--ok)", marginTop: 4 }}>
+              ✓ Linked to Production Job Card batch · {lookedUpBatch.production_date}
+              {lookedUpBatch.lot_number ? ` · Lot ${lookedUpBatch.lot_number}` : ""}
             </div>
           )}
-          {batchLookupState === "found" && lookedUpBatch && (
-            <div className="readonly-block" style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 8 }}>
-              ✓ {lookedUpBatch.batch_number}
-              {lookedUpBatch.lot_number ? ` · Lot ${lookedUpBatch.lot_number}` : ""}
-              {" · "}{lookedUpBatch.production_date}
+          {batchLookupState === "not_found" && directBatchNumber.trim() && (
+            <div className="field-hint" style={{ color: "var(--ink-soft)", marginTop: 4 }}>
+              Not linked to a Production Job Card — will save as standalone record.
             </div>
           )}
         </div>
@@ -707,7 +741,7 @@ export default function ProductQcPage() {
       )}
 
       {/* Step 4: form */}
-      {productId && (isA20 ? batchLookupState === "found" : (batchId && !checkingExisting)) && (
+      {productId && (isA20 ? directBatchNumber.trim() !== "" : (batchId && !checkingExisting)) && (
         <>
           <div className="card">
             <h3>Test Details</h3>
@@ -757,6 +791,11 @@ export default function ProductQcPage() {
                   onChange={handleChange}
                   allValues={values}
                   manualOverrideKeys={MANUAL_OVERRIDE_KEYS}
+                  specBadge={sieveWarnings[def.test_key] ? (
+                    <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>
+                      ⚠ {sieveWarnings[def.test_key]}
+                    </div>
+                  ) : undefined}
                   photoUploadProps={(user && activeFactory) ? {
                     factoryCode:  activeFactory.code,
                     factoryId:    activeFactory.id,

@@ -351,7 +351,8 @@ export interface BatchAnalysis {
  */
 export interface ProductQc {
   id: string;
-  batch_id: string;
+  batch_id: string | null;       // nullable — unlinked Product QC records have no batch FK
+  batch_no: string | null;       // typed batch number (always set; backfilled for linked records)
   factory_id: string;
   product_id: string;
   phase: QcPhase;
