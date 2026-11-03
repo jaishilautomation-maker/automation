@@ -230,6 +230,12 @@ export interface BatchAnalysisEmailArgs {
    * Null/empty → the full default parameter set.
    */
   partyResultKeys?: string[] | null;
+  /**
+   * Set of result keys whose stored value is % RETAINED but should be displayed
+   * as % PASSING (= 100 - retained) for this party (MRF mesh rows). When a key
+   * is in this set, the email shows the passing value and "(passing)" label.
+   */
+  passingKeys?: Set<string> | null;
 }
 
 export function buildBatchAnalysisEmail(d: BatchAnalysisEmailArgs): { subject: string; html: string } {
@@ -242,7 +248,13 @@ export function buildBatchAnalysisEmail(d: BatchAnalysisEmailArgs): { subject: s
   // Build one block per parameter: the calculated result, then its raw inputs.
   const paramBlocks = params
     .map((p) => {
-      const resultVal = tr[p.resultKey];
+      const isPassing = d.passingKeys?.has(p.resultKey) === true;
+      let resultVal = tr[p.resultKey];
+      // For passing-basis rows (MRF mesh), display 100 - retained as % passing
+      if (isPassing && resultVal !== undefined && resultVal !== null && resultVal !== "") {
+        const retained = parseFloat(String(resultVal));
+        if (!isNaN(retained)) resultVal = (100 - retained).toFixed(4);
+      }
       const rawRows = p.rawInputs
         .filter((k) => tr[k] !== undefined && tr[k] !== null && tr[k] !== "")
         .map(
@@ -260,7 +272,7 @@ export function buildBatchAnalysisEmail(d: BatchAnalysisEmailArgs): { subject: s
           : "—";
       return `
         <tr style="border-top:1px solid #e0e0e0">
-          <td style="padding:6px 8px;font-weight:700">${p.label}</td>
+          <td style="padding:6px 8px;font-weight:700">${p.label}${isPassing ? " (passing)" : ""}</td>
           <td style="padding:6px 8px;font-weight:700">${resultDisplay}</td>
         </tr>
         ${rawRows}`;

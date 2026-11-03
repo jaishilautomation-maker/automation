@@ -1054,6 +1054,17 @@ async function loadBatchAnalysis(
   const partyResultKeys = d.party_code
     ? await getPartySpecKeys(supabase, d.party_code as string)
     : [];
+  // For passing-basis parameters (MRF mesh), transform stored % retained →
+  // % passing (= 100 - retained) so the printed report matches the COA.
+  const passingKeys = await getPassingSpecKeys(supabase, d.party_code as string);
+  if (passingKeys.length > 0) {
+    const tr = { ...((d.test_results ?? {}) as Record<string, unknown>) };
+    for (const key of passingKeys) {
+      const retained = parseFloat(String(tr[key] ?? ""));
+      if (!isNaN(retained)) tr[key] = Number((100 - retained).toFixed(4));
+    }
+    d.test_results = tr;
+  }
   // Human-readable rework action for the in-process report.
   const reworkLabel =
     d.rework_action === "downgrade_grade_b" ? "Downgrade to Grade B"
@@ -1227,6 +1238,25 @@ async function getPartySpecKeys(
     .select("parameter")
     .eq("party_code", partyCode)
     .eq("is_active", true);
+  return ((data ?? []) as { parameter: string }[]).map((r) => r.parameter);
+}
+
+/**
+ * Parameter keys where display_as_passing = true for this party. The stored
+ * batch_analysis value is % retained; the report should print % passing
+ * (= 100 - retained) for these rows (MRF mesh).
+ */
+async function getPassingSpecKeys(
+  supabase: SupabaseClient,
+  partyCode: string | null | undefined
+): Promise<string[]> {
+  if (!partyCode) return [];
+  const { data } = await supabase
+    .from("coa_customer_specs")
+    .select("parameter")
+    .eq("party_code", partyCode)
+    .eq("is_active", true)
+    .eq("display_as_passing", true);
   return ((data ?? []) as { parameter: string }[]).map((r) => r.parameter);
 }
 

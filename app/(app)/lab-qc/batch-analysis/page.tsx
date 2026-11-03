@@ -1,3 +1,4 @@
+
 "use client";
 
 // =============================================================================
@@ -46,6 +47,7 @@ interface SpecRow {
   max_value: number | null;
   target_value: number | null;
   needs_verification: boolean;
+  display_as_passing: boolean;
 }
 
 type RiskStatus = "pass" | "fail" | "none";
@@ -185,7 +187,7 @@ export default function BatchAnalysisPage() {
     if (!partyCode) { setSpecs([]); return; }
     supabase
       .from("coa_customer_specs")
-      .select("parameter, parameter_label, unit, min_value, max_value, target_value, needs_verification")
+      .select("parameter, parameter_label, unit, min_value, max_value, target_value, needs_verification, display_as_passing")
       .eq("party_code", partyCode)
       .eq("is_active", true)
       .then(({ data }) => setSpecs((data ?? []) as SpecRow[]));
@@ -205,8 +207,12 @@ export default function BatchAnalysisPage() {
       if (!spec) return "none";
       const v = parseFloat(rawVal);
       if (rawVal === "" || isNaN(v)) return "none";
-      if (spec.min_value != null && v < spec.min_value) return "fail";
-      if (spec.max_value != null && v > spec.max_value) return "fail";
+      // For passing-basis rows (MRF mesh), the stored value is % retained.
+      // Derive % passing = 100 - retained before comparing against spec limits
+      // (which are also on the passing basis).
+      const compareVal = spec.display_as_passing ? 100 - v : v;
+      if (spec.min_value != null && compareVal < spec.min_value) return "fail";
+      if (spec.max_value != null && compareVal > spec.max_value) return "fail";
       return "pass";
     },
     [specFor]
@@ -222,14 +228,31 @@ export default function BatchAnalysisPage() {
   }, []);
 
   // Inline badge rendered to the right of a field: spec limit + pass/fail.
-  // Returns null when the parameter has no spec for the selected party.
+  // Returns null when the parameter has no spec row for the selected party.
+  // A spec row that exists but has no min/max → "No spec" (neutral, not Pass).
   const buildSpecBadge = useCallback((paramKey: string): React.ReactNode => {
     const spec = specFor(paramKey);
     if (!spec) return null;
+    // Spec row exists but carries no limits → neutral "No spec", never "Pass"
+    if (spec.min_value == null && spec.max_value == null) {
+      return (
+        <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+          <div style={{ color: "var(--ink-soft)" }}>
+            {spec.parameter_label}
+          </div>
+          <div style={{ color: "var(--ink-soft)", fontWeight: 600 }}>No spec</div>
+        </div>
+      );
+    }
     const raw = values[paramKey] ?? "";
     const st = statusFor(paramKey, raw);
     const color = st === "pass" ? "var(--ok)" : st === "fail" ? "#c0392b" : "var(--ink-soft)";
     const label = st === "pass" ? "✓ Pass" : st === "fail" ? "✗ Fail" : "—";
+    // For passing-basis rows, show the derived % passing value in the badge
+    const displayVal = (() => {
+      if (!spec.display_as_passing || raw === "" || isNaN(parseFloat(raw))) return null;
+      return (100 - parseFloat(raw)).toFixed(4);
+    })();
     return (
       <div style={{ fontSize: 12, lineHeight: 1.4 }}>
         <div style={{ color: "var(--ink-soft)" }}>
@@ -239,6 +262,11 @@ export default function BatchAnalysisPage() {
               style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>
           )}
         </div>
+        {displayVal != null && (
+          <div style={{ color: "var(--ink-soft)", fontSize: 11 }}>
+            passing: <strong>{displayVal}%</strong>
+          </div>
+        )}
         <div style={{ color, fontWeight: 700 }}>{label}</div>
       </div>
     );
@@ -271,6 +299,11 @@ export default function BatchAnalysisPage() {
   const selectedPartyName =
     parties.find(p => p.party_code === partyCode)?.customer_name || partyCode || null;
   const partyResultKeys = partyCode ? specs.map(s => s.parameter) : [];
+  // Parameters whose stored value is % retained but should display as % passing
+  // (= 100 - retained) for this party (MRF mesh rows with display_as_passing).
+  const passingKeys = new Set(
+    specs.filter(s => s.display_as_passing).map(s => s.parameter)
+  );
 
   // Which test-definition fields to render. Always show ALL fields regardless
   // of whether a party is selected — the party selection only drives the live
@@ -396,6 +429,29 @@ export default function BatchAnalysisPage() {
     // one parameter) just to record/share a result internally, without any
     // rework decision. They can still pick one when a full batch genuinely fails.
 
+    // ── Mesh input validation ──────────────────────────────────────────────
+    // For every mesh row where both M and m are entered, enforce M > 0 and
+    // 0 ≤ m ≤ M. Block the save otherwise (prevents nonsensical values).
+    const meshPairs = ["mesh100", "mesh200", "mesh325"];
+    for (const prefix of meshPairs) {
+      const mKey   = `${prefix}_m`;
+      const mRetKey = `${prefix}_m_ret`;
+      const mRaw   = (values[mKey] ?? "").trim();
+      const mRetRaw = (values[mRetKey] ?? "").trim();
+      if (mRaw === "" || mRetRaw === "") continue; // empty = not yet filled, OK
+      const M = parseFloat(mRaw);
+      const m = parseFloat(mRetRaw);
+      if (isNaN(M) || isNaN(m)) continue;
+      if (M <= 0) {
+        showToast(`${prefix}: Sample taken (M) must be greater than 0.`, true);
+        return;
+      }
+      if (m < 0 || m > M) {
+        showToast(`${prefix}: Coarse retained (m) must be between 0 and M (${M}).`, true);
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       // Resolve or create batch (direct client — same pattern as rm-receipt)
@@ -504,6 +560,7 @@ export default function BatchAnalysisPage() {
           isUpdate:        true,
           partyName:       selectedPartyName,
           partyResultKeys: partyResultKeys,
+          passingKeys:     passingKeys.size > 0 ? passingKeys : null,
         });
         void notifyEvent({
           eventType: "lab_qc_batch_analysis",
@@ -587,6 +644,7 @@ export default function BatchAnalysisPage() {
           isUpdate:        false,
           partyName:       selectedPartyName,
           partyResultKeys: partyResultKeys,
+          passingKeys:     passingKeys.size > 0 ? passingKeys : null,
         });
         void notifyEvent({
           eventType: "lab_qc_batch_analysis",
@@ -771,25 +829,83 @@ export default function BatchAnalysisPage() {
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Green fields are auto-calculated. Enter input values and they update automatically.
               </div>
-              {visibleDefs.map(def => (
-                <QcFieldRenderer
-                  key={def.id}
-                  def={def}
-                  value={values[def.test_key] ?? ""}
-                  onChange={handleChange}
-                  onBlur={(key, val) => audit.record(key, val)}
-                  specBadge={partyCode ? buildSpecBadge(def.test_key) : null}
-                  photoUploadProps={(user && activeFactory) ? {
-                    factoryCode:  activeFactory.code,
-                    factoryId:    activeFactory.id,
-                    entityType:   "batch_analysis",
-                    entityId:     existingAnalysis?.id ?? null,
-                    userId:       user.id,
-                    onUploaded:   (key, path) => handleChange(key, path),
-                    uploaderRefs,
-                  } : undefined}
-                />
-              ))}
+              {visibleDefs.map(def => {
+                // After a mesh_pct field, show W2 + % passing for passing-basis
+                // parties (MRF). Other parties keep % retained, unchanged.
+                const meshPctMatch = def.test_key.match(/^mesh(\d+)_pct$/);
+                const passingSpec = meshPctMatch
+                  ? specs.find(s => s.parameter === def.test_key && s.display_as_passing)
+                  : undefined;
+
+                const fieldEl = (
+                  <QcFieldRenderer
+                    def={def}
+                    value={values[def.test_key] ?? ""}
+                    onChange={handleChange}
+                    onBlur={(key, val) => audit.record(key, val)}
+                    specBadge={partyCode ? buildSpecBadge(def.test_key) : null}
+                    photoUploadProps={(user && activeFactory) ? {
+                      factoryCode:  activeFactory.code,
+                      factoryId:    activeFactory.id,
+                      entityType:   "batch_analysis",
+                      entityId:     existingAnalysis?.id ?? null,
+                      userId:       user.id,
+                      onUploaded:   (key, path) => handleChange(key, path),
+                      uploaderRefs,
+                    } : undefined}
+                  />
+                );
+
+                if (!passingSpec) return <div key={def.id}>{fieldEl}</div>;
+
+                // Compute W2 = M - m and % passing = W2 / M × 100
+                const mKey     = def.test_key.replace("_pct", "_m");
+                const mRetKey  = def.test_key.replace("_pct", "_m_ret");
+                const M = parseFloat(values[mKey] ?? "");
+                const m = parseFloat(values[mRetKey] ?? "");
+                const hasInputs = (values[mKey] ?? "").trim() !== "" && (values[mRetKey] ?? "").trim() !== "";
+                const valid = hasInputs && M > 0 && m >= 0 && m <= M;
+                const w2        = valid ? (M - m).toFixed(4) : "—";
+                const passingPct = valid ? ((M - m) / M * 100).toFixed(4) : "—";
+                const meshNum   = meshPctMatch![1];
+
+                return (
+                  <div key={def.id}>
+                    {fieldEl}
+                    {/* W2 + % passing read-only display (passing-basis only) */}
+                    <div style={{
+                      marginLeft: 0, marginBottom: 12, padding: "8px 12px",
+                      background: "var(--ok-soft)", borderRadius: 6, fontSize: 13,
+                    }}>
+                      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                        <div>
+                          <span style={{ color: "var(--ink-soft)" }}>
+                            {meshNum} Mesh: Passing W2 (g)
+                          </span>
+                          <span style={{ color: "var(--ok)", fontWeight: 700, marginLeft: 6 }}>— auto</span>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: valid ? "var(--ok)" : "var(--warn)" }}>
+                            {w2}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ color: "var(--ink-soft)" }}>
+                            {meshNum} Mesh: % passing (%)
+                          </span>
+                          <span style={{ color: "var(--ok)", fontWeight: 700, marginLeft: 6 }}>— auto</span>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: valid ? "var(--ok)" : "var(--warn)" }}>
+                            {passingPct}
+                          </div>
+                        </div>
+                      </div>
+                      {hasInputs && !valid && (
+                        <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 4 }}>
+                          ⚠ Invalid: M must be &gt; 0 and 0 ≤ m ≤ M. This row will not save.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
