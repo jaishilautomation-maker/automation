@@ -574,3 +574,24 @@ table.dash td { padding: 8px 8px; border-bottom: 1px solid var(--line); }
 .module-icon  { font-size: 36px; margin-bottom: 10px; }
 .module-title { font-size: 14px; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
 .module-desc  { font-size: 11px; color: var(--ink-soft); line-height: 1.5; }
+
+/* ── Fallback: Hide number input spinner buttons ──────────────────────────
+   In case any type="number" inputs slip through, hide their native up/down
+   spinner buttons across all browsers. */
+input[type="number"] {
+  /* Firefox */
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  /* Webkit (Chrome, Safari, Edge) */
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Block scroll-wheel from changing number input values (double insurance). */
+input[type="number"]::-webkit-outer-spin-button:hover,
+input[type="number"]::-webkit-inner-spin-button:hover {
+  pointer-events: none;
+}

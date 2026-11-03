@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
@@ -246,13 +247,13 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
  const { showToast } = useToast();
  const supabase = createClient();
 
- // ── Card list state ───────────────────────────────────────────────────────
+ // -- Card list state -------------------------------------------------------
  const [cards, setCards]   = useState<PulveriserJobCard[]>([]);
  const [loading, setLoading] = useState(true);
  const [filter, setFilter]  = useState<"pending" | "all">("pending");
  const [selected, setSelected] = useState<PulveriserJobCard | null>(null);
 
- // ── Oil issue state (merged from OilIssueSection) ─────────────────────────
+ // -- Oil issue state (merged from OilIssueSection) -------------------------
  const [oilIssued, setOilIssued]   = useState("");
  const [storesNote, setStoresNote] = useState("");
  const [submitting, setSubmitting] = useState(false);
@@ -260,12 +261,12 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   result: string; remark: string | null; reviewed_at: string;
  }[]>([]);
 
- // ── Oil item selector (stock deduction) ─────────────────────────────────
+ // -- Oil item selector (stock deduction) ---------------------------------
  const [oilItems, setOilItems]           = useState<StoresStockItem[]>([]);
  const [selectedOilItemId, setSelectedOilItemId] = useState("");
  const [oilItemBalance, setOilItemBalance]     = useState<number | null>(null);
 
- // ── Bags issued state (fetched from slip ledger for selected card) ────────
+ // -- Bags issued state (fetched from slip ledger for selected card) --------
  interface BagsIssuedRow {
   bagType: string;
   qtyIssued: number;
@@ -305,7 +306,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   setOilItemBalance((data as { closing_balance: number } | null)?.closing_balance ?? 0);
  };
 
- // Open a card — load rejection history and bags-issued slips
+ // Open a card � load rejection history and bags-issued slips
  const openCard = async (jc: PulveriserJobCard) => {
   setSelected(jc);
   setOilIssued(jc.oil_issued_kg?.toString() ?? "");
@@ -393,7 +394,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   setBagsIssued([]);
  };
 
- // Issue oil — the core action
+ // Issue oil � the core action
  const handleIssue = async () => {
   if (!selected || !user) return;
   const n = Number(oilIssued);
@@ -434,7 +435,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
      closing_balance:    newBal,
      reference_type:     "oil_issue",
      remark:             JSON.stringify({
-      source:    "Oil Issue — Job Card",
+      source:    "Oil Issue � Job Card",
       job_number: selected.job_number ?? selected.id,
       party_code: selected.party_code ?? null,
       remark:    storesNote.trim() || null,
@@ -471,7 +472,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
    const isRework = rejectionHistory.some(r => r.result === "not_ok");
    showToast(
     n === 0
-     ? "Confirmed — no oil required. Operator can now run the batch."
+     ? "Confirmed � no oil required. Operator can now run the batch."
      : (isRework ? "Rework oil re-issued" : "Oil issued") +
        (selectedOilItem ? " from " + selectedOilItem.item_name : "") +
        " -- operator can now run the batch."
@@ -501,7 +502,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   );
  };
 
- // ── Detail / oil-issue view ───────────────────────────────────────────────
+ // -- Detail / oil-issue view -----------------------------------------------
  if (selected) {
   const jc = selected;
   const isReworkCard  = rejectionHistory.some(r => r.result === "not_ok");
@@ -614,7 +615,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
      </div>
     )}
 
-    {/* ── Oil Issue form — shown for pending_stores cards ────────────────── */}
+    {/* -- Oil Issue form � shown for pending_stores cards ------------------ */}
     {jc.status === "pending_stores" && (
      <div className="card">
       <h3 style={{ color: isReworkCard ? "var(--warn)" : undefined }}>
@@ -629,7 +630,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
        )}
        {(jc.oil_required_kg == null || jc.oil_required_kg === 0) && (
         <span style={{ fontWeight: 700, color: "var(--ok)" }}>
-         {" "}No oil required for this batch — enter 0 to proceed.
+         {" "}No oil required for this batch � enter 0 to proceed.
         </span>
        )}
       </div>
@@ -638,7 +639,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
       <label>Oil Type *</label>
       {oilItems.length === 0 ? (
        <div className="field-hint" style={{ marginBottom: 8 }}>
-        No oil items found in Stock Ledger. Add oil items via Stock Ledger → Stock Items first.
+        No oil items found in Stock Ledger. Add oil items via Stock Ledger ? Stock Items first.
        </div>
       ) : (
        <select
@@ -668,7 +669,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
         </span>
         {oilIssued && Number.isFinite(Number(oilIssued)) && Number(oilIssued) > 0 && oilItemBalance != null && (
          <span style={{ marginLeft: 12 }}>
-          → After issue:{" "}
+          ? After issue:{" "}
           <span style={{
            fontWeight: 700,
            color: (oilItemBalance - Number(oilIssued)) < 0 ? "var(--warn)" : "var(--ok)",
@@ -676,15 +677,15 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
            {(oilItemBalance - Number(oilIssued)).toFixed(3)} kg
           </span>
           {(oilItemBalance - Number(oilIssued)) < 0 && (
-           <span style={{ color: "var(--warn)", marginLeft: 6 }}>⚠ Insufficient stock</span>
+           <span style={{ color: "var(--warn)", marginLeft: 6 }}>? Insufficient stock</span>
           )}
          </span>
         )}
        </div>
       )}
 
-      <label>Oil Issued (kg) — enter 0 if no oil required</label>
-      <input type="number" min="0" step="0.001" placeholder="0"
+      <label>Oil Issued (kg) � enter 0 if no oil required</label>
+      <NumericInput allowDecimal={true} min="0" placeholder="0"
        value={oilIssued} onChange={e => setOilIssued(e.target.value)} />
       <label style={{ marginTop: 12 }}>Stores Incharge Note</label>
       <input type="text"
@@ -704,7 +705,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
        style={{ marginTop: 16, ...(isReworkCard ? { background: "var(--warn)" } : {}) }}>
        {submitting ? "Saving..."
         : isReworkCard ? "Re-Issue Oil for Rework Batch"
-        : Number(oilIssued) === 0 ? "Confirm No Oil — Send to Operator"
+        : Number(oilIssued) === 0 ? "Confirm No Oil � Send to Operator"
         : "Issue Oil and Send to Operator"}
       </button>
      </div>
@@ -746,7 +747,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
      </div>
     )}
 
-    {/* Bags Issued — fetched from Material Issue Slip records for this job card */}
+    {/* Bags Issued � fetched from Material Issue Slip records for this job card */}
     <div className="card">
      <h3>Bags Issued</h3>
      {bagsIssued.length === 0 ? (
@@ -820,7 +821,7 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
   );
  }
 
- // ── List view ─────────────────────────────────────────────────────────────
+ // -- List view -------------------------------------------------------------
  const groups = groupByJobNumber(cards);
 
  return (
@@ -951,7 +952,7 @@ const TRANSPORT_NAMES = [
  "V-Trans",
 ] as const;
 
-/** Materials list organized by Material Type — used in Received and Supplied sections. */
+/** Materials list organized by Material Type � used in Received and Supplied sections. */
 const MATERIALS_BY_TYPE: Record<string, readonly string[]> = {
  RM: [
   "Crude Sulphur",
@@ -1011,7 +1012,7 @@ function getMaterialsList(materialType: string): readonly string[] {
  if (materialType && MATERIALS_BY_TYPE[materialType]) {
   return MATERIALS_BY_TYPE[materialType];
  }
- // No type selected — return all combined (deduped)
+ // No type selected � return all combined (deduped)
  return Array.from(new Set(Object.values(MATERIALS_BY_TYPE).flat())) as string[];
 }
 
@@ -1259,7 +1260,7 @@ function AutocompleteInput({
 // SHARED -- Searchable Code dropdown (used by both Received and Supplied)
 // =============================================================================
 
-/** Reusable searchable single-select dropdown for Code fields — with keyboard navigation */
+/** Reusable searchable single-select dropdown for Code fields � with keyboard navigation */
 function CodeDropdown({
  codes,
  value,
@@ -1386,7 +1387,7 @@ function CodeDropdown({
 );
 }
 
-/** Reusable multi-select filter dropdown for history table — with keyboard navigation */
+/** Reusable multi-select filter dropdown for history table � with keyboard navigation */
 function CodeFilterDropdown({
  codes,
  selected,
@@ -1714,7 +1715,7 @@ function ReceivedSection() {
     material_type: entry.material_type,
     material_type_other: entry.material_type_other.trim(),
    };
-   // ── 1. Logbook row (always saved, qty all 0 — audit record) ──────────
+   // -- 1. Logbook row (always saved, qty all 0 � audit record) ----------
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
     transaction_date: entry.date, transaction_source: "manual",
@@ -1724,9 +1725,9 @@ function ReceivedSection() {
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
 
-   // ── 2. Stock ledger update — add received qty to the matching item ────
+   // -- 2. Stock ledger update � add received qty to the matching item ----
    // Match by materials field first (direct ILIKE against item_name),
-   // then fall back to the Code→pattern mapping if materials is empty.
+   // then fall back to the Code?pattern mapping if materials is empty.
    const receivedQty = parseQty(entry.f_wt);
    const materialsText = entry.materials.trim();
    const codePattern   = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
@@ -2013,7 +2014,7 @@ function ReceivedSection() {
                : row.material_type === "Maintenance" ? "Maintenance"
                : row.material_type_other || "Others"}
              </span>
-            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>�</span>}
            </td>
            <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
@@ -2281,7 +2282,7 @@ function SuppliedSection() {
     material_type: entry.material_type,
     material_type_other: entry.material_type_other.trim(),
    };
-   // ── 1. Logbook row (always saved, qty all 0 — audit record) ──────────
+   // -- 1. Logbook row (always saved, qty all 0 � audit record) ----------
    const { error } = await supabase.from("stores_stock_ledger").insert({
     item_id: itemData.id, factory_id: itemData.factory_id,
     transaction_date: entry.date, transaction_source: "manual",
@@ -2291,9 +2292,9 @@ function SuppliedSection() {
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
 
-   // ── 2. Stock ledger update — deduct supplied qty from the matching item ─
+   // -- 2. Stock ledger update � deduct supplied qty from the matching item -
    // Match by materials field first (direct ILIKE against item_name),
-   // then fall back to the Code→pattern mapping if materials is empty.
+   // then fall back to the Code?pattern mapping if materials is empty.
    const suppliedQty          = parseQty(entry.f_wt);
    const suppliedMaterialsText = entry.materials.trim();
    const suppliedCodePattern   = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
@@ -2610,7 +2611,7 @@ function SuppliedSection() {
                : row.material_type === "Maintenance" ? "Maintenance"
                : row.material_type_other || "Others"}
              </span>
-            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>�</span>}
            </td>
            <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
            <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
@@ -2692,7 +2693,7 @@ function SuppliedSection() {
 // values displayed; they are not editable in the new form.
 // =============================================================================
 
-// ── Legacy DAILY_PROD_COLS kept ONLY for reading old history rows ─────────
+// -- Legacy DAILY_PROD_COLS kept ONLY for reading old history rows ---------
 interface DailyProdCol {
  key: string;
  label: string;
@@ -2716,7 +2717,7 @@ const DAILY_PROD_COLS: DailyProdCol[] = [
  { key: "export_plan_25kg", label: "Export Plan Bag W/O 25 Kg",                 shortLabel: "EXP PLAN",  bagKg: 25,  colGroup: "25kg"  },
 ];
 
-// ── New types for batch-driven entries ────────────────────────────────────
+// -- New types for batch-driven entries ------------------------------------
 
 /** Production data auto-fetched from a finalized job card + hourly readings */
 interface FetchedBatchData {
@@ -2743,7 +2744,7 @@ interface FetchedBatchData {
  }[];
 }
 
-/** Saved ledger row — v2 (batch-driven). Stored as JSON in remark. */
+/** Saved ledger row � v2 (batch-driven). Stored as JSON in remark. */
 interface SavedDailyProdRowV2 {
  id: string;
  version: 2;
@@ -2772,7 +2773,7 @@ interface SavedDailyProdRow {
  total_mt: number;
 }
 
-/** Union — what we show in history */
+/** Union � what we show in history */
 type DailyProdHistoryRow =
  | (SavedDailyProdRowV2 & { legacy: false })
  | (SavedDailyProdRow   & { legacy: true  });
@@ -2786,28 +2787,28 @@ function DailyProductionSection() {
  const pathname = usePathname();
  const draft = useFormDraft<DailyProdDraft>(draftKey(pathname, "daily_prod", user?.id));
 
- // ── Batch number input ──────────────────────────────────────────────────
+ // -- Batch number input --------------------------------------------------
  const [batchNo, setBatchNo]     = useState(() => draft.restored?.batchNo ?? "");
  const [fetching, setFetching]   = useState(false);
  const [fetchError, setFetchError] = useState<string | null>(null);
  const [fetched, setFetched]     = useState<FetchedBatchData | null>(null);
 
- // ── Store-editable fields ───────────────────────────────────────────────
+ // -- Store-editable fields -----------------------------------------------
  const [recordDate, setRecordDate]   = useState(() => draft.restored?.recordDate ?? today());
  const [storeRemark, setStoreRemark] = useState(() => draft.restored?.storeRemark ?? "");
 
  const draftSave = draft.save;
  useEffect(() => { draftSave({ batchNo, recordDate, storeRemark }); }, [batchNo, recordDate, storeRemark, draftSave]);
 
- // ── Save / edit state ───────────────────────────────────────────────────
+ // -- Save / edit state ---------------------------------------------------
  const [submitting, setSubmitting] = useState(false);
  const [editId, setEditId]         = useState<string | null>(null);
 
- // ── History ─────────────────────────────────────────────────────────────
+ // -- History -------------------------------------------------------------
  const [history, setHistory]       = useState<DailyProdHistoryRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
 
- // ── Fetch job card by batch number ─────────────────────────────────────
+ // -- Fetch job card by batch number -------------------------------------
  const fetchBatch = async (bn: string) => {
   const trimmed = bn.trim();
   if (!trimmed) return;
@@ -2878,7 +2879,7 @@ function DailyProductionSection() {
   setEditId(null);
  };
 
- // ── Load history ────────────────────────────────────────────────────────
+ // -- Load history --------------------------------------------------------
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
   const { data, error } = await supabase
@@ -2935,7 +2936,7 @@ function DailyProductionSection() {
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
- // ── Load a v2 row into edit mode ────────────────────────────────────────
+ // -- Load a v2 row into edit mode ----------------------------------------
  const startEdit = async (row: SavedDailyProdRowV2 & { legacy: false }) => {
   setBatchNo(row.batch_no);
   setRecordDate(row.record_date);
@@ -2951,7 +2952,7 @@ function DailyProductionSection() {
   setRecordDate(today());
  };
 
- // ── Save ────────────────────────────────────────────────────────────────
+ // -- Save ----------------------------------------------------------------
  const handleSave = async () => {
   if (!fetched) { showToast("Enter a Batch Number and load the production data first.", true); return; }
   if (!recordDate) { showToast("Select a record date.", true); return; }
@@ -3008,14 +3009,14 @@ function DailyProductionSection() {
      .eq("id", editId);
 
     if (updErr) {
-     // UPDATE blocked (migration 047 not yet deployed) — try delete + re-insert
+     // UPDATE blocked (migration 047 not yet deployed) � try delete + re-insert
      const { error: delErr } = await supabase
       .from("stores_stock_ledger")
       .delete()
       .eq("id", editId);
 
      if (delErr) {
-      // Both UPDATE and DELETE blocked — guide user to run the migration
+      // Both UPDATE and DELETE blocked � guide user to run the migration
       showToast(
        "Edit requires a one-time DB setup. Visit /api/migrate-047 in your browser to apply it, then try again.",
        true
@@ -3042,12 +3043,12 @@ function DailyProductionSection() {
   } finally { setSubmitting(false); }
  };
 
- // ── Render ───────────────────────────────────────────────────────────────
+ // -- Render ---------------------------------------------------------------
  return (
   <>
-   {/* ── Entry form ── */}
+   {/* -- Entry form -- */}
    <div className="card">
-    <h3>{editId ? "Edit Daily Production Record" : "Daily Production — Batch Lookup"}</h3>
+    <h3>{editId ? "Edit Daily Production Record" : "Daily Production � Batch Lookup"}</h3>
 
     {/* Edit mode banner */}
     {editId && (
@@ -3057,7 +3058,7 @@ function DailyProductionSection() {
       display: "flex", justifyContent: "space-between", alignItems: "center",
      }}>
       <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
-       Editing existing record — only Record Date and Store Remark are editable.
+       Editing existing record � only Record Date and Store Remark are editable.
       </span>
       <button type="button" className="btn btn-ghost"
        style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
@@ -3067,7 +3068,7 @@ function DailyProductionSection() {
      </div>
     )}
 
-    {/* Step 1 — Batch Number input */}
+    {/* Step 1 � Batch Number input */}
     <div style={{ marginBottom: 14 }}>
      <label style={{ fontWeight: 700 }}>Batch Number *</label>
      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -3109,7 +3110,7 @@ function DailyProductionSection() {
      </div>
     )}
 
-    {/* Step 2 — Auto-fetched production details (read-only) */}
+    {/* Step 2 � Auto-fetched production details (read-only) */}
     {fetched && (
      <>
       <div style={{
@@ -3117,7 +3118,7 @@ function DailyProductionSection() {
        borderRadius: 8, padding: "12px 14px", marginBottom: 14,
        fontSize: 12, color: "var(--ok)", fontWeight: 700,
       }}>
-       ✓ Production data loaded from finalized QC Job Card — all fields are read-only.
+       ? Production data loaded from finalized QC Job Card � all fields are read-only.
       </div>
 
       {/* Production info grid */}
@@ -3153,7 +3154,7 @@ function DailyProductionSection() {
        <div style={{ gridColumn: "1 / -1", marginTop: 4, paddingTop: 6,
         borderTop: "1px solid var(--line)", fontSize: 11,
         color: "var(--ink-soft)", fontStyle: "italic" }}>
-        QC Status: Finalized ✓ — Production data is locked and cannot be changed.
+        QC Status: Finalized ? � Production data is locked and cannot be changed.
        </div>
       </div>
 
@@ -3180,10 +3181,10 @@ function DailyProductionSection() {
            {fetched.readings.map((r, idx) => (
             <tr key={idx}>
              <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtDate(r.reading_date)}</td>
-             <td style={{ fontSize: 12 }}>{r.start_time ?? "—"}</td>
-             <td style={{ fontSize: 12 }}>{r.stop_time ?? "—"}</td>
-             <td style={{ textAlign: "right", fontSize: 12 }}>{r.total_hours ?? "—"}</td>
-             <td style={{ fontSize: 12 }}>{r.batch_no ?? "—"}</td>
+             <td style={{ fontSize: 12 }}>{r.start_time ?? "�"}</td>
+             <td style={{ fontSize: 12 }}>{r.stop_time ?? "�"}</td>
+             <td style={{ textAlign: "right", fontSize: 12 }}>{r.total_hours ?? "�"}</td>
+             <td style={{ fontSize: 12 }}>{r.batch_no ?? "�"}</td>
              <td style={{ textAlign: "right", fontWeight: 600, fontSize: 12 }}>{r.bags ?? 0}</td>
             </tr>
            ))}
@@ -3197,7 +3198,7 @@ function DailyProductionSection() {
        </div>
       )}
 
-      {/* Step 3 — Store-editable fields */}
+      {/* Step 3 � Store-editable fields */}
       <div style={{
        border: "2px solid var(--clay)", borderRadius: 8,
        padding: "14px 16px", marginBottom: 4,
@@ -3235,7 +3236,7 @@ function DailyProductionSection() {
     </button>
    )}
 
-   {/* ── History table ── */}
+   {/* -- History table -- */}
    <div className="card" style={{ marginTop: 16 }}>
     <h3>Daily Production History</h3>
     {histLoading
@@ -3261,13 +3262,13 @@ function DailyProductionSection() {
          <tbody>
           {history.map(row => {
            if (row.legacy) {
-            // Legacy manual row — display old data, no edit
+            // Legacy manual row � display old data, no edit
             const legacyMt = row.total_mt;
             return (
              <tr key={row.id} style={{ background: "#f8f8f8" }}>
               <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtDate(row.date)}</td>
               <td colSpan={6} style={{ fontSize: 11, color: "var(--ink-soft)", fontStyle: "italic" }}>
-               Legacy entry — {DAILY_PROD_COLS.filter(c => (row.values[c.key] ?? 0) > 0)
+               Legacy entry � {DAILY_PROD_COLS.filter(c => (row.values[c.key] ?? 0) > 0)
                 .map(c => c.shortLabel + ": " + row.values[c.key])
                 .join(" | ")}
               </td>
@@ -3289,13 +3290,13 @@ function DailyProductionSection() {
              <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtDate(row.record_date)}</td>
              <td style={{ fontWeight: 700, color: "var(--clay)" }}>{row.batch_no}</td>
              <td style={{ fontSize: 12 }}>{row.product ?? "N/A"}</td>
-             <td style={{ fontSize: 12 }}>{row.machine_number ?? "—"}</td>
-             <td style={{ fontSize: 12 }}>{row.shift ?? "—"}</td>
+             <td style={{ fontSize: 12 }}>{row.machine_number ?? "�"}</td>
+             <td style={{ fontSize: 12 }}>{row.shift ?? "�"}</td>
              <td style={{ textAlign: "right", fontWeight: 600 }}>{row.total_bags}</td>
              <td style={{ textAlign: "right", fontWeight: 700, color: "var(--ok)" }}>
-              {row.actual_mt != null ? (row.actual_mt * 1000).toFixed(0) : "—"}
+              {row.actual_mt != null ? (row.actual_mt * 1000).toFixed(0) : "�"}
              </td>
-             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>{row.store_remark || "—"}</td>
+             <td style={{ fontSize: 11, color: "var(--ink-soft)" }}>{row.store_remark || "�"}</td>
              <td>
               <button type="button"
                onClick={() => startEdit(row)}
@@ -3532,7 +3533,7 @@ function DailyDispatchSection() {
      {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 25).map(col => (
       <div key={col.key}>
        <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
+       <NumericInput allowDecimal={false} min="0" placeholder="0"
         value={entry[col.key]}
         onChange={e => setField(col.key, e.target.value)} />
       </div>
@@ -3548,7 +3549,7 @@ function DailyDispatchSection() {
      {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 50).map(col => (
       <div key={col.key}>
        <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
+       <NumericInput allowDecimal={false} min="0" placeholder="0"
         value={entry[col.key]}
         onChange={e => setField(col.key, e.target.value)} />
       </div>
@@ -3564,7 +3565,7 @@ function DailyDispatchSection() {
      {DAILY_DISPATCH_COLS.filter(c => c.bagKg === 550).map(col => (
       <div key={col.key}>
        <label style={{ fontSize: 11 }}>{col.label}</label>
-       <input type="number" min="0" step="1" placeholder="0"
+       <NumericInput allowDecimal={false} min="0" placeholder="0"
         value={entry[col.key]}
         onChange={e => setField(col.key, e.target.value)} />
       </div>
@@ -3678,7 +3679,7 @@ function DailyDispatchSection() {
 // O/WT values for the matching received code, filling Qty. Rec automatically.
 // =============================================================================
 
-// ── Received Code → PM Product mapping ──────────────────────────────────────
+// -- Received Code ? PM Product mapping --------------------------------------
 // Maps each RECEIVED_CODES value to the corresponding PM_PRODUCTS string.
 // Used to auto-fill Qty. Rec in the PM form from Received entries.
 const RECEIVED_CODE_TO_PM_PRODUCT: Record<string, string> = {
@@ -3696,7 +3697,7 @@ const RECEIVED_CODE_TO_PM_PRODUCT: Record<string, string> = {
  "Wooden Pallet":  "WOODEN PALLETS",
 };
 
-// Reverse: PM Product → Received Code (for lookup direction)
+// Reverse: PM Product ? Received Code (for lookup direction)
 const PM_PRODUCT_TO_RECEIVED_CODE: Record<string, string> = Object.fromEntries(
  Object.entries(RECEIVED_CODE_TO_PM_PRODUCT).map(([rc, pm]) => [pm, rc])
 );
@@ -3746,7 +3747,7 @@ const STOCK_THRESHOLD_FALLBACK: { fragment: string; threshold: number | null; ca
  { fragment: "old bags",                 threshold: 1000, category: "packaging_material" },
 ];
 
-/** Get effective threshold for a stock item — DB value takes priority, fallback map second. */
+/** Get effective threshold for a stock item � DB value takes priority, fallback map second. */
 function getEffectiveThreshold(item: StoresStockItem): number | null {
  if (item.min_threshold !== null && item.min_threshold !== undefined) return item.min_threshold;
  const nameLower = item.item_name.toLowerCase();
@@ -3780,7 +3781,7 @@ const PM_THRESHOLDS: Record<string, number | null> = {
 function computePmStatus(product: string, clBal: number | null): string {
   if (clBal == null) return "";
   const threshold = PM_THRESHOLDS[product];
-  if (threshold == null) return "";          // WOODEN PALLETS — no rule
+  if (threshold == null) return "";          // WOODEN PALLETS � no rule
   return clBal >= threshold ? "GOOD" : "LESS";
 }
 
@@ -3983,7 +3984,7 @@ function PackingMaterialSection() {
       if (!isNaN(n) && n > 0) {
        sources.push({
         date: p.date ?? date,
-        particular: p.particular ?? p.materials ?? "—",
+        particular: p.particular ?? p.materials ?? "�",
         o_wt: p.o_wt,
         qty: n,
        });
@@ -4104,7 +4105,7 @@ function PackingMaterialSection() {
       display: "flex", justifyContent: "space-between", alignItems: "center",
      }}>
       <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
-       Editing existing entry — save to update, or cancel to discard.
+       Editing existing entry � save to update, or cancel to discard.
       </span>
       <button type="button" className="btn btn-ghost"
        style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
@@ -4140,7 +4141,7 @@ function PackingMaterialSection() {
      </div>
     </div>
 
-    {/* Auto-fill banner — shown when Received entries were found */}
+    {/* Auto-fill banner � shown when Received entries were found */}
     {autoFillLoading && (
      <div className="field-hint" style={{ marginBottom: 8 }}>
       Checking Received entries for {entry.product}...
@@ -4152,7 +4153,7 @@ function PackingMaterialSection() {
       borderRadius: 8, padding: "10px 14px", marginBottom: 10, fontSize: 13,
      }}>
       <div style={{ fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>
-       ✓ Qty. Rec auto-filled from latest Received entry ({entry.date})
+       ? Qty. Rec auto-filled from latest Received entry ({entry.date})
       </div>
       <div style={{ fontSize: 12, marginBottom: 6 }}>
        {autoFillSources.map((s, i) => (
@@ -4162,15 +4163,15 @@ function PackingMaterialSection() {
          fontWeight: i === 0 ? 700 : 400,
          color: i === 0 ? "var(--ok)" : "var(--ink-soft)",
         }}>
-         {i === 0 && <span style={{ marginRight: 6 }}>★ Latest:</span>}
-         {s.particular} — O/WT: <b>{s.o_wt}</b>
+         {i === 0 && <span style={{ marginRight: 6 }}>? Latest:</span>}
+         {s.particular} � O/WT: <b>{s.o_wt}</b>
          {i > 0 && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--ink-soft)" }}>(earlier entry)</span>}
         </div>
        ))}
       </div>
       <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 6 }}>
        Using latest entry: <b>{autoFillQty?.toFixed(0)}</b> bags
-       {autoFillSources.length > 1 && <span> · {autoFillSources.length} entries found for this code today</span>}
+       {autoFillSources.length > 1 && <span> � {autoFillSources.length} entries found for this code today</span>}
       </div>
       <div style={{ display: "flex", gap: 12 }}>
        <button type="button" onClick={() => {
@@ -4196,7 +4197,7 @@ function PackingMaterialSection() {
          background: "none", border: "none", cursor: "pointer", padding: 0,
          textDecoration: "underline",
         }}>
-        {autoFillLoading ? "Refreshing..." : "↻ Refresh (new entry added?)"}
+        {autoFillLoading ? "Refreshing..." : "? Refresh (new entry added?)"}
        </button>
       </div>
      </div>
@@ -4222,13 +4223,13 @@ function PackingMaterialSection() {
     <div className="row3">
      <div>
       <label>Op. Bal</label>
-      <input type="number" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} placeholder="0"
        value={entry.op_bal}
        onChange={e => setField("op_bal", e.target.value)} />
      </div>
      <div>
       <label>Qty. Rec{autoFillSources.length > 0 ? " (auto-filled)" : ""}</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.qty_received}
        onChange={e => {
         setField("qty_received", e.target.value);
@@ -4249,7 +4250,7 @@ function PackingMaterialSection() {
      </div>
      <div>
       <label>By Transfer</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.by_transfer}
        onChange={e => setField("by_transfer", e.target.value)} />
      </div>
@@ -4259,13 +4260,13 @@ function PackingMaterialSection() {
     <div className="row3">
      <div>
       <label>Qty. Issued</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.qty_issued}
        onChange={e => setField("qty_issued", e.target.value)} />
      </div>
      <div>
       <label>To Transfer</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.to_transfer}
        onChange={e => setField("to_transfer", e.target.value)} />
      </div>
@@ -4300,7 +4301,7 @@ function PackingMaterialSection() {
          : entry.status === "LESS" ? "color-mix(in srgb, var(--warn) 30%, transparent)"
          : "var(--line)"),
        }}>
-        {entry.status || "—"}
+        {entry.status || "�"}
         {entry.status && (
          <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, opacity: 0.8 }}>
           Threshold: {PM_THRESHOLDS[entry.product]?.toLocaleString()} bags
@@ -4745,7 +4746,7 @@ function FinishedGoodsSection() {
       display: "flex", justifyContent: "space-between", alignItems: "center",
      }}>
       <span style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)" }}>
-       Editing existing entry — save to update, or cancel to discard.
+       Editing existing entry � save to update, or cancel to discard.
       </span>
       <button type="button" className="btn btn-ghost"
        style={{ width: "auto", padding: "6px 14px", marginTop: 0, fontSize: 12 }}
@@ -4787,19 +4788,19 @@ function FinishedGoodsSection() {
     <div className="row3">
      <div>
       <label>O/BAL in BAGS</label>
-      <input type="number" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} placeholder="0"
        value={entry.op_bal}
        onChange={e => setField("op_bal", e.target.value)} />
      </div>
      <div>
       <label>PROD</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.production}
        onChange={e => setField("production", e.target.value)} />
      </div>
      <div>
       <label>Repacking material / BY TR</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.repacking_by_tr}
        onChange={e => setField("repacking_by_tr", e.target.value)} />
      </div>
@@ -4809,19 +4810,19 @@ function FinishedGoodsSection() {
     <div className="row3">
      <div>
       <label>Less packing Stock</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.less_packing_stock}
        onChange={e => setField("less_packing_stock", e.target.value)} />
      </div>
      <div>
       <label>Transfer material / TO TR</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.transfer_to_tr}
        onChange={e => setField("transfer_to_tr", e.target.value)} />
      </div>
      <div>
       <label>Dispatch</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={entry.dispatch}
        onChange={e => setField("dispatch", e.target.value)} />
      </div>
@@ -4980,7 +4981,7 @@ function FinishedGoodsSection() {
 //
 // Mirrors the BALL MILL PRODUCTION 2026-27 tab in the DPR Excel.
 //
-// LEFT SIDE — Ball Mill Manufacturing Details:
+// LEFT SIDE � Ball Mill Manufacturing Details:
 //  A Date of Ball Milling
 //  B SHIFT (1ST / 2ND)
 //  C Party (Lanxess / W10)
@@ -4989,7 +4990,7 @@ function FinishedGoodsSection() {
 //  F KG = E * 25
 //  G Total weight MT = F / 1000
 //
-// RIGHT SIDE — Dispatch Details with Closing Stock:
+// RIGHT SIDE � Dispatch Details with Closing Stock:
 //  H Dispatch Date
 //  I LOCATION
 //  J BATCH NO (dispatch)
@@ -5015,12 +5016,12 @@ interface BmProdRow {
  shift: BallMillShift | "";
  party: BallMillParty | "";
  batch_no: string;
- qty_mfg: string;    // E — Qty. MFG. Ball Mill (bags)
+ qty_mfg: string;    // E � Qty. MFG. Ball Mill (bags)
  kg: number | null;   // F = E * 25
  total_mt: number | null; // G = F / 1000
 }
 
-/** One dispatch row (right side) — can be on the same or different date */
+/** One dispatch row (right side) � can be on the same or different date */
 interface BmDispatchRow {
  dispatch_date: string;
  location: string;
@@ -5034,7 +5035,7 @@ interface SavedBmEntry {
  date: string;
  prod_rows: BmProdRow[];
  dispatch_rows: BmDispatchRow[];
- balance_bags: number; // L — running balance stored
+ balance_bags: number; // L � running balance stored
 }
 
 function blankProdRow(): BmProdRow {
@@ -5200,7 +5201,7 @@ function BallMillSection() {
 
  return (
   <>
-   {/* ── Manufacturing Details ── */}
+   {/* -- Manufacturing Details -- */}
    <div className="card">
     <div className="helper-row" style={{ marginBottom: 8 }}>
      <h3 style={{ margin: 0 }}>Ball Mill Manufacturing Details</h3>
@@ -5264,7 +5265,7 @@ function BallMillSection() {
             border: "1px solid var(--line)", borderRadius: 6 }} />
          </td>
          <td style={{ padding: "6px 4px", textAlign: "right" }}>
-          <input type="number" min="0" step="1" value={row.qty_mfg}
+          <NumericInput allowDecimal={false} min="0" value={row.qty_mfg}
            onChange={e => updateProdRow(idx, { qty_mfg: e.target.value })}
            placeholder="0"
            style={{ width: 70, padding: "4px 6px", fontSize: 12,
@@ -5304,7 +5305,7 @@ function BallMillSection() {
     </div>
    </div>
 
-   {/* ── Dispatch Details ── */}
+   {/* -- Dispatch Details -- */}
    <div className="card">
     <div className="helper-row" style={{ marginBottom: 8 }}>
      <h3 style={{ margin: 0 }}>Dispatch Details with Closing Stock</h3>
@@ -5347,7 +5348,7 @@ function BallMillSection() {
             border: "1px solid var(--line)", borderRadius: 6 }} />
          </td>
          <td style={{ padding: "6px 4px", textAlign: "right" }}>
-          <input type="number" min="0" step="1" value={row.dispatch_bags}
+          <NumericInput allowDecimal={false} min="0" value={row.dispatch_bags}
            onChange={e => updateDispatch(idx, { dispatch_bags: e.target.value })}
            placeholder="0"
            style={{ width: 70, padding: "4px 6px", fontSize: 12,
@@ -5370,13 +5371,13 @@ function BallMillSection() {
     </div>
    </div>
 
-   {/* ── Running Balance ── */}
+   {/* -- Running Balance -- */}
    <div className="card">
     <h3>Running Balance (L = prev_L + sum_E - sum_K)</h3>
     <div className="row3">
      <div>
       <label>Previous Balance (L_prev)</label>
-      <input type="number" min="0" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0" placeholder="0"
        value={prevBalance}
        onChange={e => setPrevBalance(e.target.value)} />
       <div className="field-hint">Auto-filled from last saved entry</div>
@@ -5412,7 +5413,7 @@ function BallMillSection() {
     {submitting ? "Saving..." : "Save Ball Mill Entry"}
    </button>
 
-   {/* ── History ── */}
+   {/* -- History -- */}
    <div className="card" style={{ marginTop: 16 }}>
     <h3>Ball Mill History</h3>
     {histLoading ? <div className="empty">Loading...</div>
@@ -5563,7 +5564,7 @@ interface DispatchSlot {
 
 interface BatchWiseEntry {
  batch_no: string;
- qty_bags: string;     // B — supports "12+49+51" arithmetic
+ qty_bags: string;     // B � supports "12+49+51" arithmetic
  code: BatchCode | "";
  mfg_date: string;
  dispatches: DispatchSlot[];
@@ -5845,14 +5846,14 @@ function BatchWiseSection() {
        <div className="row3">
         <div>
          <label style={{ fontSize: 11 }}>
-          {idx === 0 ? "F" : idx === 1 ? "I" : idx === 2 ? "L" : String.fromCharCode(70 + idx*3)} — Dispatch Date
+          {idx === 0 ? "F" : idx === 1 ? "I" : idx === 2 ? "L" : String.fromCharCode(70 + idx*3)} � Dispatch Date
         </label>
          <DateField value={d.date}
           onChange={v => updateDispatch(idx, { date: v })} />
         </div>
         <div>
          <label style={{ fontSize: 11 }}>
-          {idx === 0 ? "G" : idx === 1 ? "J" : idx === 2 ? "M" : "-"} — Inv No.
+          {idx === 0 ? "G" : idx === 1 ? "J" : idx === 2 ? "M" : "-"} � Inv No.
         </label>
          <input type="text" placeholder="e.g. C/119/26-27"
           value={d.inv_no}
@@ -5860,7 +5861,7 @@ function BatchWiseSection() {
         </div>
         <div>
          <label style={{ fontSize: 11 }}>
-          {idx === 0 ? "H" : idx === 1 ? "K" : idx === 2 ? "N" : "-"} — Qty in Bags (arithmetic ok)
+          {idx === 0 ? "H" : idx === 1 ? "K" : idx === 2 ? "N" : "-"} � Qty in Bags (arithmetic ok)
         </label>
          <input type="text" placeholder="e.g. 28 or 2+12+26"
           value={d.qty_bags}
@@ -6228,19 +6229,19 @@ function OilConsumptionSection() {
         <div className="row3">
           <div>
             <label>Tank Qty</label>
-            <input type="number" min="0" step="0.001" placeholder="0"
+            <NumericInput allowDecimal={true} min="0" placeholder="0"
               value={entry.tank_qty}
               onChange={e => setField("tank_qty", e.target.value)} />
           </div>
           <div>
             <label>Taken From Tank</label>
-            <input type="number" min="0" step="0.001" placeholder="0"
+            <NumericInput allowDecimal={true} min="0" placeholder="0"
               value={entry.taken_from_tank}
               onChange={e => setField("taken_from_tank", e.target.value)} />
           </div>
           <div>
             <label>Add To Tank</label>
-            <input type="number" min="0" step="0.001" placeholder="0"
+            <NumericInput allowDecimal={true} min="0" placeholder="0"
               value={entry.add_to_tank}
               onChange={e => setField("add_to_tank", e.target.value)} />
           </div>
@@ -6249,7 +6250,7 @@ function OilConsumptionSection() {
         {/* Row 3: Tank Qty + Drum Qty (manual) */}
         <div style={{ maxWidth: 280 }}>
           <label>Tank Qty + Drum Qty (enter manually)</label>
-          <input type="number" min="0" step="0.001" placeholder="0"
+          <NumericInput allowDecimal={true} min="0" placeholder="0"
             value={entry.tank_plus_drum_qty}
             onChange={e => setField("tank_plus_drum_qty", e.target.value)} />
           <div className="field-hint" style={{ marginTop: 4 }}>
@@ -6277,7 +6278,7 @@ function OilConsumptionSection() {
             {entry.drums.map((val, idx) => (
               <div key={idx} style={{ position: "relative" }}>
                 <label style={{ fontSize: 11 }}>Drum {idx + 1}</label>
-                <input type="number" min="0" step="0.001" placeholder="0"
+                <NumericInput allowDecimal={true} min="0" placeholder="0"
                   value={val}
                   onChange={e => setDrum(idx, e.target.value)}
                   style={{ paddingRight: entry.drums.length > 1 ? 24 : undefined }} />
@@ -6395,7 +6396,7 @@ function OilConsumptionSection() {
 // =============================================================================
 // APPROVED / REJECTED SECTION
 //
-// Read-only view of ALL QC decisions made by chemists/lab — auto-populated
+// Read-only view of ALL QC decisions made by chemists/lab � auto-populated
 // from two sources:
 //
 //   1. pulveriser_job_card_reviews  (result = 'ok' | 'not_ok')
@@ -6405,7 +6406,7 @@ function OilConsumptionSection() {
 //   2. product_qc  (overall_result = 'pass' | 'fail')
 //      Product QC results set by the DB trigger fn_evaluate_product_qc.
 //
-// Stores CANNOT edit anything here — this is purely a live feed of what
+// Stores CANNOT edit anything here � this is purely a live feed of what
 // the chemist decided. The manual entry form has been removed.
 // =============================================================================
 
@@ -6436,7 +6437,7 @@ function ApprovalSection() {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const collected: QcDecisionRow[] = [];
 
-    // ── Source 1: pulveriser_job_card_reviews ───────────────────────────────
+    // -- Source 1: pulveriser_job_card_reviews -------------------------------
     const { data: reviews, error: revErr } = await supabase
       .from("pulveriser_job_card_reviews")
       .select(`
@@ -6479,7 +6480,7 @@ function ApprovalSection() {
       }
     }
 
-    // ── Source 2: product_qc (overall_result) ────────────────────────────────
+    // -- Source 2: product_qc (overall_result) --------------------------------
     const { data: pqc, error: pqcErr } = await supabase
       .from("product_qc")
       .select(`
@@ -6518,7 +6519,7 @@ function ApprovalSection() {
       }
     }
 
-    // ── Source 3: rm_qc — Grade A / Grade B from incoming_grade ─────────────
+    // -- Source 3: rm_qc � Grade A / Grade B from incoming_grade -------------
     const { data: rmqc, error: rmqcErr } = await supabase
       .from("rm_qc")
       .select(`
@@ -6562,7 +6563,7 @@ function ApprovalSection() {
       }
     }
 
-    // ── Source 4: batch_analysis — Grade A / Grade B from rework_action ──────
+    // -- Source 4: batch_analysis � Grade A / Grade B from rework_action ------
     const { data: ba, error: baErr } = await supabase
       .from("batch_analysis")
       .select(`
@@ -6806,8 +6807,8 @@ function ApprovalSection() {
 // Read-only overview + stock update capability.
 // Each item shows current balance. Clicking an item opens the detail view with:
 //   - Current balance + threshold warning
-//   - "Add Stock" form — for receiving new stock (adds to balance)
-//   - "Deduct Stock" form — for manual adjustments or recording production use
+//   - "Add Stock" form � for receiving new stock (adds to balance)
+//   - "Deduct Stock" form � for manual adjustments or recording production use
 //   - Full transaction history (last 100 rows) with color-coded movements
 // =============================================================================
 function StockLedgerSection() {
@@ -6823,7 +6824,7 @@ function StockLedgerSection() {
  const [ledgerLoading, setLedgerLoading] = useState(false);
  const [balances, setBalances]     = useState<Record<string, number>>({});
 
- // ── Stock update form state ───────────────────────────────────────────────
+ // -- Stock update form state -----------------------------------------------
  const [mode, setMode]             = useState<"view" | "add" | "deduct">("view");
  const [updateQty, setUpdateQty]   = useState("");
  const [updateDate, setUpdateDate] = useState(today());
@@ -6924,8 +6925,8 @@ function StockLedgerSection() {
    setBalances(prev => ({ ...prev, [activeItem.id]: newBal }));
    showToast(
     (isAdd ? "Stock added" : "Stock deducted") +
-    " — " + activeItem.item_name + " " +
-    (isAdd ? "+" : "−") + qty.toFixed(3) + " " + displayUnit(activeItem.unit, activeItem.category) +
+    " � " + activeItem.item_name + " " +
+    (isAdd ? "+" : "-") + qty.toFixed(3) + " " + displayUnit(activeItem.unit, activeItem.category) +
     " | New balance: " + newBal.toFixed(3)
    );
    setMode("view");
@@ -6948,13 +6949,13 @@ function StockLedgerSection() {
   }
   // reference_type takes precedence for production rows inserted by the lab page
   // (which must use transaction_source='manual' due to RLS)
-  if (row.reference_type === "production_fg")  return "QC OK — Production";
+  if (row.reference_type === "production_fg")  return "QC OK � Production";
   if (row.reference_type === "received_entry") return "Received";
   if (row.reference_type === "supplied_entry") return "Supplied";
   if (row.reference_type === "slip")           return "Issue Slip";
   if (row.reference_type === "oil_issue")      return "Oil Issue";
   switch (row.transaction_source) {
-   case "production_fg":      return "QC OK — Production";
+   case "production_fg":      return "QC OK � Production";
    case "production_rm_oil":  return "Auto Oil Deduct";
    case "production_rm_sul":  return "Auto Sulphur Deduct";
    case "dispatch":           return "Dispatch";
@@ -6984,14 +6985,14 @@ function StockLedgerSection() {
       <div style={{ fontWeight: 700, fontSize: 15 }}>
        {activeItem.item_name}
        <span style={{ fontSize: 12, fontWeight: 400, color: "var(--ink-soft)", marginLeft: 8 }}>
-        ({activeItem.item_code}) · {CATEGORY_LABEL[activeItem.category]}
+        ({activeItem.item_code}) � {CATEGORY_LABEL[activeItem.category]}
        </span>
       </div>
       {threshold != null && (
        <div style={{ fontSize: 12, marginTop: 2,
         color: below ? "var(--warn)" : "var(--ink-soft)" }}>
-        {below ? "⚠ Material Required" : "✓ Above minimum threshold"}
-        {" — "}Min: {threshold} {displayUnit(activeItem.unit, activeItem.category)}
+        {below ? "? Material Required" : "? Above minimum threshold"}
+        {" � "}Min: {threshold} {displayUnit(activeItem.unit, activeItem.category)}
        </div>
       )}
      </div>
@@ -7015,12 +7016,12 @@ function StockLedgerSection() {
       <button type="button" className="btn btn-secondary"
        style={{ width: "auto", padding: "10px 22px", marginTop: 0 }}
        onClick={() => { setMode("deduct"); setUpdateSource(""); }}>
-       − Deduct Stock
+       - Deduct Stock
       </button>
      </div>
     )}
 
-    {/* FG info banner — shown alongside the manual buttons */}
+    {/* FG info banner � shown alongside the manual buttons */}
     {mode === "view" && activeItem.category === "finished_good" && (
      <div style={{
       padding: "10px 14px", borderRadius: 8, marginBottom: 16,
@@ -7039,7 +7040,7 @@ function StockLedgerSection() {
       marginBottom: 16,
      }}>
       <h3 style={{ color: mode === "add" ? "var(--ok)" : "var(--warn)" }}>
-       {mode === "add" ? "Add Stock — " : "Deduct Stock — "}{activeItem.item_name}
+       {mode === "add" ? "Add Stock � " : "Deduct Stock � "}{activeItem.item_name}
       </h3>
       <div className="field-hint" style={{ marginBottom: 12 }}>
        {mode === "add"
@@ -7051,7 +7052,7 @@ function StockLedgerSection() {
       <div className="row2">
        <div>
         <label>Quantity ({displayUnit(activeItem.unit, activeItem.category)}) *</label>
-        <input type="number" min="0.001" step="0.001" placeholder="0.000"
+        <NumericInput allowDecimal={true} min="0.001" placeholder="0.000"
          value={updateQty} onChange={e => setUpdateQty(e.target.value)}
          style={{ fontSize: 16, fontWeight: 700 }} />
         {updateQty && Number.isFinite(Number(updateQty)) && Number(updateQty) > 0 && (
@@ -7061,7 +7062,7 @@ function StockLedgerSection() {
            ? (bal + Number(updateQty)).toFixed(3)
            : (bal - Number(updateQty)).toFixed(3)} {displayUnit(activeItem.unit, activeItem.category)}
           {mode === "deduct" && Number(updateQty) > bal && (
-           <span style={{ color: "var(--warn)", marginLeft: 8 }}>⚠ Will go negative</span>
+           <span style={{ color: "var(--warn)", marginLeft: 8 }}>? Will go negative</span>
           )}
          </div>
         )}
@@ -7128,7 +7129,7 @@ function StockLedgerSection() {
             <th>Date</th>
             <th>Source / Reason</th>
             <th style={{ textAlign: "right", color: "var(--ok)" }}>+ Received</th>
-            <th style={{ textAlign: "right", color: "var(--warn)" }}>− Issued</th>
+            <th style={{ textAlign: "right", color: "var(--warn)" }}>- Issued</th>
             <th style={{ textAlign: "right", color: "var(--clay)" }}>Dispatch</th>
             <th style={{ textAlign: "right" }}>Balance</th>
             <th>Remark</th>
@@ -7174,21 +7175,21 @@ function StockLedgerSection() {
               </td>
               <td style={{ textAlign: "right", color: row.qty_received > 0 ? "var(--ok)" : undefined,
                fontWeight: row.qty_received > 0 ? 700 : undefined }}>
-               {row.qty_received > 0 ? "+" + fmt(row.qty_received) : <span style={{ color: "var(--line)" }}>—</span>}
+               {row.qty_received > 0 ? "+" + fmt(row.qty_received) : <span style={{ color: "var(--line)" }}>�</span>}
               </td>
               <td style={{ textAlign: "right", color: row.qty_issued > 0 ? "var(--warn)" : undefined,
                fontWeight: row.qty_issued > 0 ? 700 : undefined }}>
-               {row.qty_issued > 0 ? "−" + fmt(row.qty_issued) : <span style={{ color: "var(--line)" }}>—</span>}
+               {row.qty_issued > 0 ? "-" + fmt(row.qty_issued) : <span style={{ color: "var(--line)" }}>�</span>}
               </td>
               <td style={{ textAlign: "right", color: row.dispatch_qty > 0 ? "var(--clay)" : undefined }}>
-               {row.dispatch_qty > 0 ? fmt(row.dispatch_qty) : <span style={{ color: "var(--line)" }}>—</span>}
+               {row.dispatch_qty > 0 ? fmt(row.dispatch_qty) : <span style={{ color: "var(--line)" }}>�</span>}
               </td>
               <td style={{ textAlign: "right", fontWeight: 700,
                color: row.closing_balance < 0 ? "var(--warn)" : undefined }}>
                {fmt(row.closing_balance, 3)}
               </td>
               <td style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: 160, whiteSpace: "normal" }}>
-               {remarkText || "—"}
+               {remarkText || "�"}
               </td>
              </tr>
             );
@@ -7203,7 +7204,7 @@ function StockLedgerSection() {
   );
  }
 
- // ── List view ─────────────────────────────────────────────────────────────
+ // -- List view -------------------------------------------------------------
  const filtered = filterCat === "all" ? items : items.filter(i => i.category === filterCat);
  return (
   <>
@@ -7235,7 +7236,7 @@ function StockLedgerSection() {
       background: "var(--warn-soft)", fontSize: 13, color: "var(--warn)",
       fontWeight: 600, border: "1px solid var(--warn)",
      }}>
-      ⚠ {itemsBelow.length} item{itemsBelow.length > 1 ? "s" : ""} — Material Required:{" "}
+      ? {itemsBelow.length} item{itemsBelow.length > 1 ? "s" : ""} � Material Required:{" "}
       {itemsBelow.map(i => i.item_name).join(", ")}
      </div>
     ) : null;
@@ -7260,11 +7261,11 @@ function StockLedgerSection() {
         </div>
         <div className="pi-sub">
          {CATEGORY_LABEL[item.category]}
-         <span style={{ color: "var(--ink-soft)", margin: "0 6px" }}>·</span>
+         <span style={{ color: "var(--ink-soft)", margin: "0 6px" }}>�</span>
          Code: {item.item_code}
          {below && (
           <span style={{ color: "var(--warn)", fontWeight: 700, marginLeft: 8 }}>
-           ⚠ Material Required (min {threshold} {displayUnit(item.unit, item.category)})
+           ? Material Required (min {threshold} {displayUnit(item.unit, item.category)})
           </span>
          )}
         </div>
@@ -7389,7 +7390,7 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
   if (prefill.qtyRequired != null) {
    setQtyRequired(String(prefill.qtyRequired));
   }
-  // qtyIssued intentionally NOT pre-filled — storekeeper must enter it manually
+  // qtyIssued intentionally NOT pre-filled � storekeeper must enter it manually
   if (prefill.usedFor) setUsedFor(prefill.usedFor);
   if (prefill.remark)  setRemark(prefill.remark);
   setPlannedProduction(prefill.plannedProduction ?? null);
@@ -7566,27 +7567,27 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
      <div>
       <label>Bags Quantity Required</label>
       {!selectedItemId ? (
-       // No material selected yet — blank placeholder
+       // No material selected yet � blank placeholder
        <input type="text" disabled value="" placeholder="Select a material first" />
       ) : bagsQtyRequired != null ? (
-       // Packing material with known bag weight — auto-calculated, read-only
+       // Packing material with known bag weight � auto-calculated, read-only
        <>
         <input type="text" disabled
          value={bagsQtyRequired + " nos"}
          style={{ fontWeight: 700, color: "var(--clay)" }} />
         <div className="field-hint">
-         {plannedProduction} kg ÷ {bagWeight} kg/bag = {bagsQtyRequired} bags
+         {plannedProduction} kg � {bagWeight} kg/bag = {bagsQtyRequired} bags
         </div>
        </>
       ) : (
-       // Raw material or bag without a weight in the name — editable
-       <input type="number" min="0" step="0.001" placeholder="0"
+       // Raw material or bag without a weight in the name � editable
+       <NumericInput allowDecimal={true} min="0" placeholder="0"
         value={qtyRequired} onChange={e => setQtyRequired(e.target.value)} />
       )}
      </div>
      <div>
       <label>Bags Quantity Issued *</label>
-      <input type="number" min="0.001" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="0.001" placeholder="0"
        value={qtyIssued} onChange={e => setQtyIssued(e.target.value)} />
      </div>
     </div>
@@ -7655,7 +7656,7 @@ function IssueSlipSection({ prefill, onPrefillConsumed }: {
             <td style={{ fontWeight: 600, fontSize: 12 }}>{row.material_description}</td>
             <td style={{ fontSize: 12 }}>{row.unit === "bags" ? "nos" : row.unit}</td>
             <td style={{ textAlign: "right", fontWeight: 700, color: "var(--clay)" }}>
-             {row.planned_production != null ? row.planned_production.toFixed(0) : "—"}
+             {row.planned_production != null ? row.planned_production.toFixed(0) : "�"}
             </td>
             <td style={{ textAlign: "right" }}>
              {row.qty_required > 0 ? fmt(row.qty_required) : "0"}
@@ -7870,7 +7871,7 @@ function PrnSection() {
 
   return (
     <>
-      {/* ── Entry form ── */}
+      {/* -- Entry form -- */}
       <div className="card">
         <h3>New PRN Entry</h3>
 
@@ -7901,13 +7902,13 @@ function PrnSection() {
         <div className="row2">
           <div>
             <label>Requirements</label>
-            <input type="number" min="0" step="1" placeholder="0"
+            <NumericInput allowDecimal={false} min="0" placeholder="0"
               value={entry.requirements}
               onChange={e => setField("requirements", e.target.value)} />
           </div>
           <div>
             <label>Qty</label>
-            <input type="number" min="0" step="1" placeholder="0"
+            <NumericInput allowDecimal={false} min="0" placeholder="0"
               value={entry.qty}
               onChange={e => setField("qty", e.target.value)} />
           </div>
@@ -7916,7 +7917,7 @@ function PrnSection() {
         <div className="row2">
           <div>
             <label>Current Stock</label>
-            <input type="number" min="0" step="1" placeholder="0"
+            <NumericInput allowDecimal={false} min="0" placeholder="0"
               value={entry.current_stock}
               onChange={e => setField("current_stock", e.target.value)} />
           </div>
@@ -7970,7 +7971,7 @@ function PrnSection() {
         <div className="row3">
           <div>
             <label>PO Qty</label>
-            <input type="number" min="0" step="1" placeholder="0"
+            <NumericInput allowDecimal={false} min="0" placeholder="0"
               value={entry.po_qty}
               onChange={e => setField("po_qty", e.target.value)} />
           </div>
@@ -7995,7 +7996,7 @@ function PrnSection() {
         {submitting ? "Saving..." : "Save PRN Entry"}
       </button>
 
-      {/* ── History table ── */}
+      {/* -- History table -- */}
       <div className="card" style={{ marginTop: 16 }}>
         <div className="helper-row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0 }}>PRN History</h3>
@@ -8219,12 +8220,12 @@ function DispatchSection() {
     <div className="row3">
      <div>
       <label>Bags *</label>
-      <input type="number" min="1" step="1" placeholder="0"
+      <NumericInput allowDecimal={false} min="1" placeholder="0"
        value={bags} onChange={e => setBags(e.target.value)} />
      </div>
      <div>
       <label>Kg / Bag</label>
-      <input type="number" min="0.1" step="0.1" placeholder="25"
+      <NumericInput allowDecimal={true} min="0.1" placeholder="25"
        value={kgPerBag} onChange={e => setKgPerBag(e.target.value)} />
      </div>
      <div>
@@ -8293,3 +8294,4 @@ function DispatchSection() {
   </>
 );
 }
+

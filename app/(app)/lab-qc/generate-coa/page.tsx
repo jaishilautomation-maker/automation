@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Generate COA (JSCI/QC/17) — Lab (chemist) only, Factory A-20/1.
@@ -22,6 +22,7 @@ import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import { useEffectiveRole } from "@/lib/use-effective-role";
 import { useFieldAudit } from "@/lib/use-field-audit";
+import NumericInput from "@/components/NumericInput";
 import { MAX_BATCHES_PER_COA, BATCH_WARN_THRESHOLD } from "@/lib/coa/catalog";
 
 interface PartyOption { party_code: string; customer_name: string | null }
@@ -381,7 +382,7 @@ export default function GenerateCoaPage() {
           </div>
           <div>
             <label>Quantity (MT, total)</label>
-            <input type="number" step="0.001" min="0" value={quantityMt}
+            <NumericInput allowDecimal={true} min="0" value={quantityMt}
               onChange={(e) => setQuantityMt(e.target.value)}
               onBlur={() => audit.record("quantity_mt", quantityMt)} />
           </div>

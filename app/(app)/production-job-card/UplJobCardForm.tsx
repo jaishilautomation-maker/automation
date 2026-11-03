@@ -28,6 +28,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -671,14 +672,14 @@ export default function UplJobCardForm({
                   <td style={{ ...td, padding: "4px 6px" }}>
                     {isSulphur ? (
                       // Sulphur Added: editable input that auto-fills from bag grid below
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={r.instructedQty.toFixed(3)}
                         value={sulphurAddedKg}
                         onChange={e => handleSulphurAddedChange(e.target.value)}
                         style={{ width: 90, textAlign: "right",
                           borderColor: bagMismatchWarning ? "var(--warn)" : undefined }} />
                     ) : (
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={r.instructedQty.toFixed(3)}
                         value={r.addedQty}
                         onChange={e => updater(idx, "addedQty", e.target.value)}
@@ -770,7 +771,7 @@ export default function UplJobCardForm({
           </div>
           <div>
             <label>{t("batchSizeKg")}</label>
-            <input type="number" step="any" value={batchSize}
+            <NumericInput allowDecimal={true} value={batchSize}
               onChange={e => setBatchSize(e.target.value)} />
             {parseFloat(batchSize) !== REF_BATCH_KG && (
               <div className="field-hint" style={{ color: "#1565c0" }}>
@@ -837,8 +838,7 @@ export default function UplJobCardForm({
                   <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, padding: "3px 6px" }}>
-                      <input
-                        type="number" step="any" placeholder="—"
+                      <NumericInput allowDecimal={true} placeholder="—"
                         value={sulphurBags[i]}
                         onChange={e => updateBag(i, e.target.value)}
                         style={{ width: "100%", textAlign: "right" }}
@@ -863,8 +863,7 @@ export default function UplJobCardForm({
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <label style={{ fontSize: 12 }}>{t("sulphurAddedConfirmed")}</label>
-            <input
-              type="number" step="any"
+            <NumericInput allowDecimal={true}
               value={sulphurAddedKg}
               onChange={e => handleSulphurAddedChange(e.target.value)}
               style={{ width: 140 }}
@@ -905,7 +904,7 @@ export default function UplJobCardForm({
           </div>
           <div>
             <label>{t("flowRateSL")}</label>
-            <input type="number" step="any" placeholder="0" value={flowRate}
+            <NumericInput allowDecimal={true} placeholder="0" value={flowRate}
               onChange={e => setFlowRate(e.target.value)} />
           </div>
         </div>
@@ -923,7 +922,7 @@ export default function UplJobCardForm({
         <div className="row2" style={{ marginTop: 8 }}>
           <div>
             <label>{t("collectedSlurryA")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryA}
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryA}
               onChange={e => setSlurryA(e.target.value)} />
           </div>
           <div />
@@ -950,7 +949,7 @@ export default function UplJobCardForm({
           </div>
           <div>
             <label>{t("collectedSlurryB")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryB}
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryB}
               onChange={e => setSlurryB(e.target.value)} />
           </div>
         </div>
@@ -962,12 +961,12 @@ export default function UplJobCardForm({
         <div className="row2">
           <div>
             <label>{t("totalScCollectedKg")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScKg}
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScKg}
               onChange={e => setTotalScKg(e.target.value)} />
           </div>
           <div>
             <label>{t("totalScCollectedL")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScL}
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScL}
               onChange={e => setTotalScL(e.target.value)} />
           </div>
         </div>

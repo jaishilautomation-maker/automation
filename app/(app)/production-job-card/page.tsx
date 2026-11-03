@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Production Job Card — Module A (A-20 only)
@@ -19,6 +19,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
@@ -304,7 +305,7 @@ function GenericJobCardForm({ product, factoryId, userId, onDone }: GenericJobCa
         <div className="row2">
           <div>
             <label>Batch Size (kg) *</label>
-            <input type="number" step="any" placeholder="e.g. 500" value={batchSize} onChange={e => setBatchSize(e.target.value)} />
+            <NumericInput allowDecimal={true} placeholder="e.g. 500" value={batchSize} onChange={e => setBatchSize(e.target.value)} />
           </div>
           <div>
             {isPhaseAware && (
@@ -327,13 +328,13 @@ function GenericJobCardForm({ product, factoryId, userId, onDone }: GenericJobCa
           <div><label>Bead Mill End</label><input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} /></div>
         </div>
         <div className="row2">
-          <div><label>Flow Rate</label><input type="number" step="any" placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
-          <div><label>pH</label><input type="number" step="0.01" placeholder="0.00" value={ph} onChange={e => setPh(e.target.value)} /></div>
+          <div><label>Flow Rate</label><NumericInput allowDecimal={true} placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
+          <div><label>pH</label><NumericInput allowDecimal={true} placeholder="0.00" value={ph} onChange={e => setPh(e.target.value)} /></div>
         </div>
         {isPhaseAware && (
           <div className="row2">
-            <div><label>Collected Slurry Phase A (kg)</label><input type="number" step="any" placeholder="0" value={slurryA} onChange={e => setSlurryA(e.target.value)} /></div>
-            <div><label>Collected Slurry Phase B (kg)</label><input type="number" step="any" placeholder="0" value={slurryB} onChange={e => setSlurryB(e.target.value)} /></div>
+            <div><label>Collected Slurry Phase A (kg)</label><NumericInput allowDecimal={true} placeholder="0" value={slurryA} onChange={e => setSlurryA(e.target.value)} /></div>
+            <div><label>Collected Slurry Phase B (kg)</label><NumericInput allowDecimal={true} placeholder="0" value={slurryB} onChange={e => setSlurryB(e.target.value)} /></div>
           </div>
         )}
       </div>
@@ -380,7 +381,7 @@ function GenericJobCardForm({ product, factoryId, userId, onDone }: GenericJobCa
                             <td style={{ padding: "5px 10px", fontWeight: 500 }}>{li.componentName}</td>
                             <td style={{ padding: "5px 10px", textAlign: "right", fontWeight: 600 }}>{li.instructedQty.toFixed(3)}</td>
                             <td style={{ padding: "5px 6px" }}>
-                              <input type="number" step="any" placeholder={li.instructedQty.toFixed(3)} value={li.addedQty}
+                              <NumericInput allowDecimal={true} placeholder={li.instructedQty.toFixed(3)} value={li.addedQty}
                                 onChange={e => updateLine(globalIdx, "addedQty", e.target.value)} style={{ width: 90, textAlign: "right" }} />
                             </td>
                             <td style={{ padding: "5px 6px" }}>

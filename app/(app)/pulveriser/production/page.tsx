@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Pulveriser Job Card — Production (Form JSCI/PROD/02)
@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
@@ -648,7 +649,7 @@ export default function PulveriserProductionPage() {
 
             {/* Production plan */}
             <label style={{ marginTop: 12 }}>Planned Production (kg)</label>
-            <input type="number" min="0" step="1" placeholder="0"
+            <NumericInput allowDecimal={false} min="0" placeholder="0"
               value={e.plannedKg}
               onChange={ev => updateEntry(e.key, { plannedKg: ev.target.value })}
               onBlur={() => audit.record(`entry_${idx}_planned_kg`, e.plannedKg)} />

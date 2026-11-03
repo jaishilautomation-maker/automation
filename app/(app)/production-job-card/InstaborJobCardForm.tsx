@@ -48,6 +48,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -597,14 +598,14 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
                   </td>
                   <td style={{ ...tdS, padding: "4px 6px", textAlign: "right" }}>
                     {isBoric ? (
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={r.instructedQty.toFixed(3)}
                         value={boricAcidAdded}
                         onChange={e => handleBoricAddedChange(e.target.value)}
                         style={{ width: 90, textAlign: "right",
                           borderColor: bagMismatch ? "var(--warn)" : undefined }} />
                     ) : (
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={r.instructedQty < 1 ? r.instructedQty.toFixed(8) : r.instructedQty.toFixed(3)}
                         value={r.addedQty}
                         onChange={e => updater(r.formulaItemId, "addedQty", e.target.value)}
@@ -669,7 +670,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
           </div>
           <div>
             <label>{t("batchSizeKg")}</label>
-            <input type="number" step="any" value={batchSize}
+            <NumericInput allowDecimal={true} value={batchSize}
               onChange={e => !isEdit && setBatchSize(e.target.value)} />
             {isEdit && <div className="field-hint" style={{ marginTop: 4 }}>Batch size cannot be changed when editing.</div>}
             {parseFloat(batchSize) !== REF_BATCH_KG && !isEdit && (
@@ -718,7 +719,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
                   <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
                     <td style={tdS}>{i + 1}</td>
                     <td style={{ ...tdS, padding: "3px 6px" }}>
-                      <input type="number" step="any" placeholder="—"
+                      <NumericInput allowDecimal={true} placeholder="—"
                         value={boricAcidBags[i]}
                         onChange={e => updateBag(i, e.target.value)}
                         style={{ width: "100%", textAlign: "right" }} />
@@ -833,7 +834,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
         <div className="row2">
           <div>
             <label>TOTAL LOT WT (kg) — confirmed actual</label>
-            <input type="number" step="any"
+            <NumericInput allowDecimal={true}
               placeholder={calcLotWt.toFixed(3)}
               value={totalLotKg}
               onChange={e => setTotalLotKg(e.target.value)} />

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Lab QC — Raw Material Receipt
@@ -14,6 +14,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -495,7 +496,7 @@ export default function RmReceiptPage() {
             onBlur={() => audit.record("invoice_number", invoiceNumber)} />
 
           <label>Quantity Received (MT) *</label>
-          <input type="number" min="0" step="0.001" placeholder="0.000"
+          <NumericInput allowDecimal={true} min="0" placeholder="0.000"
             value={quantityMt} onChange={e => setQuantityMt(e.target.value)}
             onBlur={() => audit.record("quantity_mt", quantityMt)} />
 
@@ -542,7 +543,7 @@ export default function RmReceiptPage() {
             onChange={e => setOilDatetime(e.target.value)} />
 
           <label>Quantity (MT) *</label>
-          <input type="number" min="0" step="0.001" placeholder="0.000"
+          <NumericInput allowDecimal={true} min="0" placeholder="0.000"
             value={oilQuantity} onChange={e => setOilQuantity(e.target.value)} />
 
           <label>Truck Number</label>
@@ -576,7 +577,7 @@ export default function RmReceiptPage() {
             value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
 
           <label>Quantity Received (MT) *</label>
-          <input type="number" min="0" step="0.001" placeholder="0.000"
+          <NumericInput allowDecimal={true} min="0" placeholder="0.000"
             value={quantityMt} onChange={e => setQuantityMt(e.target.value)} />
 
           <label>Appearance / Physical State</label>

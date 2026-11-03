@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Lab QC — Lab Trials
@@ -12,6 +12,7 @@ import { useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
@@ -292,24 +293,24 @@ export default function LabTrialsPage() {
         <div className="row2">
           <div>
             <label>Density (g/cm³)</label>
-            <input type="number" step="any" placeholder="0" value={density}
+            <NumericInput allowDecimal={true} placeholder="0" value={density}
               onChange={e => setDensity(e.target.value)} />
           </div>
           <div>
             <label>pH (neat)</label>
-            <input type="number" step="any" placeholder="0" value={phNeat}
+            <NumericInput allowDecimal={true} placeholder="0" value={phNeat}
               onChange={e => setPhNeat(e.target.value)} />
           </div>
         </div>
         <div className="row2">
           <div>
             <label>pH (5%)</label>
-            <input type="number" step="any" placeholder="0" value={ph5pct}
+            <NumericInput allowDecimal={true} placeholder="0" value={ph5pct}
               onChange={e => setPh5pct(e.target.value)} />
           </div>
           <div>
             <label>Suspensibility (%)</label>
-            <input type="number" step="any" placeholder="0" value={suspensibility}
+            <NumericInput allowDecimal={true} placeholder="0" value={suspensibility}
               onChange={e => setSuspensibility(e.target.value)} />
           </div>
         </div>

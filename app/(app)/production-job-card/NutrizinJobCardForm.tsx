@@ -32,6 +32,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -604,7 +605,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                     </td>
                     <td style={{ ...tdS, padding: "4px 6px", textAlign: "right" }}>
                       {isZno ? (
-                        <input type="number" step="any"
+                        <NumericInput allowDecimal={true}
                           placeholder={r.instructedQty.toFixed(2)}
                           value={znoAdded}
                           onChange={e => {
@@ -615,7 +616,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                           style={{ width: 90, textAlign: "right",
                             borderColor: mismatch ? "var(--warn)" : undefined }} />
                       ) : (
-                        <input type="number" step="any"
+                        <NumericInput allowDecimal={true}
                           placeholder={r.instructedQty.toFixed(2)}
                           value={r.addedQty}
                           onChange={e => updateRow(r.formulaItemId, "addedQty", e.target.value)}
@@ -695,7 +696,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                   <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
                     <td style={tdS}>{i + 1}</td>
                     <td style={{ ...tdS, padding: "3px 6px" }}>
-                      <input type="number" step="any" placeholder="—" value={bags[i]}
+                      <NumericInput allowDecimal={true} placeholder="—" value={bags[i]}
                         onChange={e => updateFn(i, e.target.value)}
                         style={{ width: "100%", textAlign: "right" }} />
                     </td>
@@ -822,7 +823,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           <div><label>{t("startTime")}</label>
             <input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} /></div>
           <div><label>{t("flowRateSL")}</label>
-            <input type="number" step="any" placeholder="0" value={flowRate}
+            <NumericInput allowDecimal={true} placeholder="0" value={flowRate}
               onChange={e => setFlowRate(e.target.value)} /></div>
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
@@ -837,7 +838,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         <div className="row2" style={{ marginTop: 8 }}>
           <div>
             <label>{t("collectedSlurryA")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryA}
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryA}
               onChange={e => setSlurryA(e.target.value)} />
           </div>
           <div />
@@ -856,7 +857,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           </div>
           <div>
             <label>{t("collectedSlurryB")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryB}
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryB}
               onChange={e => setSlurryB(e.target.value)} />
           </div>
         </div>
@@ -867,10 +868,10 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         <SectionHeader title={t("secFinalCollection")} />
         <div className="row2">
           <div><label>{t("totalScCollectedKg")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScKg}
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScKg}
               onChange={e => setTotalScKg(e.target.value)} /></div>
           <div><label>{t("totalScCollectedL")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScL}
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScL}
               onChange={e => setTotalScL(e.target.value)} /></div>
         </div>
       </div>

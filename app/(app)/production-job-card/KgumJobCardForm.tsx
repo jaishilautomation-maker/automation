@@ -28,6 +28,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -434,7 +435,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
                           style={{ width: 100 }} />
                       </td>
                       <td style={{ ...tdS, padding: "4px 6px", textAlign: "right" }}>
-                        <input type="number" step="any"
+                        <NumericInput allowDecimal={true}
                           placeholder={r.instructedQty.toFixed(3)}
                           value={r.addedQty}
                           onChange={e => updateRow(r.formulaItemId, "addedQty", e.target.value)}
@@ -515,7 +516,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         <div className="row2">
           <div>
             <label>{t("phLabel")}</label>
-            <input type="number" step="0.01" placeholder="0.00" value={ph}
+            <NumericInput allowDecimal={true} placeholder="0.00" value={ph}
               onChange={e => setPh(e.target.value)} />
           </div>
           <div />

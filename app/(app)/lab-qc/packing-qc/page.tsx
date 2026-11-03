@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Lab QC — Packing Material QC
@@ -19,6 +19,7 @@ import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
+import NumericInput from "@/components/NumericInput";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildPackingQcEmail } from "@/lib/notifications/lab-qc-emails";
 
@@ -195,12 +196,12 @@ export default function PackingQcPage() {
             <div className="row2">
               <div>
                 <label>PO Weight</label>
-                <input type="number" step="any" placeholder="0"
+                <NumericInput allowDecimal={true} placeholder="0"
                   value={poWeight} onChange={e => setPoWeight(e.target.value)} />
               </div>
               <div>
                 <label>Actual Weight</label>
-                <input type="number" step="any" placeholder="0"
+                <NumericInput allowDecimal={true} placeholder="0"
                   value={actualWeight} onChange={e => setActualWeight(e.target.value)} />
               </div>
             </div>

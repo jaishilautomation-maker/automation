@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Lab QC — Raw Material QC
@@ -17,6 +17,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { useModule } from "@/lib/module-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -980,12 +981,12 @@ export default function RmQcPage() {
           <div className="row2">
             <div>
               <label>Mass of sample, M (g)</label>
-              <input type="number" step="any" placeholder="0"
+              <NumericInput allowDecimal={true} placeholder="0"
                 value={oilMass} onChange={e => setOilMass(e.target.value)} />
             </div>
             <div>
               <label>Volume of sample, V (mL)</label>
-              <input type="number" step="any" placeholder="0"
+              <NumericInput allowDecimal={true} placeholder="0"
                 value={oilVolume} onChange={e => setOilVolume(e.target.value)} />
             </div>
           </div>
@@ -1004,7 +1005,7 @@ export default function RmQcPage() {
           <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 auto", minWidth: 0 }}>
               <label>Viscosity</label>
-              <input type="number" step="any" placeholder="Viscosity value"
+              <NumericInput allowDecimal={true} placeholder="Viscosity value"
                 value={oilViscosity} onChange={e => setOilViscosity(e.target.value)} />
             </div>
             <div style={{ flex: "0 0 auto", minWidth: 150, paddingBottom: 2 }}>

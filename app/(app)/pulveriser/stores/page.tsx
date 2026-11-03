@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Pulveriser Job Card — Stores (Form JSCI/PROD/02 + oil-dosing addendum)
@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
+import NumericInput from "@/components/NumericInput";
 import { groupByJobNumber, type PulveriserJobCard } from "@/lib/types";
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { buildStoresEmail } from "@/lib/notifications/pulveriser-emails";
@@ -179,7 +180,7 @@ export default function PulveriserStoresPage() {
       <div className="card">
         <h3>Oil issue</h3>
         <label>Oil issued (kg) *</label>
-        <input type="number" min="0" step="0.001" placeholder="0"
+        <NumericInput allowDecimal={true} min="0" placeholder="0"
           value={oilIssued} onChange={e => setOilIssued(e.target.value)}
           onBlur={() => audit.record("oil_issued_kg", oilIssued)} />
         <div className="field-hint" style={{ marginTop: 6 }}>

@@ -13,6 +13,20 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Ban type="number" in JSX — use NumericInput component instead.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "JSXAttribute[name.name='type'][value.value='number']",
+          message:
+            'Do not use type="number" in inputs. Use the NumericInput component instead to prevent scroll-wheel value changes and unwanted number formatting.',
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

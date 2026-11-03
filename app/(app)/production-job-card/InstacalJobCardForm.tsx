@@ -25,6 +25,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -575,14 +576,14 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
                   </td>
                   <td style={{ ...tdS, padding: "4px 6px", textAlign: "right" }}>
                     {isJsc45 ? (
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={fmtQty(r.instructedQty, batchVariant)}
                         value={jsc45Added[vStr] ?? ""}
                         onChange={e => handleJsc45AddedChange(e.target.value)}
                         style={{ width: 90, textAlign: "right",
                           borderColor: bagMismatch ? "var(--warn)" : undefined }} />
                     ) : (
-                      <input type="number" step="any"
+                      <NumericInput allowDecimal={true}
                         placeholder={fmtQty(r.instructedQty, batchVariant)}
                         value={r.addedQty}
                         onChange={e => updateRow(r.formulaItemId, "addedQty", e.target.value)}
@@ -649,7 +650,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
                   <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
                     <td style={tdS}>{i + 1}</td>
                     <td style={{ ...tdS, padding: "3px 6px" }}>
-                      <input type="number" step="any" placeholder="—" value={bags[i]}
+                      <NumericInput allowDecimal={true} placeholder="—" value={bags[i]}
                         onChange={e => updateBag(vStr, i, e.target.value)}
                         style={{ width: "100%", textAlign: "right" }} />
                     </td>
@@ -858,7 +859,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         <div className="row2">
           <div>
             <label>{t("totalLotWeightConfirmed")}</label>
-            <input type="number" step="any"
+            <NumericInput allowDecimal={true}
               placeholder={calcLotWeight.toFixed(3)}
               value={totalLotKg}
               onChange={e => setTotalLotKg(e.target.value)} />

@@ -29,6 +29,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -614,7 +615,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                     {r.instructedQty.toFixed(2)}
                   </td>
                   <td style={{ ...tdStyle, padding: "4px 6px" }}>
-                    <input type="number" step="any" placeholder={r.instructedQty.toFixed(2)}
+                    <NumericInput allowDecimal={true} placeholder={r.instructedQty.toFixed(2)}
                       value={isSulphur ? sulphurAddedKg : r.addedQty}
                       onChange={e => isSulphur ? handleSulphurAddedChange(e.target.value) : updater(idx, "addedQty", e.target.value)}
                       style={{ width: 90, textAlign: "right",
@@ -683,7 +684,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           </div>
           <div>
             <label>{t("batchSizeKg")}</label>
-            <input type="number" step="any" value={batchSize} onChange={e => setBatchSize(e.target.value)} />
+            <NumericInput allowDecimal={true} value={batchSize} onChange={e => setBatchSize(e.target.value)} />
             {parseFloat(batchSize) !== REF_BATCH_KG && (
               <div className="field-hint" style={{ color: "#1565c0" }}>
                 {lang === "hi"
@@ -745,7 +746,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                   <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
                     <td style={tdStyle}>{i + 1}</td>
                     <td style={{ ...tdStyle, padding: "3px 6px" }}>
-                      <input type="number" step="any" placeholder="—" value={sulphurBags[i]}
+                      <NumericInput allowDecimal={true} placeholder="—" value={sulphurBags[i]}
                         onChange={e => updateBag(i, e.target.value)}
                         style={{ width: "100%", textAlign: "right" }} />
                     </td>
@@ -763,7 +764,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={{ fontSize: 12 }}>{t("sulphurAddedConfirmed")}</label>
-            <input type="number" step="any" value={sulphurAddedKg}
+            <NumericInput allowDecimal={true} value={sulphurAddedKg}
               onChange={e => handleSulphurAddedChange(e.target.value)} style={{ width: 140 }} />
           </div>
         </div>
@@ -787,7 +788,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <div style={{ fontWeight: 600, fontSize: 13, marginTop: 14, marginBottom: 8 }}>{t("beadMill")}</div>
         <div className="row2">
           <div><label>{t("startTime")}</label><input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} /></div>
-          <div><label>{t("flowRateSL")}</label><input type="number" step="any" placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
+          <div><label>{t("flowRateSL")}</label><NumericInput allowDecimal={true} placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
           <div><label>{t("endTime")}</label><input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} /></div>
@@ -799,7 +800,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
           <div><label>{t("collectedSlurryA")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryA} onChange={e => setSlurryA(e.target.value)} /></div>
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryA} onChange={e => setSlurryA(e.target.value)} /></div>
           <div />
         </div>
       </div>
@@ -821,7 +822,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
               style={{ background: "var(--surface)", color: "var(--ink-soft)" }} />
           </div>
           <div><label>{t("collectedSlurryB")}</label>
-            <input type="number" step="any" placeholder="0" value={slurryB} onChange={e => setSlurryB(e.target.value)} /></div>
+            <NumericInput allowDecimal={true} placeholder="0" value={slurryB} onChange={e => setSlurryB(e.target.value)} /></div>
         </div>
       </div>
 
@@ -830,9 +831,9 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <SectionHeader title={t("secFinalCollection")} />
         <div className="row2">
           <div><label>{t("totalScCollectedKg")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScKg} onChange={e => setTotalScKg(e.target.value)} /></div>
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScKg} onChange={e => setTotalScKg(e.target.value)} /></div>
           <div><label>{t("totalScCollectedL")}</label>
-            <input type="number" step="any" placeholder="0" value={totalScL} onChange={e => setTotalScL(e.target.value)} /></div>
+            <NumericInput allowDecimal={true} placeholder="0" value={totalScL} onChange={e => setTotalScL(e.target.value)} /></div>
         </div>
       </div>
 

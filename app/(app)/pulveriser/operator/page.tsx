@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 // Pulveriser Job Card — Operator (Form JSCI/PROD/02)
@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import DateField, { isoToDisplay } from "@/components/DateField";
+import NumericInput from '@/components/NumericInput';
 import { useFormDraft, draftKey, peekDraft } from "@/lib/use-form-draft";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
@@ -913,7 +914,7 @@ export default function PulveriserOperatorPage() {
         <div className="row2">
           <div>
             <label>तैयार माल बैग</label>
-            <input type="number" min="0" step="1" placeholder="0" value={fgBag}
+            <NumericInput allowDecimal={false} min="0" placeholder="0" value={fgBag}
               onChange={e => { setFgBag(e.target.value); recomputeActualKg(e.target.value, packingSize); }} />
           </div>
           <div>
@@ -930,7 +931,7 @@ export default function PulveriserOperatorPage() {
 
         {/* वास्तविक उत्पादन — auto-filled from bags × packing size; drives oil calcs */}
         <label>वास्तविक उत्पादन (kg)</label>
-        <input type="number" min="0" step="1" placeholder="0"
+        <NumericInput allowDecimal={false} min="0" placeholder="0"
           value={actualKg} onChange={e => setActualKg(e.target.value)} />
         <div className="field-hint" style={{ marginTop: 2 }}>
           बैग × पैकिंग साइज़ से अपने-आप भर जाता है। ज़रूरत पर यहाँ बदल सकते हैं।
@@ -1070,12 +1071,12 @@ export default function PulveriserOperatorPage() {
               <div className="row3">
                 <div>
                   <label>शुरू रीडिंग</label>
-                  <input type="number" inputMode="numeric" placeholder="जैसे 780" value={r.start_time}
+                  <NumericInput allowDecimal={false} placeholder="जैसे 780" value={r.start_time}
                     onChange={e => updateRow(r.id, "start_time", e.target.value)} />
                 </div>
                 <div>
                   <label>बंद रीडिंग</label>
-                  <input type="number" inputMode="numeric" placeholder="जैसे 930" value={r.stop_time}
+                  <NumericInput allowDecimal={false} placeholder="जैसे 930" value={r.stop_time}
                     onChange={e => updateRow(r.id, "stop_time", e.target.value)} />
                 </div>
                 <div>

@@ -18,6 +18,7 @@
 import { useRef } from "react";
 import type { QcTestDefinition, AttachmentEntityType } from "@/lib/types";
 import PhotoUploader, { type PhotoUploaderHandle } from "./PhotoUploader";
+import NumericInput from "./NumericInput";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -277,14 +278,14 @@ export default function QcFieldRenderer({
   return withBadge(
     <div>
       {labelEl}
-      <input
-        type="number"
-        step="any"
+      <NumericInput
+        allowDecimal={true}
+        allowNegative={false}
         value={value}
         placeholder={def.is_calculated ? "—" : "0"}
         disabled={def.is_calculated}
-        onChange={e => onChange(def.test_key, e.target.value)}
-        onBlur={e => onBlur?.(def.test_key, e.target.value)}
+        onChange={e => onChange(def.test_key, e.currentTarget.value)}
+        onBlur={e => onBlur?.(def.test_key, e.currentTarget.value)}
         style={
           def.is_calculated
             ? { background: "var(--ok-soft)", color: "var(--ok)" }
