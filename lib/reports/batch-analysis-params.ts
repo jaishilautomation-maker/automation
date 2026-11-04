@@ -34,10 +34,12 @@ export const BATCH_ANALYSIS_PARAMS: BatchAnalysisParam[] = [
   { resultKey: "mesh200_pct",           label: "Mesh 75µ / 200 Mesh",        unit: "%",  rawInputs: ["mesh200_m", "mesh200_m_ret"] },
   { resultKey: "mesh325_pct",           label: "Mesh 45µ / 325 Mesh",        unit: "%",  rawInputs: ["mesh325_m", "mesh325_m_ret"] },
   { resultKey: "oil_percent",           label: "Oil Content",                unit: "%",  rawInputs: ["oil_mass_loss", "oil_original_mass"] },
-  { resultKey: "heat_loss_percent",     label: "Heat Loss",                  unit: "%",  rawInputs: ["heat_loss_temp", "heat_loss_m_before", "heat_loss_m_after"] },
+  // Same order as the COA (Sr 6 melting, 7 sp. gravity, 8 heat loss).
+  { resultKey: "melting_point",         label: "Melting Point",              unit: "°C", rawInputs: [] },
   { resultKey: "sg_value",              label: "Specific Gravity @ 25°C",    unit: null, rawInputs: ["sg_w1", "sg_w2", "sg_w3", "sg_w4", "sg_sl"] },
   { resultKey: "bd_value",              label: "Bulk Density",               unit: null, rawInputs: ["bd_mass", "bd_volume"] },
-  { resultKey: "melting_point",         label: "Melting Point",              unit: "°C", rawInputs: [] },
+  // Heat loss / moisture: crucible method  (W - (W2 - E)) / W x 100.
+  { resultKey: "heat_loss_percent",     label: "Heat Loss",                  unit: "%",  rawInputs: ["heat_loss_temp", "heat_loss_crucible", "heat_loss_m_before", "heat_loss_w2"] },
   { resultKey: "alkalinity_naoh",       label: "Alkalinity (as NaOH)",       unit: "%",  rawInputs: [] },
   { resultKey: "total_sulphur_percent", label: "Total Sulphur Content",      unit: "%",  rawInputs: [] },
   { resultKey: "softening_point",       label: "Softening Point",            unit: "°C", rawInputs: [] },
@@ -71,8 +73,10 @@ const RAW_INPUT_LABELS: Record<string, string> = {
   oil_mass_loss: "Oil mass loss (g)",
   oil_original_mass: "Oil original mass (g)",
   heat_loss_temp: "Heat loss temp (°C)",
-  heat_loss_m_before: "Heat loss mass before (g)",
-  heat_loss_m_after: "Heat loss mass after (g)",
+  heat_loss_crucible: "Empty crucible E (g)",
+  heat_loss_m_before: "Sample taken W (g)",
+  heat_loss_w2: "Crucible + residue W2 (g)",
+  heat_loss_m_after: "Heat loss mass after (g) [old method]",
   sg_w1: "SG W1", sg_w2: "SG W2", sg_w3: "SG W3", sg_w4: "SG W4", sg_sl: "SG of liquid",
   bd_mass: "Bulk density mass (g)",
   bd_volume: "Bulk density volume (mL)",
@@ -89,7 +93,8 @@ export function paramsForParty(
   if (!partyResultKeys || partyResultKeys.length === 0) {
     return BATCH_ANALYSIS_PARAMS;
   }
-  const wanted = new Set(partyResultKeys);
+  // A party that specs "moisture" is shown / reported under Heat Loss (073).
+  const wanted = new Set(partyResultKeys.map((k) => (k === "moisture_percent" ? "heat_loss_percent" : k)));
   // Preserve catalog order; include only params the party specs on.
   const picked = BATCH_ANALYSIS_PARAMS.filter((p) => wanted.has(p.resultKey));
   // Fallback: if none of the party's keys matched the catalog (unexpected),

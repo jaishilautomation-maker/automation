@@ -44,6 +44,31 @@ export interface CoaCatalogRow {
    * each is a one-number change here.
    */
   decimals?: number;
+  /**
+   * Other batch_analysis fields this slot may print INSTEAD of qcSourceField,
+   * chosen by which one the party's spec rows cover. First match wins; the
+   * default field wins if the party specs it.
+   */
+  altSourceFields?: Array<{ field: string; decimals?: number }>;
+}
+
+/**
+ * Spec parameters that are the SAME measurement under another name.
+ * Migration 073 removed Moisture from Final Inspection ("use Heat Loss
+ * instead"), so a party spec that says moisture_percent is certified from the
+ * Heat Loss result (same crucible method: (W - (W2 - E)) / W x 100).
+ */
+export const SPEC_PARAMETER_ALIASES: Readonly<Record<string, string>> = {
+  moisture_percent: "heat_loss_percent",
+};
+
+/** Return `specs` with aliased parameters renamed (never overriding a real row). */
+export function applySpecAliases<T extends { parameter: string }>(specs: T[]): T[] {
+  const have = new Set(specs.map((s) => s.parameter));
+  return specs.map((s) => {
+    const target = SPEC_PARAMETER_ALIASES[s.parameter];
+    return target && !have.has(target) ? { ...s, parameter: target } : s;
+  });
 }
 
 /**
@@ -52,7 +77,10 @@ export interface CoaCatalogRow {
  * spec pins a different mesh (e.g. Dalmia's 88/170) overrides via its spec row.
  */
 export const COA_CATALOG: CoaCatalogRow[] = [
-  { sr: 1,  defaultLabel: "% Purity solubility in CS2",        qcSourceField: "purity_percent", decimals: 2 },
+  { sr: 1,  defaultLabel: "% Purity solubility in CS2",        qcSourceField: "purity_percent", decimals: 2,
+    // Sr 1 is "Insoluble in Toluene" for parties that spec that instead of CS2
+    // purity (Apollo, Birla/Dalmia ...). The party's spec decides which field prints.
+    altSourceFields: [{ field: "insolubility_toluene", decimals: 3 }] },
   { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4 },
   { sr: 3,  defaultLabel: "% Ash content",                     qcSourceField: "ash_percent", decimals: 3 },
   // Sr 4 — Mesh size (three sub-rows). Defaults = MRF variant.

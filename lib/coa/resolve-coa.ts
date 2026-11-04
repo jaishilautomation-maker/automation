@@ -17,6 +17,7 @@ import {
   COA_CATALOG,
   BATCH_ANALYSIS_KEYS,
   BATCH_HEADER_KEYS,
+  applySpecAliases,
   type CoaCatalogRow,
 } from "./catalog";
 
@@ -145,7 +146,9 @@ function averageAtSourcePrecision(raws: unknown[]): string {
  * @param batches  resolved batches, in the order the user added them
  * @param specs    the selected party's coa_customer_specs rows
  */
-export function resolveCoa(batches: ResolvedBatch[], specs: CoaSpec[]): ResolveResult {
+export function resolveCoa(batches: ResolvedBatch[], rawSpecs: CoaSpec[]): ResolveResult {
+  // A party spec for "moisture" is certified from Heat Loss (migration 073).
+  const specs = applySpecAliases(rawSpecs);
   const missingBatches = batches.filter((b) => b.testResults == null).map((b) => b.batchNumber);
 
   // Index specs by their qc_source_field (parameter) for override lookup.
@@ -203,12 +206,18 @@ function resolveSlot(
   specByField: Map<string, CoaSpec>,
 ): ResolvedRow {
   // Which spec applies to this slot? The spec whose parameter equals the slot's
-  // qcSourceField wins (that's how row 1 switches between CS2-purity and
-  // toluene-insolubility: the party either specs purity_percent or
-  // insolubility_toluene, each mapping to its own slot/label).
-  const spec = slot.qcSourceField ? specByField.get(slot.qcSourceField) : undefined;
+  // qcSourceField wins; otherwise the first alternate the party specs (that is
+  // how row 1 switches between CS2-purity and toluene-insolubility).
+  let field: string | null = slot.qcSourceField;
+  let slotDecimals = slot.decimals;
+  let spec = field ? specByField.get(field) : undefined;
+  if (!spec) {
+    for (const alt of slot.altSourceFields ?? []) {
+      const altSpec = specByField.get(alt.field);
+      if (altSpec) { spec = altSpec; field = alt.field; slotDecimals = alt.decimals; break; }
+    }
+  }
 
-  const field  = slot.qcSourceField;
   const label  = spec?.parameter_label ?? slot.defaultLabel;
   const min    = spec?.min_value ?? null;
   const max    = spec?.max_value ?? null;
@@ -256,7 +265,7 @@ function resolveSlot(
     average: averageAtSourcePrecision(rawPerBatch),
     hasSpec,
     needsVerification,
-    decimals: slot.decimals,
+    decimals: slotDecimals,
     rowStatus,
   };
 }

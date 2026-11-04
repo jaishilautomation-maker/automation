@@ -1,4 +1,4 @@
-
+﻿
 "use client";
 
 // =============================================================================
@@ -30,6 +30,7 @@ import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildBatchAnalysisEmail } from "@/lib/notifications/lab-qc-emails";
 import { paramsForParty } from "@/lib/reports/batch-analysis-params";
+import { applySpecAliases } from "@/lib/coa/catalog";
 import { useFieldAudit } from "@/lib/use-field-audit";
 import { flushPhotoUploads, PHOTO_UPLOAD_FAILED_MSG } from "@/lib/upload";
 import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
@@ -188,7 +189,8 @@ export default function BatchAnalysisPage() {
       .select("parameter, parameter_label, unit, min_value, max_value, target_value, needs_verification, display_as_passing")
       .eq("party_code", partyCode)
       .eq("is_active", true)
-      .then(({ data }) => setSpecs((data ?? []) as SpecRow[]));
+      // moisture_percent specs are checked against the Heat Loss field (073)
+      .then(({ data }) => setSpecs(applySpecAliases((data ?? []) as SpecRow[])));
   }, [partyCode, supabase]);
 
   // -------------------------------------------------------------------------
