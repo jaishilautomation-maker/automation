@@ -245,7 +245,14 @@ export default function ProductQcPage() {
       .eq("is_active", true)
       .order("sort_order")
       .then(({ data }) => {
-        const defs = (data ?? []) as QcTestDefinition[];
+        // Defensive: drop duplicate rows for the same test_key (safety net in
+        // case migration 026 has not been applied yet).
+        const seen = new Set<string>();
+        const defs = ((data ?? []) as QcTestDefinition[]).filter(d => {
+          if (seen.has(d.test_key)) return false;
+          seen.add(d.test_key);
+          return true;
+        });
         setTestDefs(defs);
         const init: Record<string, string> = {};
         defs.forEach(d => { init[d.test_key] = ""; });
