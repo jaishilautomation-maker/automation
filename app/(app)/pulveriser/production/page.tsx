@@ -58,6 +58,7 @@ const PARTY_CODE_ORDER = [
   "JKI-108",
   "Shakti",
   "Rubber",
+  "WE-10",
   "Sulphur Powder",
 ] as const;
 

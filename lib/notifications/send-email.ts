@@ -53,7 +53,7 @@ const LAB_QC_EVENT_PREFIX = "lab_qc_";
 // Factory mailbox. Production and Operator job-card submissions are also
 // delivered here, in the same format, in addition to AUTOMATION_EMAIL.
 export const FACTORY_EMAIL = "factory@jaishilsulphur.com";
-const FACTORY_EVENT_TYPES = new Set(["pulveriser_production", "pulveriser_operator"]);
+const FACTORY_EVENT_TYPES = new Set(["pulveriser_production", "pulveriser_operator", "breakdown_register", "pm_completion"]);
 
 // ---------------------------------------------------------------------------
 // TEMPORARY global CC — every notification (all roles, all event types) is
