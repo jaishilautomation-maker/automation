@@ -12,6 +12,7 @@
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { COA_LETTERHEAD } from "./catalog";
+import { JAISHIL_LOGO_JPEG_BASE64, JAISHIL_LOGO_WIDTH, JAISHIL_LOGO_HEIGHT } from "./logo-data";
 
 export interface SnapshotRow {
   sr:      number;
@@ -119,20 +120,47 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   const right = A4.w - MARGIN;
   const contentW = right - left;
 
-  // ── Letterhead ──────────────────────────────────────────────────────────
-  text(ctx, COA_LETTERHEAD.companyName, left, ctx.y, 15, bold);
-  ctx.y -= 15;
-  text(ctx, COA_LETTERHEAD.tagline, left, ctx.y, 8, reg, soft);
-  ctx.y -= 14;
-  hline(ctx, left, right, ctx.y, 1.2);
-  ctx.y -= 12;
+  // ── Letterhead (matches the reference COAs) ──────────────────────────────
+  // Bordered header: logo cell on the left, company name + tagline centred in
+  // the rest; then Office (left) / Factory (right) address blocks and a rule.
+  const hdrH   = 62;
+  const hdrTop = ctx.y + 4;
+  const hdrBot = hdrTop - hdrH;
+  page.drawRectangle({ x: left, y: hdrBot, width: contentW, height: hdrH, borderColor: line, borderWidth: 1 });
+  vline(ctx, left + hdrH, hdrBot, hdrTop, 1);
+
+  try {
+    const logo = await doc.embedJpg(Buffer.from(JAISHIL_LOGO_JPEG_BASE64, "base64"));
+    const box  = hdrH - 8;                                   // padding inside the cell
+    const lh   = box;
+    const lw   = box * (JAISHIL_LOGO_WIDTH / JAISHIL_LOGO_HEIGHT);
+    const scale = lw > box ? box / lw : 1;                   // never wider than the cell
+    page.drawImage(logo, {
+      x: left + (hdrH - lw * scale) / 2,
+      y: hdrBot + (hdrH - lh * scale) / 2,
+      width: lw * scale,
+      height: lh * scale,
+    });
+  } catch {
+    /* a missing/corrupt logo must never block issuing a COA */
+  }
+
+  const nameArea = right - (left + hdrH);
+  let nameSize = 18;
+  while (nameSize > 11 && bold.widthOfTextAtSize(COA_LETTERHEAD.companyName, nameSize) > nameArea - 16) nameSize -= 0.5;
+  const nameW = bold.widthOfTextAtSize(COA_LETTERHEAD.companyName, nameSize);
+  text(ctx, COA_LETTERHEAD.companyName, left + hdrH + (nameArea - nameW) / 2, hdrTop - 26, nameSize, bold);
+  const tagW = bold.widthOfTextAtSize(COA_LETTERHEAD.tagline, 9);
+  text(ctx, COA_LETTERHEAD.tagline, left + hdrH + (nameArea - tagW) / 2, hdrTop - 44, 9, bold, soft);
+
+  ctx.y = hdrBot - 14;
 
   // Office (left) + Factory (right) address blocks.
   const colR = left + contentW * 0.56;
   let oy = ctx.y;
-  for (const l of COA_LETTERHEAD.office) { text(ctx, l, left, oy, 7.5); oy -= 10; }
+  for (const l of COA_LETTERHEAD.office) { text(ctx, l, left, oy, 7.5, bold); oy -= 10; }
   let fy = ctx.y;
-  for (const l of COA_LETTERHEAD.factory) { text(ctx, l, colR, fy, 7.5); fy -= 10; }
+  for (const l of COA_LETTERHEAD.factory) { text(ctx, l, colR, fy, 7.5, bold); fy -= 10; }
   ctx.y = Math.min(oy, fy) - 4;
   hline(ctx, left, right, ctx.y, 1.2);
   ctx.y -= 18;

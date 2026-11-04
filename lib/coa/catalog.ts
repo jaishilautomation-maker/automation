@@ -120,15 +120,17 @@ export const BATCH_WARN_THRESHOLD = 3;
 export const COA_LETTERHEAD = {
   companyName: "JAISHIL SULPHUR & CHEMICAL INDUSTRIES",
   tagline:     "MANUFACTURER'S OF SULPHUR POWDER:",
+  // Text taken from the reference COAs ("COA OF MRF, CEAT, ETC. WITH DIFF ADDRESS").
+  // The docx has "forties Hospital" (typo); the scanned certificates read "Fortis".
   office: [
     "Office: 202/203, Pratik Industrial Estate, 2nd fl.,",
-    "Bhandup-Goregaon Link Rd., Near Fortis Hospital,",
-    "Bhandup, Mumbai-400078.",
+    "Bhandup - Goregaon Link Rd., Near Fortis Hospital,",
+    "Bhandup, Mumbai - 400078.",
     "Phone: 61407900  FAX: 61407979",
-    "E-Mail: jaishil@vsnl.net / jaishila20@gmail.com",
+    "E-Mail: jaishil@vsnl.net/jaishila20@gmail.com.",
   ],
   factory: [
-    "Factory: Plot No. A/20/1, Phase 1, M.I.D.C.,",
+    "Factory: Plot NO. A/20/1, PHASE 1, M.I.D.C.,",
     "Dombivli (East) 421203, Dist. Thane.",
     "Phone: 2471391/6454979",
   ],
