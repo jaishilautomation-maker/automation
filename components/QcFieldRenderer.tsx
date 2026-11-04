@@ -44,7 +44,7 @@ interface Props {
   photoUploadProps?: PhotoUploadProps;
   /**
    * Optional inline indicator rendered to the RIGHT of this field
-   * (e.g. the customer spec limit + pass/fail for this parameter).
+   * (e.g. the product spec limit + pass/fail for this parameter).
    */
   specBadge?: React.ReactNode;
   /**
@@ -275,6 +275,8 @@ export default function QcFieldRenderer({
   }
 
   // ── Number (default, includes calculated in auto mode) ────────────────────
+  // pH fields: use 2 decimal places placeholder to hint the pH meter reads 2 d.p.
+  const isPh = def.test_key.startsWith("ph_") || def.test_key === "ph";
   return withBadge(
     <div>
       {labelEl}
@@ -282,7 +284,7 @@ export default function QcFieldRenderer({
         allowDecimal={true}
         allowNegative={false}
         value={value}
-        placeholder={def.is_calculated ? "—" : "0"}
+        placeholder={def.is_calculated ? "—" : isPh ? "0.00" : "0"}
         disabled={def.is_calculated}
         onChange={e => onChange(def.test_key, e.currentTarget.value)}
         onBlur={e => onBlur?.(def.test_key, e.currentTarget.value)}

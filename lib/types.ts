@@ -230,6 +230,10 @@ export interface QcTestDefinition {
   is_calculated: boolean;
   sort_order: number;
   is_active: boolean;
+  /** Section header rendered above this field when it differs from the previous field's section_label */
+  section_label: string | null;
+  /** Formula is interim / under review — show indicator to chemist */
+  needs_review: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +362,8 @@ export interface ProductQc {
   phase: QcPhase;
   chemist_id: string;
   test_date: string;            // ISO date
+  mfg_date: string | null;      // Manufacturing date (A1)
+  analysed_by: string | null;   // Selected chemist name (A2; login user stays chemist_id)
   appearance: string | null;
   appearance_ok: boolean | null;
   test_results: Record<string, unknown>;

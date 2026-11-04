@@ -3,15 +3,31 @@
 // =============================================================================
 // Lab QC — Product QC (dynamic per-product forms)
 //
+// Meeting fixes (023_qc_form_meeting_fixes.sql, 4 Nov 2026):
+//   A1  Manufacturing Date added alongside Testing Date.
+//   A2  "Analysed By" dropdown replicates batch-analysis pattern.
+//   A3  sample_taken_by deactivated in DB — no code change needed.
+//   A4  lot_batch_number / lot_batch_quantity deactivated in DB — batch
+//       number entered once in the header; all products read from there.
+//   A5  Section headers rendered between field groups (section_label column).
+//   A6  Calculated results already follow inputs via sort_order (migration 022);
+//       calcium_content sort_order fixed in migration 023.
+//   A7  Burette V1/V2 warning: if V2 < V1 show inline message, suppress result.
+//   A9  NumericInput used by QcFieldRenderer for all number fields — no spinner.
+//   A10 Live spec check: specs loaded from product_qc_specs table (seeded from
+//       COA PDFs in migration 025); pass (✓) / fail (✗) shown beside each field.
+//       Neutral "No spec" when no row for a parameter. needs_verification rows
+//       show a ⚠ icon beside the spec limit.
+//   111% guard: suspensibility shows "—" until all inputs valid; warns if >100.
+//   pH: placeholder "0.00" to match pH meter 2 d.p. display.
+//
 // Flow:
-//   1. Pick product (non-trial-only products only)
+//   1. Pick product (5 A-20 Lab QC products)
 //   2. For phase-aware products (Sulphur SC, Zinc SC): pick Phase A or B
-//      For others: phase is 'none' automatically
-//   3. Pick batch (fg batches for that product at this factory)
-//   4. Dynamic form renders from qc_test_definitions WHERE product_id = X
-//      AND phase = selected
-//   5. Calculated fields update live; submit = INSERT or UPDATE
-//      (UNIQUE constraint: batch_id + product_id + phase)
+//   3. Enter batch number (top-level, non-blocking background lookup)
+//   4. Dynamic form renders from qc_test_definitions sorted by sort_order,
+//      grouped by section_label for headers.
+//   5. Calculated fields update live; submit = INSERT or UPDATE.
 // =============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -32,6 +48,7 @@ import type { Product, QcTestDefinition, ProductQc, QcPhase } from "@/lib/types"
 import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildProductQcEmail } from "@/lib/notifications/lab-qc-emails";
+import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
 
 interface BatchOption {
   id: string;
@@ -40,11 +57,35 @@ interface BatchOption {
   production_date: string;
 }
 
+// Product spec row from product_qc_specs table
+interface SpecRow {
+  test_key: string;
+  parameter_label: string;
+  unit: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  needs_verification: boolean;
+}
+
 // Products that have Phase A + B
 const PHASE_AWARE_CODES = ["SULPHUR_SC", "ZINC_SC"];
 
-// Calculated fields that support "Enter manually" toggle (item 7)
+// Calculated fields that support "Enter manually" toggle
 const MANUAL_OVERRIDE_KEYS = new Set(["calcium_content", "boron_content"]);
+
+// Burette pair definitions: [v1_key, v2_key, result_key]
+// When V2 < V1 we suppress the result and show an inline warning.
+const BURETTE_PAIRS: [string, string, string][] = [
+  ["naoh_v1",          "naoh_v2",          "boron_content"],
+  ["content_iodine_blank", "content_iodine_vol", "sulphur_content"],   // Ziddi B2>B1
+  ["zc_v1_with_cyanide", "zc_v2_without_cyanide", "zinc_content"],      // Zinc SC B
+  ["v1_with_cyanide",    "v2_without_cyanide",     "zinc_content_a"],   // Zinc SC A
+];
+
+// Suspensibility keys that should show ">100" warning
+const SUSPENSIBILITY_KEYS = new Set([
+  "suspensibility", "sulphur_suspensibility", "suspension",
+]);
 
 export default function ProductQcPage() {
   const { user, profile } = useAuth();
@@ -62,16 +103,14 @@ export default function ProductQcPage() {
     directLotNumber: string;
     values: Record<string, string>;
     testDate: string;
-    chemistName: string;
+    mfgDate: string;
+    analysisBy: string;
     remarks: string;
   }
   const draft = useFormDraft<DraftShape>(
     draftKey(pathname, activeFactory?.id, user?.id),
   );
   const d0 = draft.restored;
-  // One-time snapshot of the restored draft (captured at mount). The defs-load
-  // effect seeds `values` from this, NOT the live `d0`, so autosaves don't
-  // re-seed and clobber what the user is typing.
   const [initialDraft] = useState<DraftShape | null>(() => draft.restored);
 
   // Step 1: product selection
@@ -85,14 +124,10 @@ export default function ProductQcPage() {
   // Step 3: batch selection
   const [batches, setBatches]           = useState<BatchOption[]>([]);
   const [batchId, setBatchId]           = useState(d0?.batchId ?? "");
-  const [loadingBatches, setLoadingBatches] = useState(false);
 
-  // A-20 direct batch entry — plain required text field, no blocking lookup.
-  // A silent background lookup runs to link to an existing batches row when
-  // available; if no match the record is saved with batch_id=null + batch_no.
+  // A-20 direct batch entry
   const [directBatchNumber, setDirectBatchNumber] = useState(d0?.directBatchNumber ?? "");
   const [directLotNumber, setDirectLotNumber]     = useState(d0?.directLotNumber ?? "");
-  // Silent background lookup state (non-blocking)
   const [batchLookupState, setBatchLookupState] = useState<
     "idle" | "searching" | "found" | "not_found"
   >("idle");
@@ -103,43 +138,43 @@ export default function ProductQcPage() {
   const [testDefs, setTestDefs]         = useState<QcTestDefinition[]>([]);
   const [loadingDefs, setLoadingDefs]   = useState(false);
 
-  // Existing QC record for selected batch+product+phase
+  // Existing QC record
   const [existingRecord, setExistingRecord] = useState<ProductQc | null>(null);
   const [checkingExisting, setCheckingExisting] = useState(false);
 
   // Form state
   const [values, setValues]             = useState<Record<string, string>>({});
   const [testDate, setTestDate]         = useState(d0?.testDate ?? new Date().toISOString().slice(0, 10));
-  const [chemistName, setChemistName]   = useState(d0?.chemistName ?? "");
+  const [mfgDate, setMfgDate]           = useState(d0?.mfgDate   ?? new Date().toISOString().slice(0, 10));
+  const [analysisBy, setAnalysisBy]     = useState(d0?.analysisBy ?? "");
   const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
-  // Per-field warnings: retained > sample (sieve inputs)
-  const [sieveWarnings, setSieveWarnings] = useState<Record<string, string>>({});
 
-  // Autosave the live form state on every change (debounced inside the hook).
+  // Per-field warnings
+  const [sieveWarnings, setSieveWarnings]   = useState<Record<string, string>>({});
+  const [buretteWarnings, setBuretteWarnings] = useState<Record<string, string>>({});
+
+  // A10: product specs for pass/fail indicators
+  const [specs, setSpecs] = useState<SpecRow[]>([]);
+
+  // Autosave
   const draftSave = draft.save;
   useEffect(() => {
     draftSave({
       productId, phase, batchId, directBatchNumber, directLotNumber,
-      values, testDate, chemistName, remarks,
+      values, testDate, mfgDate, analysisBy, remarks,
     });
   }, [productId, phase, batchId, directBatchNumber, directLotNumber,
-      values, testDate, chemistName, remarks, draftSave]);
+      values, testDate, mfgDate, analysisBy, remarks, draftSave]);
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
-
-  // A-20 uses direct batch/lot entry (batch analysis & hourly reading do not
-  // exist in this factory). A-20/1 keeps the batch dropdown.
   const isA20 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20";
 
-  // -------------------------------------------------------------------------
-  // Load products — A-20: filter to 5 known Lab QC products by code
-  //                 A-20/1: all non-trial active products
-  // -------------------------------------------------------------------------
   const A20_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "ZIDDI", "LIQUID_CALCIUM", "LIQUID_BORON"];
 
+  // ── Load products ─────────────────────────────────────────────────────────
   useEffect(() => {
     const q = supabase.from("products").select("*").eq("is_active", true);
     const finalQ = isA20
@@ -150,11 +185,9 @@ export default function ProductQcPage() {
         setProducts((data ?? []) as Product[]);
         setLoadingProducts(false);
       });
-  }, [supabase]);
+  }, [supabase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -------------------------------------------------------------------------
-  // Reset phase when product changes
-  // -------------------------------------------------------------------------
+  // ── Reset on product change ───────────────────────────────────────────────
   useEffect(() => {
     setPhase(isPhaseAware ? "A" : "none");
     setBatchId("");
@@ -166,28 +199,19 @@ export default function ProductQcPage() {
     setValues({});
     setRemarks("");
     setSieveWarnings({});
+    setBuretteWarnings({});
   }, [productId, isPhaseAware]);
 
-  // -------------------------------------------------------------------------
-  // Load batches when product changes
-  // For A-20/1: also load SULPHUR_POWDER material batches (batch_type='fg')
-  // since hourly-reading / batch-analysis create them with material_id
-  // -------------------------------------------------------------------------
+  // ── Load batches (A-20/1) ─────────────────────────────────────────────────
   useEffect(() => {
-    // A-20 uses direct batch/lot entry — no dropdown to populate.
     if (isA20) { setBatches([]); return; }
     if (!productId || !activeFactory) { setBatches([]); return; }
 
-    setLoadingBatches(true);
-
-    // For A-20/1 Sulphur Powder products, also check material-based batches
     const isA20_1 = process.env.NEXT_PUBLIC_FACTORY_CODE === "A20_1";
     const selectedCode = products.find(p => p.id === productId)?.code;
     const isSulphurProduct = selectedCode === "SULPHUR_SC" || selectedCode === "SULPHUR_POWDER";
 
     if (isA20_1 && isSulphurProduct) {
-      // Load all fg-type batches at this factory — these are
-      // created by hourly-reading / batch-analysis pages
       supabase
         .from("batches")
         .select("id, batch_number, lot_number, production_date")
@@ -195,10 +219,7 @@ export default function ProductQcPage() {
         .eq("batch_type", "fg")
         .order("production_date", { ascending: false })
         .limit(50)
-        .then(({ data }) => {
-          setBatches((data ?? []) as BatchOption[]);
-          setLoadingBatches(false);
-        });
+        .then(({ data }) => setBatches((data ?? []) as BatchOption[]));
     } else {
       supabase
         .from("batches")
@@ -207,16 +228,11 @@ export default function ProductQcPage() {
         .eq("product_id", productId)
         .order("production_date", { ascending: false })
         .limit(50)
-        .then(({ data }) => {
-          setBatches((data ?? []) as BatchOption[]);
-          setLoadingBatches(false);
-        });
+        .then(({ data }) => setBatches((data ?? []) as BatchOption[]));
     }
-  }, [productId, activeFactory, supabase, products]);
+  }, [productId, activeFactory, supabase, products]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -------------------------------------------------------------------------
-  // Load test definitions when product + phase change
-  // -------------------------------------------------------------------------
+  // ── Load test definitions ─────────────────────────────────────────────────
   useEffect(() => {
     if (!productId) { setTestDefs([]); setValues({}); return; }
 
@@ -233,19 +249,26 @@ export default function ProductQcPage() {
         setTestDefs(defs);
         const init: Record<string, string> = {};
         defs.forEach(d => { init[d.test_key] = ""; });
-        // Merge any saved draft values over the blank init so restored input
-        // survives a tab/browser close (one-time; see initialDraft).
         setValues({ ...init, ...(initialDraft?.values ?? {}) });
         setLoadingDefs(false);
       });
   }, [productId, phase, supabase, initialDraft]);
 
-  // -------------------------------------------------------------------------
-  // A-20: silent background batch lookup — 400 ms debounce.
-  // NEVER blocks the form. Just tries to link to an existing batches row.
-  // If found → batchId is set (used as FK when saving).
-  // If not found → batchId stays empty; record saves with batch_no only.
-  // -------------------------------------------------------------------------
+  // ── A10: Load product specs for pass/fail indicators ─────────────────────
+  useEffect(() => {
+    if (!productId || !selectedProduct) { setSpecs([]); return; }
+    const code = selectedProduct.code;
+    const phaseKey = phase === "none" ? "none" : phase;
+    supabase
+      .from("product_qc_specs")
+      .select("test_key, parameter_label, unit, min_value, max_value, needs_verification")
+      .eq("product_code", code)
+      .eq("phase", phaseKey)
+      .eq("is_active", true)
+      .then(({ data }) => setSpecs((data ?? []) as SpecRow[]));
+  }, [productId, phase, selectedProduct, supabase]);
+
+  // ── A-20: silent background batch lookup ─────────────────────────────────
   useEffect(() => {
     if (!isA20 || !productId || !activeFactory) return;
     const bn = directBatchNumber.trim();
@@ -278,7 +301,7 @@ export default function ProductQcPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directBatchNumber, productId, activeFactory]);
 
-  // Clear lookup when product changes (already resets directBatchNumber above)
+  // ── Load existing record ──────────────────────────────────────────────────
   useEffect(() => {
     if (!batchId || !productId) { setExistingRecord(null); return; }
 
@@ -295,6 +318,10 @@ export default function ProductQcPage() {
         setExistingRecord(rec);
         if (rec) {
           setTestDate(rec.test_date);
+          setMfgDate(rec.mfg_date ?? new Date().toISOString().slice(0, 10));
+          setAnalysisBy(
+            (rec.test_results?.[ANALYSIS_BY_KEY] as string | undefined) ?? rec.analysed_by ?? ""
+          );
           setRemarks(rec.remarks ?? "");
           const prefill: Record<string, string> = {};
           const tr = (rec.test_results ?? {}) as Record<string, unknown>;
@@ -302,7 +329,6 @@ export default function ProductQcPage() {
             const v = tr[d.test_key];
             prefill[d.test_key] = v !== undefined && v !== null ? String(v) : "";
           });
-          // Recompute calculated fields on prefill
           testDefs
             .filter(d => d.is_calculated && d.formula)
             .forEach(d => {
@@ -322,10 +348,7 @@ export default function ProductQcPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId, productId, phase, supabase]);
 
-  // -------------------------------------------------------------------------
-  // Field change with live formula recalculation + sieve retained>sample warn
-  // -------------------------------------------------------------------------
-  // Pairs of (retained_key, sample_key) for retained>sample validation
+  // ── Field change + live recalc ────────────────────────────────────────────
   const SIEVE_PAIRS: [string, string][] = [
     ["wet_sieve200_residue",  "wet_sieve200_sample"],
     ["wet_sieve325_residue",  "wet_sieve325_sample"],
@@ -338,21 +361,36 @@ export default function ProductQcPage() {
     (key: string, val: string) => {
       setValues(prev => {
         const next = { ...prev, [key]: val };
+
         testDefs
           .filter(d => d.is_calculated && d.formula)
           .forEach(d => {
-            // Skip fields in manual-override mode (sidecar key = test_key + "_manual_mode")
             if (next[d.test_key + "_manual_mode"] === "1") return;
+
+            // A7: V2 < V1 guard — suppress result and record warning
+            const burettePair = BURETTE_PAIRS.find(([, , rk]) => rk === d.test_key);
+            if (burettePair) {
+              const [v1k, v2k] = burettePair;
+              const v1 = parseFloat(next[v1k] ?? "");
+              const v2 = parseFloat(next[v2k] ?? "");
+              if (!isNaN(v1) && !isNaN(v2) && v2 < v1) {
+                next[d.test_key] = "";
+                // Warning handled in buretteWarnings state below
+                return;
+              }
+            }
+
             const result = evalFormula(d.formula!, next, d.unit);
             next[d.test_key] = result !== null ? String(result) : "";
           });
+
         return next;
       });
-      // Sieve retained > sample warnings (warn only, never block)
+
+      // Sieve retained > sample warnings
       setSieveWarnings(prev => {
         const next = { ...prev };
         for (const [retKey, sampleKey] of SIEVE_PAIRS) {
-          // Only recheck the pair that contains the changed key
           if (key !== retKey && key !== sampleKey) continue;
           setValues(vals => {
             const retained = parseFloat(key === retKey ? val : (vals[retKey] ?? ""));
@@ -362,38 +400,48 @@ export default function ProductQcPage() {
             } else {
               delete next[retKey];
             }
-            return vals; // no state change, just reading
+            return vals;
           });
         }
+        return next;
+      });
+
+      // A7: Burette V2 < V1 warnings
+      setBuretteWarnings(prev => {
+        const next = { ...prev };
+        setValues(vals => {
+          const merged = { ...vals, [key]: val };
+          for (const [v1k, v2k, rk] of BURETTE_PAIRS) {
+            if (key !== v1k && key !== v2k) continue;
+            const v1 = parseFloat(merged[v1k] ?? "");
+            const v2 = parseFloat(merged[v2k] ?? "");
+            if (!isNaN(v1) && !isNaN(v2) && v2 < v1) {
+              next[rk] = `V2 (${v2}) is less than V1 (${v1}) — check burette readings`;
+            } else {
+              delete next[rk];
+            }
+          }
+          return vals;
+        });
         return next;
       });
     },
     [testDefs], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // -------------------------------------------------------------------------
-  // Submit
-  // -------------------------------------------------------------------------
+  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!user || !activeFactory)       { showToast("Session error — refresh.", true); return; }
     if (!productId)                    { showToast("Select a product.", true); return; }
     if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
     if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
-    if (!chemistName.trim() && !existingRecord) {
-      showToast("Enter chemist name.", true); return;
-    }
 
     setSubmitting(true);
     try {
-      // A-20: batch_no is always stored as typed. batch_id links to the
-      // batches table only when a match was found via the silent background
-      // lookup. No auto-create, no blocking if unlinked.
-      const effectiveBatchId = batchId || null;  // null when not linked
+      const effectiveBatchId = batchId || null;
       const effectiveBatchNo = directBatchNumber.trim();
 
       if (isA20) {
-        // Guard against duplicate QC record for this batch/product/phase.
-        // Check by batch_id (linked) or batch_no+factory (unlinked).
         let dupQuery = supabase
           .from("product_qc")
           .select("id")
@@ -427,12 +475,14 @@ export default function ProductQcPage() {
         } else {
           testResults[d.test_key] = raw;
         }
-        // Persist sidecar keys: manual mode flag and "Other" free-text
         const manualKey = d.test_key + "_manual_mode";
         if (values[manualKey]) testResults[manualKey] = values[manualKey];
         const otherKey = d.test_key + "_other";
         if (values[otherKey]) testResults[otherKey] = values[otherKey];
       });
+
+      // Store analysed_by in test_results (JSONB) for consistency with batch-analysis
+      if (analysisBy) testResults[ANALYSIS_BY_KEY] = analysisBy;
 
       const appearanceOkRaw = values["appearance_ok"];
       const appearanceOk =
@@ -444,6 +494,8 @@ export default function ProductQcPage() {
           .from("product_qc")
           .update({
             test_date:     testDate,
+            mfg_date:      mfgDate || null,
+            analysed_by:   analysisBy || null,
             appearance:    values["colour_physical_state"] ?? null,
             appearance_ok: appearanceOk,
             test_results:  testResults,
@@ -454,29 +506,23 @@ export default function ProductQcPage() {
 
         if (error) { showToast("Update failed: " + error.message, true); return; }
         if (!await flushPhotoUploads(Object.values(uploaderRefs.current), existingRecord.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
-        {
-          const { data: fresh } = await supabase
-            .from("product_qc").select("overall_result").eq("id", existingRecord.id).maybeSingle();
-          void notifyQcFinalized({
-            sourceTable:   "product_qc",
-            sourceRecordId: existingRecord.id,
-            factoryId:     activeFactory.id,
-            batchId:       existingRecord.batch_id ?? existingRecord.batch_no ?? "",
-            phase,
-            overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
-            testDate:      testDate,
-            testResults:   testResults,
-            extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
-          });
-        }
 
-        // Fire-and-forget: generate + email the filled final-inspection report.
-        // Product QC / final inspection is an A-20 workflow only — A-20/1 (crude
-        // sulphur → powder line) has no final-inspection report. Gate on A-20 so
-        // this shared code never emits a product_qc report on the A-20/1 build.
+        const { data: fresh } = await supabase
+          .from("product_qc").select("overall_result").eq("id", existingRecord.id).maybeSingle();
+        void notifyQcFinalized({
+          sourceTable:   "product_qc",
+          sourceRecordId: existingRecord.id,
+          factoryId:     activeFactory.id,
+          batchId:       existingRecord.batch_id ?? existingRecord.batch_no ?? "",
+          phase,
+          overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
+          testDate,
+          testResults,
+          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+        });
+
         if (isA20) void notifyReport({ source: "product_qc", recordId: existingRecord.id });
 
-        // Fire-and-forget email (UPDATE path)
         const pqcUpdISO = new Date().toISOString();
         const { subject: pqcUpdSubj, html: pqcUpdHtml } = buildProductQcEmail({
           productName:     selectedProduct?.name ?? "Product",
@@ -502,20 +548,13 @@ export default function ProductQcPage() {
             target: "lab",
             tab: "Product QC",
             values: [
-              existingRecord.id,
-              selectedProduct?.name ?? null,
+              existingRecord.id, selectedProduct?.name ?? null,
               batches.find(b => b.id === existingRecord.batch_id)?.batch_number ?? null,
-              phase,
-              testDate,
-              values["colour_physical_state"] ?? null,
-              appearanceOk,
-              "pending",  // overall_result — not available at this point
-              JSON.stringify(testResults),
-              remarks.trim() || null,
-              profile?.full_name ?? null,
-              pqcUpdISO,
-              true,  // isUpdate
-              activeFactory.id,
+              phase, testDate, mfgDate || null, analysisBy || null,
+              values["colour_physical_state"] ?? null, appearanceOk,
+              "pending", JSON.stringify(testResults),
+              remarks.trim() || null, profile?.full_name ?? null,
+              pqcUpdISO, true, activeFactory.id,
             ],
           },
         });
@@ -533,6 +572,8 @@ export default function ProductQcPage() {
             phase,
             chemist_id:    user.id,
             test_date:     testDate,
+            mfg_date:      mfgDate || null,
+            analysed_by:   analysisBy || null,
             appearance:    values["colour_physical_state"] ?? null,
             appearance_ok: appearanceOk,
             test_results:  testResults,
@@ -543,29 +584,27 @@ export default function ProductQcPage() {
 
         if (error || !newRow) { showToast("Could not save: " + (error?.message ?? "unknown"), true); return; }
         if (!await flushPhotoUploads(Object.values(uploaderRefs.current), newRow.id)) showToast(PHOTO_UPLOAD_FAILED_MSG, true);
-        {
-          const { data: fresh } = await supabase
-            .from("product_qc").select("overall_result").eq("id", newRow.id).maybeSingle();
-          void notifyQcFinalized({
-            sourceTable:   "product_qc",
-            sourceRecordId: newRow.id,
-            factoryId:     activeFactory.id,
-            batchId:       effectiveBatchId ?? effectiveBatchNo,
-            phase,
-            overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
-            testDate:      testDate,
-            testResults:   testResults,
-            extra:         { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
-          });
-        }
 
-        // Fire-and-forget: generate + email the filled final-inspection report.
-        // A-20 only (see UPDATE-path note above) — never emitted on A-20/1.
+        const { data: fresh } = await supabase
+          .from("product_qc").select("overall_result").eq("id", newRow.id).maybeSingle();
+        void notifyQcFinalized({
+          sourceTable:   "product_qc",
+          sourceRecordId: newRow.id,
+          factoryId:     activeFactory.id,
+          batchId:       effectiveBatchId ?? effectiveBatchNo,
+          phase,
+          overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
+          testDate,
+          testResults,
+          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+        });
+
         if (isA20) void notifyReport({ source: "product_qc", recordId: newRow.id });
 
-        // Fire-and-forget email (INSERT path)
         const pqcInsISO = new Date().toISOString();
-        const batchNum = isA20 ? (lookedUpBatch?.batch_number ?? effectiveBatchNo) : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
+        const batchNum = isA20
+          ? (lookedUpBatch?.batch_number ?? effectiveBatchNo)
+          : (batches.find(b => b.id === effectiveBatchId)?.batch_number ?? null);
         const { subject: pqcInsSubj, html: pqcInsHtml } = buildProductQcEmail({
           productName:     selectedProduct?.name ?? "Product",
           batchNumber:     batchNum,
@@ -590,20 +629,12 @@ export default function ProductQcPage() {
             target: "lab",
             tab: "Product QC",
             values: [
-              newRow.id,
-              selectedProduct?.name ?? null,
-              batchNum,
-              phase,
-              testDate,
-              values["colour_physical_state"] ?? null,
-              appearanceOk,
-              "pending",  // overall_result — not available at this point
-              JSON.stringify(testResults),
-              remarks.trim() || null,
-              profile?.full_name ?? null,
-              pqcInsISO,
-              false,  // isUpdate
-              activeFactory.id,
+              newRow.id, selectedProduct?.name ?? null, batchNum,
+              phase, testDate, mfgDate || null, analysisBy || null,
+              values["colour_physical_state"] ?? null, appearanceOk,
+              "pending", JSON.stringify(testResults),
+              remarks.trim() || null, profile?.full_name ?? null,
+              pqcInsISO, false, activeFactory.id,
             ],
           },
         });
@@ -616,9 +647,10 @@ export default function ProductQcPage() {
         setLookedUpBatch(null);
         setExistingRecord(null);
         setSieveWarnings({});
+        setBuretteWarnings({});
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
-        setChemistName("");
+        setAnalysisBy("");
         draft.clear();
       }
     } catch {
@@ -628,9 +660,86 @@ export default function ProductQcPage() {
     }
   };
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
+  // ── A10: Spec lookup helpers (mirrors batch-analysis pattern) ────────────
+  const specFor = useCallback(
+    (key: string): SpecRow | undefined => specs.find(s => s.test_key === key),
+    [specs],
+  );
+
+  type SpecStatus = "pass" | "fail" | "none";
+
+  const statusFor = useCallback(
+    (key: string, rawVal: string): SpecStatus => {
+      const spec = specFor(key);
+      if (!spec) return "none";
+      const v = parseFloat(rawVal);
+      if (rawVal === "" || isNaN(v)) return "none";
+      if (spec.min_value != null && v < spec.min_value) return "fail";
+      if (spec.max_value != null && v > spec.max_value) return "fail";
+      return "pass";
+    },
+    [specFor],
+  );
+
+  const specLimitText = useCallback((spec: SpecRow): string => {
+    const parts: string[] = [];
+    if (spec.min_value != null) parts.push(`≥ ${spec.min_value}`);
+    if (spec.max_value != null) parts.push(`≤ ${spec.max_value}`);
+    return parts.join(" · ") || "—";
+  }, []);
+
+  const buildSpecBadge = useCallback(
+    (key: string): React.ReactNode => {
+      const spec = specFor(key);
+      if (!spec) return null;
+      // No limits → neutral "No spec", never "Pass"
+      if (spec.min_value == null && spec.max_value == null) {
+        return (
+          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+            <div style={{ color: "var(--ink-soft)" }}>{spec.parameter_label}</div>
+            <div style={{ color: "var(--ink-soft)", fontWeight: 600 }}>No spec</div>
+          </div>
+        );
+      }
+      const raw = values[key] ?? "";
+      const st = statusFor(key, raw);
+      const color = st === "pass" ? "var(--ok)" : st === "fail" ? "#c0392b" : "var(--ink-soft)";
+      const label = st === "pass" ? "✓ Pass" : st === "fail" ? "✗ Fail" : "—";
+      return (
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+          <div style={{ color: "var(--ink-soft)" }}>
+            Spec: <strong>{specLimitText(spec)}{spec.unit ? ` ${spec.unit}` : ""}</strong>
+            {spec.needs_verification && (
+              <span title="Interim spec from COA — verify against official spec sheet"
+                style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>
+            )}
+          </div>
+          <div style={{ color, fontWeight: 700, fontSize: 13 }}>{label}</div>
+        </div>
+      );
+    },
+    [specFor, statusFor, specLimitText, values],
+  );
+
+  // ── Build grouped field sections for rendering (A5) ───────────────────────
+  interface FieldSection {
+    label: string | null;  // null = no header
+    defs: QcTestDefinition[];
+  }
+
+  const fieldSections: FieldSection[] = [];
+  let currentLabel: string | null | undefined = undefined; // undefined = not started
+
+  for (const def of testDefs) {
+    const sl = def.section_label ?? null;
+    if (sl !== currentLabel) {
+      fieldSections.push({ label: sl, defs: [] });
+      currentLabel = sl;
+    }
+    fieldSections[fieldSections.length - 1].defs.push(def);
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
       <Link href="/lab-qc" className="back-link">← Activities</Link>
@@ -669,9 +778,7 @@ export default function ProductQcPage() {
         )}
       </div>
 
-      {/* Step 3 (A-20): plain batch number input. No lookup requirement.
-          A silent background search links to an existing batch when found.
-          Never blocks — saves with batch_no even if no batches row exists.  */}
+      {/* Step 3 (A-20): single batch number — no per-product lot_batch_number shown */}
       {isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
@@ -699,18 +806,14 @@ export default function ProductQcPage() {
         </div>
       )}
 
-      {/* Step 3 (A-20/1): batch dropdown from hourly reading / batch analysis */}
+      {/* Step 3 (A-20/1): batch dropdown */}
       {!isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
           <label>Batch Number *</label>
-          {loadingBatches ? (
-            <div className="field-hint">Loading batches…</div>
-          ) : batches.length === 0 ? (
+          {batches.length === 0 ? (
             <div className="field-hint" style={{ color: "var(--warn)" }}>
               No batches for {selectedProduct?.name ?? "this product"} at {activeFactory?.name}.
-              <br />
-              <span style={{ fontSize: 12 }}>Create a batch via Hourly Reading or Batch Analysis first.</span>
             </div>
           ) : (
             <select value={batchId} onChange={e => setBatchId(e.target.value)}>
@@ -728,10 +831,7 @@ export default function ProductQcPage() {
           {checkingExisting && <div className="field-hint">Checking for existing record…</div>}
 
           {batchId && !checkingExisting && existingRecord && (
-            <div
-              className="readonly-block"
-              style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 10 }}
-            >
+            <div className="readonly-block" style={{ background: "var(--ok-soft)", color: "var(--ok)", marginTop: 10 }}>
               ✓ A QC record already exists for this batch / phase
               (submitted {new Date(existingRecord.submitted_at).toLocaleDateString("en-IN")}).
               Saving will update it.
@@ -743,25 +843,30 @@ export default function ProductQcPage() {
       {/* Step 4: form */}
       {productId && (isA20 ? directBatchNumber.trim() !== "" : (batchId && !checkingExisting)) && (
         <>
+          {/* A1 + A2: Test Date, Mfg Date, Analysed By in one card */}
           <div className="card">
             <h3>Test Details</h3>
             <div className="row2">
               <div>
-                <label>Test Date *</label>
-                <DateField
-                  value={testDate}
-                  onChange={setTestDate}
-                />
+                <label>Manufacturing Date *</label>
+                <DateField value={mfgDate} onChange={setMfgDate} />
               </div>
               <div>
-                <label>Chemist Name {!existingRecord && "*"}</label>
-                <input
-                  type="text"
-                  placeholder="Name"
-                  value={chemistName}
-                  onChange={e => setChemistName(e.target.value)}
-                />
+                <label>Testing Date *</label>
+                <DateField value={testDate} onChange={setTestDate} />
               </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label>Analysed By</label>
+              <select
+                value={analysisBy}
+                onChange={e => setAnalysisBy(e.target.value)}
+              >
+                <option value="">— Select chemist —</option>
+                {ANALYSIS_BY_OPTIONS.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -783,29 +888,92 @@ export default function ProductQcPage() {
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Green fields are auto-calculated. Enter input values and they update automatically.
               </div>
-              {testDefs.map(def => (
-                <QcFieldRenderer
-                  key={def.id}
-                  def={def}
-                  value={values[def.test_key] ?? ""}
-                  onChange={handleChange}
-                  allValues={values}
-                  manualOverrideKeys={MANUAL_OVERRIDE_KEYS}
-                  specBadge={sieveWarnings[def.test_key] ? (
-                    <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>
-                      ⚠ {sieveWarnings[def.test_key]}
+
+              {/* A5: Render fields grouped by section_label */}
+              {fieldSections.map((section, si) => (
+                <div key={si}>
+                  {section.label && (
+                    <div style={{
+                      margin: "20px 0 10px",
+                      padding: "7px 12px",
+                      background: "var(--bg-soft)",
+                      borderLeft: "4px solid var(--accent)",
+                      borderRadius: "0 6px 6px 0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {section.label}
+                      </span>
                     </div>
-                  ) : undefined}
-                  photoUploadProps={(user && activeFactory) ? {
-                    factoryCode:  activeFactory.code,
-                    factoryId:    activeFactory.id,
-                    entityType:   "product_qc",
-                    entityId:     existingRecord?.id ?? null,
-                    userId:       user.id,
-                    onUploaded:   (key, path) => handleChange(key, path),
-                    uploaderRefs,
-                  } : undefined}
-                />
+                  )}
+                  {section.defs.map(def => {
+                    // Build combined warning badge (sieve + burette)
+                    const sieveWarn = sieveWarnings[def.test_key];
+                    const buretteWarn = buretteWarnings[def.test_key];
+
+                    // 111% guard: suspensibility >100 warning
+                    const isSusp = SUSPENSIBILITY_KEYS.has(def.test_key);
+                    const suspResult = isSusp ? parseFloat(values[def.test_key] ?? "") : NaN;
+                    const suspWarn = isSusp && !isNaN(suspResult) && suspResult > 100
+                      ? `Result ${suspResult.toFixed(2)}% > 100 — check readings`
+                      : undefined;
+
+                    // needs_review indicator for interim/unconfirmed formulas
+                    const reviewBadge = def.needs_review ? (
+                      <div style={{ fontSize: 11, color: "var(--warn)", fontStyle: "italic" }}>
+                        ⚠ Formula not yet confirmed — verify result with lab before approving
+                      </div>
+                    ) : undefined;
+
+                    // A10: spec pass/fail badge (merged with other warnings)
+                    const specBadgeEl = buildSpecBadge(def.test_key);
+
+                    const warnBadge = (sieveWarn || buretteWarn || suspWarn || reviewBadge || specBadgeEl) ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {specBadgeEl}
+                        {sieveWarn && (
+                          <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>
+                            ⚠ {sieveWarn}
+                          </div>
+                        )}
+                        {buretteWarn && (
+                          <div style={{ fontSize: 12, color: "var(--error)", fontWeight: 600 }}>
+                            ✗ {buretteWarn}
+                          </div>
+                        )}
+                        {suspWarn && (
+                          <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600 }}>
+                            ⚠ {suspWarn}
+                          </div>
+                        )}
+                        {reviewBadge}
+                      </div>
+                    ) : undefined;
+
+                    return (
+                      <QcFieldRenderer
+                        key={def.id}
+                        def={def}
+                        value={values[def.test_key] ?? ""}
+                        onChange={handleChange}
+                        allValues={values}
+                        manualOverrideKeys={MANUAL_OVERRIDE_KEYS}
+                        specBadge={warnBadge}
+                        photoUploadProps={(user && activeFactory) ? {
+                          factoryCode:  activeFactory.code,
+                          factoryId:    activeFactory.id,
+                          entityType:   "product_qc",
+                          entityId:     existingRecord?.id ?? null,
+                          userId:       user.id,
+                          onUploaded:   (k, path) => handleChange(k, path),
+                          uploaderRefs,
+                        } : undefined}
+                      />
+                    );
+                  })}
+                </div>
               ))}
             </div>
           )}
@@ -819,6 +987,45 @@ export default function ProductQcPage() {
               rows={3}
             />
           </div>
+
+          {/* A10: Overall pass/fail summary */}
+          {(() => {
+            const evaluated = specs
+              .map(s => ({ key: s.test_key, st: statusFor(s.test_key, values[s.test_key] ?? "") }))
+              .filter(r => r.st !== "none");
+            if (evaluated.length === 0) return null;
+            const fails = evaluated.filter(r => r.st === "fail");
+            const passes = evaluated.filter(r => r.st === "pass");
+            const overallOk = fails.length === 0;
+            return (
+              <div style={{
+                padding: "10px 14px",
+                borderRadius: 6,
+                border: `1px solid ${overallOk ? "var(--ok)" : "#c0392b"}`,
+                background: overallOk ? "var(--ok-soft)" : "#fdf2f2",
+                marginBottom: 8,
+                fontSize: 13,
+              }}>
+                <strong style={{ color: overallOk ? "var(--ok)" : "#c0392b" }}>
+                  {overallOk ? `✓ All ${passes.length} checked parameters pass spec` : `✗ ${fails.length} parameter${fails.length > 1 ? "s" : ""} out of spec`}
+                </strong>
+                {!overallOk && (
+                  <div style={{ marginTop: 4, color: "#c0392b" }}>
+                    {fails.map(f => {
+                      const spec = specFor(f.key);
+                      return (
+                        <div key={f.key} style={{ fontSize: 12 }}>
+                          · {spec?.parameter_label ?? f.key}: {values[f.key] ?? "—"}
+                          {spec?.unit ? ` ${spec.unit}` : ""}
+                          {" "}(spec: {spec ? specLimitText(spec) : "—"})
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <p className="field-hint" style={{ marginBottom: 8 }}>
             Factory: <strong>{activeFactory?.name ?? "—"}</strong> ·{" "}
