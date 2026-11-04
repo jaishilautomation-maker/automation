@@ -210,18 +210,22 @@ function resolveSlot(
   // how row 1 switches between CS2-purity and toluene-insolubility).
   let field: string | null = slot.qcSourceField;
   let slotDecimals = slot.decimals;
+  let slotMethod = slot.method;
   let spec = field ? specByField.get(field) : undefined;
   if (!spec) {
     for (const alt of slot.altSourceFields ?? []) {
       const altSpec = specByField.get(alt.field);
-      if (altSpec) { spec = altSpec; field = alt.field; slotDecimals = alt.decimals; break; }
+      if (altSpec) { spec = altSpec; field = alt.field; slotDecimals = alt.decimals; slotMethod = alt.method; break; }
     }
   }
 
   const label  = spec?.parameter_label ?? slot.defaultLabel;
   const min    = spec?.min_value ?? null;
   const max    = spec?.max_value ?? null;
-  const method = spec?.test_method ?? null;
+  // Method is fixed per parameter (catalog) - never taken from the party spec
+  // row or typed by hand. A parameter with no standard method prints blank,
+  // exactly like the issued certificates (melting point, sp. gravity, ...).
+  const method = slotMethod ?? null;
   const remarks = spec?.remarks ?? null;
   const hasSpec = !!spec;
   const needsVerification = spec?.needs_verification ?? false;

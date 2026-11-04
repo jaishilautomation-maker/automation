@@ -67,7 +67,7 @@ export interface GenerateCoaInput {
    * limits always come from the QC record and the party spec, so an issued COA
    * can never disagree with the data.
    */
-  rowOverrides?: Array<{ label?: string; method?: string; remarks?: string } | null>;
+  rowOverrides?: Array<{ label?: string; remarks?: string } | null>;
 }
 
 const MAX_OVERRIDE_LEN = 200;
@@ -168,10 +168,9 @@ function buildSnapshot(
   (input.rowOverrides ?? []).forEach((o, i) => {
     if (!o || !rows[i]) return;
     const label = clean(o.label);
-    const method = clean(o.method);
+    // Method is deliberately NOT overridable: it is standard per parameter.
     const remarks = clean(o.remarks);
     if (label) rows[i].label = label;
-    if (method !== undefined) rows[i].method = method || null;
     if (remarks !== undefined) rows[i].remarks = remarks || null;
   });
 

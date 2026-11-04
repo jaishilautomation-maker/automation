@@ -54,7 +54,8 @@ interface CoaListRow {
   email_status: string | null;
 }
 
-interface RowEdit { label?: string; method?: string; remarks?: string }
+// Test Method is fixed per parameter (lib/coa/catalog.ts), so only label + remarks are editable.
+interface RowEdit { label?: string; remarks?: string }
 
 interface PreviewResult {
   ok: boolean;
@@ -280,7 +281,6 @@ export default function GenerateCoaPage() {
       if (!e) return null;
       const o: RowEdit = {};
       if (e.label !== undefined && e.label !== r.label) o.label = e.label;
-      if (e.method !== undefined && e.method !== (r.method ?? "")) o.method = e.method;
       if (e.remarks !== undefined && e.remarks !== (r.remarks ?? "")) o.remarks = e.remarks;
       return Object.keys(o).length ? o : null;
     });
@@ -657,10 +657,8 @@ export default function GenerateCoaPage() {
                       ))}
                       <td style={td}>{r.hasSpec && r.min != null ? Number(r.min) : "-"}</td>
                       <td style={td}>{r.hasSpec && r.max != null ? Number(r.max) : "-"}</td>
-                      <td style={td}>
-                        <input type="text" style={cellInput} value={e.method ?? (r.method ?? "")}
-                          onChange={(ev) => setEdit({ method: ev.target.value })} />
-                      </td>
+                      {/* Test method is standardised per parameter (not editable) */}
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{r.method || "-"}</td>
                       <td style={td}>
                         <input type="text" style={cellInput} value={e.remarks ?? (r.remarks ?? "")}
                           onChange={(ev) => setEdit({ remarks: ev.target.value })} />
@@ -675,7 +673,7 @@ export default function GenerateCoaPage() {
 
         {preview && preview.rows.length > 0 && (
           <div className="field-hint" style={{ marginTop: 8 }}>
-            Parameter names, Test Method and Remarks above are editable. Actual values and spec limits
+            Parameter names and Remarks above are editable. Test Method is standard for each parameter. Actual values and spec limits
             come from the QC record and the party spec and cannot be changed here.
           </div>
         )}

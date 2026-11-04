@@ -49,8 +49,20 @@ export interface CoaCatalogRow {
    * chosen by which one the party's spec rows cover. First match wins; the
    * default field wins if the party specs it.
    */
-  altSourceFields?: Array<{ field: string; decimals?: number }>;
+  altSourceFields?: Array<{ field: string; decimals?: number; method?: string }>;
+  /**
+   * Standard TEST METHOD printed for this parameter on every COA. Fixed per
+   * parameter (taken from the issued JSCI/QC/17 certificates) - not entered by
+   * hand and not taken from the party spec. Omitted = the certificates leave
+   * the Method cell blank for this parameter.
+   */
+  method?: string;
 }
+
+// Standard methods exactly as printed on the certificates (en dash as in the doc).
+export const METHOD_IS_6655  = "IS \u2013 6655";
+export const METHOD_IS_7086  = "IS \u2013 7086";
+export const METHOD_OIL      = "GTIC F \u2013 2405";
 
 /**
  * Spec parameters that are the SAME measurement under another name.
@@ -80,18 +92,19 @@ export const COA_CATALOG: CoaCatalogRow[] = [
   { sr: 1,  defaultLabel: "% Purity solubility in CS2",        qcSourceField: "purity_percent", decimals: 2,
     // Sr 1 is "Insoluble in Toluene" for parties that spec that instead of CS2
     // purity (Apollo, Birla/Dalmia ...). The party's spec decides which field prints.
-    altSourceFields: [{ field: "insolubility_toluene", decimals: 3 }] },
-  { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4 },
-  { sr: 3,  defaultLabel: "% Ash content",                     qcSourceField: "ash_percent", decimals: 3 },
+    method: METHOD_IS_6655,
+    altSourceFields: [{ field: "insolubility_toluene", decimals: 3, method: METHOD_IS_6655 }] },
+  { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4, method: METHOD_IS_6655 },
+  { sr: 3,  defaultLabel: "% Ash content",                     qcSourceField: "ash_percent", decimals: 3, method: METHOD_IS_6655 },
   // Sr 4 — Mesh size (three sub-rows). Defaults = MRF variant.
-  { sr: 4, sub: "a", defaultLabel: "% passing on wet sieve (150µ) 100 mesh", qcSourceField: "mesh100_pct" },
-  { sr: 4, sub: "b", defaultLabel: "% passing on wet sieve (75µ) 200 mesh",  qcSourceField: "mesh200_pct", decimals: 2 },
-  { sr: 4, sub: "c", defaultLabel: "% passing on wet sieve (45µ) 325 mesh",  qcSourceField: "mesh325_pct", decimals: 2 },
-  { sr: 5,  defaultLabel: "% Oil content",                     qcSourceField: "oil_percent", decimals: 2 },
+  { sr: 4, sub: "a", defaultLabel: "% passing on wet sieve (150µ) 100 mesh", qcSourceField: "mesh100_pct", method: METHOD_IS_7086 },
+  { sr: 4, sub: "b", defaultLabel: "% passing on wet sieve (75µ) 200 mesh",  qcSourceField: "mesh200_pct", decimals: 2, method: METHOD_IS_7086 },
+  { sr: 4, sub: "c", defaultLabel: "% passing on wet sieve (45µ) 325 mesh",  qcSourceField: "mesh325_pct", decimals: 2, method: METHOD_IS_7086 },
+  { sr: 5,  defaultLabel: "% Oil content",                     qcSourceField: "oil_percent", decimals: 2, method: METHOD_OIL },
   { sr: 6,  defaultLabel: "Melting Point °C",                  qcSourceField: "melting_point", decimals: 1 },
   { sr: 7,  defaultLabel: "Sp. Gravity @25°C",                 qcSourceField: "sg_value", decimals: 3 },
-  { sr: 8,  defaultLabel: "% Heat of loss at 70°C 2 hrs.",     qcSourceField: "heat_loss_percent", decimals: 3 },
-  { sr: 9,  defaultLabel: "% Alkalinity (as NaOH)",            qcSourceField: "alkalinity_naoh" },
+  { sr: 8,  defaultLabel: "% Heat of loss at 70°C 2 hrs.",     qcSourceField: "heat_loss_percent", decimals: 3, method: METHOD_IS_6655 },
+  { sr: 9,  defaultLabel: "% Alkalinity (as NaOH)",            qcSourceField: "alkalinity_naoh", method: METHOD_IS_6655 },
   { sr: 10, defaultLabel: "% Total Sulphur Content",           qcSourceField: "total_sulphur_percent" },
   { sr: 11, defaultLabel: "% Acetone Solubility",              qcSourceField: "acetone_solubility" },
   { sr: 12, defaultLabel: "Softening Point °C",                qcSourceField: "softening_point" },
