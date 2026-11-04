@@ -1,11 +1,11 @@
 // =============================================================================
-// COA parameter catalog â€” the fixed JSCI/QC/17 certificate layout.
+// COA parameter catalog — the fixed JSCI/QC/17 certificate layout.
 //
 // The paper "TEST REPORT OF SULPHUR POWDER" (doc JSCI/QC/17) always prints the
 // SAME 12 Sr. No. rows in the SAME order, regardless of customer (see the two
 // real samples: MRF #395 and Dalmia #400). What varies per customer is:
 //   - the row LABEL (row 1 is "Solubility in CS2" for MRF but "Insolubility in
-//     Toluene" for Dalmia; mesh sub-rows swap 150Âµ/100 for 88Âµ/170, etc.),
+//     Toluene" for Dalmia; mesh sub-rows swap 150µ/100 for 88µ/170, etc.),
 //   - which rows have a spec (min/max) and an actual value,
 //   - the test method + remarks text.
 //
@@ -18,7 +18,7 @@
 // qcSourceField is the key read from batch_analysis.test_results. A party spec
 // row's `parameter` OVERRIDES this (that is how row 1 becomes CS2-purity for one
 // customer and toluene-insolubility for another). Slots whose default source is
-// null (e.g. the 170-mesh sub-row) have NO batch_analysis key at all â€” if a
+// null (e.g. the 170-mesh sub-row) have NO batch_analysis key at all — if a
 // party specs them, the resolver reports a GAP rather than printing a blank.
 // =============================================================================
 
@@ -34,7 +34,7 @@ export interface CoaCatalogRow {
   /**
    * batch_analysis.test_results key this slot reads by default. A matching party
    * spec row's `parameter` wins. NULL = the slot has no QC source field at all;
-   * if a party specs it, that is a reportable gap (e.g. 88Âµ/170 mesh).
+   * if a party specs it, that is a reportable gap (e.g. 88µ/170 mesh).
    */
   qcSourceField: string | null;
   /**
@@ -55,18 +55,18 @@ export const COA_CATALOG: CoaCatalogRow[] = [
   { sr: 1,  defaultLabel: "% Purity solubility in CS2",        qcSourceField: "purity_percent", decimals: 2 },
   { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4 },
   { sr: 3,  defaultLabel: "% Ash content",                     qcSourceField: "ash_percent", decimals: 3 },
-  // Sr 4 â€” Mesh size (three sub-rows). Defaults = MRF variant.
-  { sr: 4, sub: "a", defaultLabel: "% passing on wet sieve (150Âµ) 100 mesh", qcSourceField: "mesh100_pct" },
-  { sr: 4, sub: "b", defaultLabel: "% passing on wet sieve (75Âµ) 200 mesh",  qcSourceField: "mesh200_pct", decimals: 2 },
-  { sr: 4, sub: "c", defaultLabel: "% passing on wet sieve (45Âµ) 325 mesh",  qcSourceField: "mesh325_pct", decimals: 2 },
+  // Sr 4 — Mesh size (three sub-rows). Defaults = MRF variant.
+  { sr: 4, sub: "a", defaultLabel: "% passing on wet sieve (150µ) 100 mesh", qcSourceField: "mesh100_pct" },
+  { sr: 4, sub: "b", defaultLabel: "% passing on wet sieve (75µ) 200 mesh",  qcSourceField: "mesh200_pct", decimals: 2 },
+  { sr: 4, sub: "c", defaultLabel: "% passing on wet sieve (45µ) 325 mesh",  qcSourceField: "mesh325_pct", decimals: 2 },
   { sr: 5,  defaultLabel: "% Oil content",                     qcSourceField: "oil_percent", decimals: 2 },
-  { sr: 6,  defaultLabel: "Melting Point Â°C",                  qcSourceField: "melting_point", decimals: 1 },
-  { sr: 7,  defaultLabel: "Sp. Gravity @25Â°C",                 qcSourceField: "sg_value", decimals: 3 },
-  { sr: 8,  defaultLabel: "% Heat of loss at 70Â°C 2 hrs.",     qcSourceField: "heat_loss_percent", decimals: 3 },
+  { sr: 6,  defaultLabel: "Melting Point °C",                  qcSourceField: "melting_point", decimals: 1 },
+  { sr: 7,  defaultLabel: "Sp. Gravity @25°C",                 qcSourceField: "sg_value", decimals: 3 },
+  { sr: 8,  defaultLabel: "% Heat of loss at 70°C 2 hrs.",     qcSourceField: "heat_loss_percent", decimals: 3 },
   { sr: 9,  defaultLabel: "% Alkalinity (as NaOH)",            qcSourceField: "alkalinity_naoh" },
   { sr: 10, defaultLabel: "% Total Sulphur Content",           qcSourceField: "total_sulphur_percent" },
   { sr: 11, defaultLabel: "% Acetone Solubility",              qcSourceField: "acetone_solubility" },
-  { sr: 12, defaultLabel: "Softening Point Â°C",                qcSourceField: "softening_point" },
+  { sr: 12, defaultLabel: "Softening Point °C",                qcSourceField: "softening_point" },
 ];
 
 /**
@@ -75,7 +75,7 @@ export const COA_CATALOG: CoaCatalogRow[] = [
  * reports it as a gap (do NOT silently print "-" for a customer-required row).
  *
  * Confirmed from migrations 001 (phase B seed) + 040. Notably absent: any
- * 88Âµ/170-mesh key â€” Dalmia's 170-mesh row therefore has no QC source and is a
+ * 88µ/170-mesh key — Dalmia's 170-mesh row therefore has no QC source and is a
  * reportable gap until added to the Final Inspection form.
  */
 export const BATCH_ANALYSIS_KEYS: ReadonlySet<string> = new Set([
@@ -110,13 +110,13 @@ export const BATCH_HEADER_KEYS = {
 /**
  * Max batches on one COA. Real MRF certificates (e.g. #467 Kottayam) carry 5
  * batches, so 5 is the hard cap. Beyond 3 the per-batch Actual columns get
- * narrow; the PDF shrinks the actual-column font for 4â€“5 batches.
+ * narrow; the PDF shrinks the actual-column font for 4–5 batches.
  */
 export const MAX_BATCHES_PER_COA = 5;
-/** Soft warning threshold â€” most COAs are <= 3 batches. */
+/** Soft warning threshold — most COAs are <= 3 batches. */
 export const BATCH_WARN_THRESHOLD = 3;
 
-// â”€â”€â”€ Company letterhead (verbatim from the current JSCI/QC/17 form) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Company letterhead (verbatim from the current JSCI/QC/17 form) ─────────
 export const COA_LETTERHEAD = {
   companyName: "JAISHIL SULPHUR & CHEMICAL INDUSTRIES",
   tagline:     "MANUFACTURER'S OF SULPHUR POWDER:",
@@ -125,7 +125,7 @@ export const COA_LETTERHEAD = {
     "Bhandup-Goregaon Link Rd., Near Fortis Hospital,",
     "Bhandup, Mumbai-400078.",
     "Phone: 61407900  FAX: 61407979",
-    "E-Mail: support@jaishilsulphur.com",
+    "E-Mail: jaishil@vsnl.net / jaishila20@gmail.com",
   ],
   factory: [
     "Factory: Plot No. A/20/1, Phase 1, M.I.D.C.,",
@@ -133,5 +133,5 @@ export const COA_LETTERHEAD = {
     "Phone: 2471391/6454979",
   ],
   title:  "TEST REPORT OF SULPHUR POWDER",
-  footer: "DOC NO. JSCI/QC/17 Â· REV-00 Â· DATE 01/01/2024",
+  footer: "DOC NO. JSCI/QC/17 · REV-00 · DATE 01/01/2024",
 } as const;

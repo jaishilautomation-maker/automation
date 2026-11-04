@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 // =============================================================================
 // Generate COA (JSCI/QC/17) — Lab (chemist) only, Factory A-20/1.
@@ -405,12 +405,22 @@ export default function GenerateCoaPage() {
     URL.revokeObjectURL(url);
   };
 
-  const resetForm = useCallback(() => {
+  // keepParty = true: start the next COA for the same customer / ship-to
+  // (typical for repeat dispatches) - only the per-dispatch fields are cleared.
+  const resetForm = useCallback((keepParty = false) => {
     setDocValue(""); setVehicleNo(""); setBatchInput(""); setBatches([]); setQuantityMt("");
-    setPartyCode(""); setShipToSel(""); setShipToManual(""); setPreview(null); setDupInvoice(false);
+    if (!keepParty) { setPartyCode(""); setShipToSel(""); setShipToManual(""); }
+    setPreview(null); setDupInvoice(false);
     setCodeNumber(""); setCodeTouched(false); setReportNoInput(""); setRowEdits({}); setDraftUrl(null);
     audit.reset();
   }, [audit]);
+
+  const startNewCoa = (keepParty: boolean) => {
+    setSuccess(null);
+    setSubmitting(false);
+    resetForm(keepParty);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // ── render guards ─────────────────────────────────────────────────────────
   if (authLoading || moduleLoading || !activeFactory) {
@@ -439,9 +449,16 @@ export default function GenerateCoaPage() {
             </div>
           )}
 
-          <div style={{ marginTop: 20, display: "flex", gap: 12, justifyContent: "center" }}>
-            <button className="btn btn-primary" onClick={handleDownload}>Download PDF</button>
-            <button className="btn" onClick={() => { setSuccess(null); setSubmitting(false); resetForm(); }}>New COA</button>
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+            {/* C3: the next-COA action is the primary one */}
+            <button className="btn btn-primary" style={{ minWidth: 260, padding: "12px 20px", fontSize: 15 }}
+              onClick={() => startNewCoa(false)}>
+              ＋ New COA
+            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+              <button className="btn" onClick={handleDownload}>Download PDF</button>
+              <button className="btn" onClick={() => startNewCoa(true)}>New COA · same customer</button>
+            </div>
           </div>
         </div>
       </div>
@@ -453,9 +470,16 @@ export default function GenerateCoaPage() {
   // ── main form ─────────────────────────────────────────────────────────────
   return (
     <div className="module-wrap">
-      <div className="module-header">
-        <div className="title">📄 Generate COA</div>
-        <div className="sub">{activeFactory.name} · Certificate of Analysis (JSCI/QC/17)</div>
+      <div className="module-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div className="title">📄 Generate COA</div>
+          <div className="sub">{activeFactory.name} · Certificate of Analysis (JSCI/QC/17)</div>
+        </div>
+        {(batches.length > 0 || docValue || partyCode) && (
+          <button className="btn" type="button" onClick={() => startNewCoa(false)} title="Clear this form and start a fresh COA">
+            ＋ New COA (clear form)
+          </button>
+        )}
       </div>
 
       <div className="module-card" style={{ maxWidth: 980, margin: "0 auto" }}>

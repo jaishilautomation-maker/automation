@@ -366,6 +366,9 @@ export interface ProductQc {
   analysed_by: string | null;   // Selected chemist name (A2; login user stays chemist_id)
   appearance: string | null;
   appearance_ok: boolean | null;
+  /** A11: 'approved' | 'rejected' (required for Sulphur SC, Zinc SC, Liquid Boron, Liquid Calcium) */
+  approval_decision: string | null;
+  approval_reason: string | null;
   test_results: Record<string, unknown>;
   overall_result: string | null; // 'pass' | 'fail' | null (set by DB trigger)
   remarks: string | null;

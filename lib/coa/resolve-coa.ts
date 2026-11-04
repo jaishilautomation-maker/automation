@@ -1,5 +1,5 @@
 // =============================================================================
-// COA resolver â€” turn (batch numbers + party) into fully-resolved rows.
+// COA resolver — turn (batch numbers + party) into fully-resolved rows.
 //
 // Shared by BOTH the live preview (client) and the submit path (server), so the
 // previewed table and the saved snapshot are guaranteed identical. Pure
@@ -69,7 +69,7 @@ export interface ResolvedRow {
   max:       number | null;
   method:    string | null;
   remarks:   string | null;
-  /** One entry per batch (per-batch columns â€” the confirmed layout). */
+  /** One entry per batch (per-batch columns — the confirmed layout). */
   actuals:   ResolvedActual[];
   /** Average across batches that have a value, at source precision. "-" if none. */
   average:   string;
@@ -106,7 +106,7 @@ export interface ResolveResult {
   expiryDate: string | null;
 }
 
-// â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── helpers ────────────────────────────────────────────────────────────────
 
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -139,7 +139,7 @@ function averageAtSourcePrecision(raws: unknown[]): string {
   return (sum / present.length).toFixed(maxDp);
 }
 
-// â”€â”€â”€ main resolver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── main resolver ────────────────────────────────────────────────────────────
 
 /**
  * @param batches  resolved batches, in the order the user added them

@@ -326,6 +326,9 @@ export interface ProductQcEmailArgs {
   appearanceOk?:  boolean | null;
   testResults:    Record<string, unknown> | null | undefined;
   remarks:        string | null | undefined;
+  /** A11: 'approved' | 'rejected' (null for products without a decision gate) */
+  approvalDecision?: string | null;
+  approvalReason?:   string | null;
   submittedByName: string;
   submittedAt:    string;
   isUpdate:       boolean;
@@ -351,6 +354,10 @@ export function buildProductQcEmail(d: ProductQcEmailArgs): { subject: string; h
       ["Test Date",        fmtDate(d.testDate)],
       ["Appearance",       d.appearance     || "—"],
       ["Appearance OK",    appearanceStatus],
+      ...(d.approvalDecision ? [
+        ["Product Decision", d.approvalDecision === "approved" ? "APPROVED ✅" : "REJECTED ❌"] as [string, string],
+        ["Decision Reason",  d.approvalReason || "—"] as [string, string],
+      ] : []),
       ["Remarks",          d.remarks        || "—"],
       ["Saved By",         d.submittedByName],
       ["Saved At",         fmtTs(d.submittedAt)],

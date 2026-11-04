@@ -70,6 +70,11 @@ interface SpecRow {
 // Products that have Phase A + B
 const PHASE_AWARE_CODES = ["SULPHUR_SC", "ZINC_SC"];
 
+// A11: products that need an explicit Approved / Rejected decision before save.
+// It also covers the non-spec checks (suspensibility, caking, hard sediment).
+const DECISION_PRODUCT_CODES = ["SULPHUR_SC", "ZINC_SC", "LIQUID_BORON", "LIQUID_CALCIUM"];
+type Decision = "" | "approved" | "rejected";
+
 // Calculated fields that support "Enter manually" toggle
 const MANUAL_OVERRIDE_KEYS = new Set(["calcium_content", "boron_content"]);
 
@@ -106,6 +111,8 @@ export default function ProductQcPage() {
     mfgDate: string;
     analysisBy: string;
     remarks: string;
+    decision?: Decision;
+    decisionReason?: string;
   }
   const draft = useFormDraft<DraftShape>(
     draftKey(pathname, activeFactory?.id, user?.id),
@@ -148,6 +155,9 @@ export default function ProductQcPage() {
   const [mfgDate, setMfgDate]           = useState(d0?.mfgDate   ?? new Date().toISOString().slice(0, 10));
   const [analysisBy, setAnalysisBy]     = useState(d0?.analysisBy ?? "");
   const [remarks, setRemarks]           = useState(d0?.remarks ?? "");
+  // A11: Product Approved / Rejected (required for DECISION_PRODUCT_CODES)
+  const [decision, setDecision]             = useState<Decision>(d0?.decision ?? "");
+  const [decisionReason, setDecisionReason] = useState(d0?.decisionReason ?? "");
   const [submitting, setSubmitting]     = useState(false);
   const uploaderRefs = useRef<Record<string, PhotoUploaderHandle | null>>({});
 
@@ -163,10 +173,10 @@ export default function ProductQcPage() {
   useEffect(() => {
     draftSave({
       productId, phase, batchId, directBatchNumber, directLotNumber,
-      values, testDate, mfgDate, analysisBy, remarks,
+      values, testDate, mfgDate, analysisBy, remarks, decision, decisionReason,
     });
   }, [productId, phase, batchId, directBatchNumber, directLotNumber,
-      values, testDate, mfgDate, analysisBy, remarks, draftSave]);
+      values, testDate, mfgDate, analysisBy, remarks, decision, decisionReason, draftSave]);
 
   const selectedProduct = products.find(p => p.id === productId);
   const isPhaseAware    = PHASE_AWARE_CODES.includes(selectedProduct?.code ?? "");
@@ -198,6 +208,8 @@ export default function ProductQcPage() {
     setExistingRecord(null);
     setValues({});
     setRemarks("");
+    setDecision("");
+    setDecisionReason("");
     setSieveWarnings({});
     setBuretteWarnings({});
   }, [productId, isPhaseAware]);
@@ -330,6 +342,8 @@ export default function ProductQcPage() {
             (rec.test_results?.[ANALYSIS_BY_KEY] as string | undefined) ?? rec.analysed_by ?? ""
           );
           setRemarks(rec.remarks ?? "");
+          setDecision((rec.approval_decision as Decision | null) ?? "");
+          setDecisionReason(rec.approval_reason ?? "");
           const prefill: Record<string, string> = {};
           const tr = (rec.test_results ?? {}) as Record<string, unknown>;
           testDefs.forEach(d => {
@@ -443,6 +457,22 @@ export default function ProductQcPage() {
     if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
     if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
 
+    // A11: decision gate. Required decision; Rejected -> reason required;
+    // Approved while any parameter is red (out of spec) -> reason required too.
+    const needsDecision = DECISION_PRODUCT_CODES.includes(selectedProduct?.code ?? "");
+    const redParams = specs.filter(s => statusFor(s.test_key, values[s.test_key] ?? "") === "fail");
+    const reasonText = decisionReason.trim();
+    if (needsDecision) {
+      if (!decision) { showToast("Select Product Approved or Rejected before submitting.", true); return; }
+      if (decision === "rejected" && !reasonText) { showToast("Rejected: enter the reason in the decision remark.", true); return; }
+      if (decision === "approved" && redParams.length > 0 && !reasonText) {
+        showToast(`Approved with out-of-spec parameter(s) (${redParams.map(r => r.parameter_label).join(", ")}): a remark is required.`, true);
+        return;
+      }
+    }
+    const approvalDecision = needsDecision ? decision : "";
+    const approvalReason   = needsDecision ? reasonText : "";
+
     setSubmitting(true);
     try {
       const effectiveBatchId = batchId || null;
@@ -507,6 +537,8 @@ export default function ProductQcPage() {
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
+            approval_decision: approvalDecision || null,
+            approval_reason:   approvalReason || null,
             updated_by:    user.id,
           })
           .eq("id", existingRecord.id);
@@ -525,7 +557,7 @@ export default function ProductQcPage() {
           overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
           testDate,
           testResults,
-          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
         });
 
         if (isA20) void notifyReport({ source: "product_qc", recordId: existingRecord.id });
@@ -540,6 +572,8 @@ export default function ProductQcPage() {
           appearanceOk,
           testResults:     testResults as Record<string, unknown>,
           remarks:         remarks.trim() || null,
+          approvalDecision: approvalDecision || null,
+          approvalReason:   approvalReason || null,
           submittedByName: profile?.full_name ?? "—",
           submittedAt:     pqcUpdISO,
           isUpdate:        true,
@@ -557,11 +591,13 @@ export default function ProductQcPage() {
             values: [
               existingRecord.id, selectedProduct?.name ?? null,
               batches.find(b => b.id === existingRecord.batch_id)?.batch_number ?? null,
-              phase, testDate, mfgDate || null, analysisBy || null,
+              phase, testDate,
               values["colour_physical_state"] ?? null, appearanceOk,
               "pending", JSON.stringify(testResults),
               remarks.trim() || null, profile?.full_name ?? null,
               pqcUpdISO, true, activeFactory.id,
+              // New columns are APPENDED so the existing Sheet columns keep their positions.
+              mfgDate || null, analysisBy || null, approvalDecision || null, approvalReason || null,
             ],
           },
         });
@@ -585,6 +621,8 @@ export default function ProductQcPage() {
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
+            approval_decision: approvalDecision || null,
+            approval_reason:   approvalReason || null,
           })
           .select("id")
           .single();
@@ -603,7 +641,7 @@ export default function ProductQcPage() {
           overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
           testDate,
           testResults,
-          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null },
+          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
         });
 
         if (isA20) void notifyReport({ source: "product_qc", recordId: newRow.id });
@@ -621,6 +659,8 @@ export default function ProductQcPage() {
           appearanceOk,
           testResults:     testResults as Record<string, unknown>,
           remarks:         remarks.trim() || null,
+          approvalDecision: approvalDecision || null,
+          approvalReason:   approvalReason || null,
           submittedByName: profile?.full_name ?? "—",
           submittedAt:     pqcInsISO,
           isUpdate:        false,
@@ -637,11 +677,13 @@ export default function ProductQcPage() {
             tab: "Product QC",
             values: [
               newRow.id, selectedProduct?.name ?? null, batchNum,
-              phase, testDate, mfgDate || null, analysisBy || null,
+              phase, testDate,
               values["colour_physical_state"] ?? null, appearanceOk,
               "pending", JSON.stringify(testResults),
               remarks.trim() || null, profile?.full_name ?? null,
               pqcInsISO, false, activeFactory.id,
+              // New columns are APPENDED so the existing Sheet columns keep their positions.
+              mfgDate || null, analysisBy || null, approvalDecision || null, approvalReason || null,
             ],
           },
         });
@@ -658,6 +700,8 @@ export default function ProductQcPage() {
         setValues(prev => Object.fromEntries(Object.keys(prev).map(k => [k, ""])));
         setRemarks("");
         setAnalysisBy("");
+        setDecision("");
+        setDecisionReason("");
         draft.clear();
       }
     } catch {
@@ -1030,6 +1074,51 @@ export default function ProductQcPage() {
                     })}
                   </div>
                 )}
+              </div>
+            );
+          })()}
+
+          {/* A11: Product Approved / Rejected - required before Submit */}
+          {DECISION_PRODUCT_CODES.includes(selectedProduct?.code ?? "") && (() => {
+            const red = specs.filter(s => statusFor(s.test_key, values[s.test_key] ?? "") === "fail");
+            const reasonRequired = decision === "rejected" || (decision === "approved" && red.length > 0);
+            return (
+              <div className="card" style={{ borderLeft: `4px solid ${decision === "rejected" ? "#c0392b" : decision === "approved" ? "var(--ok)" : "var(--line)"}` }}>
+                <h3>Product Decision *</h3>
+                <div className="field-hint" style={{ marginBottom: 10 }}>
+                  Covers the checks that have no spec value here (suspensibility, caking, hard sediment, appearance).
+                </div>
+                <div className="chip-group" role="radiogroup" aria-label="Product approved or rejected">
+                  <div role="radio" aria-checked={decision === "approved"} tabIndex={0}
+                    className={`chip${decision === "approved" ? " selected" : ""}`}
+                    onClick={() => setDecision("approved")}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setDecision("approved"); }}>
+                    ✓ Product Approved
+                  </div>
+                  <div role="radio" aria-checked={decision === "rejected"} tabIndex={0}
+                    className={`chip${decision === "rejected" ? " selected" : ""}`}
+                    onClick={() => setDecision("rejected")}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setDecision("rejected"); }}>
+                    ✗ Product Rejected
+                  </div>
+                </div>
+
+                {decision === "approved" && red.length > 0 && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#c0392b", fontWeight: 600 }}>
+                    ⚠ {red.length} parameter{red.length > 1 ? "s are" : " is"} out of spec ({red.map(r => r.parameter_label).join(", ")}). A remark is required to approve.
+                  </div>
+                )}
+
+                <label style={{ marginTop: 12 }}>
+                  Decision remark / reason {reasonRequired ? "*" : "(optional)"}
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder={decision === "rejected" ? "Why is the product rejected?" : "Reason / remark…"}
+                  value={decisionReason}
+                  onChange={e => setDecisionReason(e.target.value)}
+                  aria-required={reasonRequired}
+                />
               </div>
             );
           })()}
