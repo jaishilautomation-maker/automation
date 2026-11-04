@@ -468,7 +468,9 @@ export default function RmQcPage() {
     setValues(prev => {
       const next = { ...prev, [key]: val };
       testDefs.filter(d => d.is_calculated && d.formula).forEach(d => {
-        const result = evalFormula(d.formula!, next, d.unit);
+        // Heat Loss is a small % (e.g. 0.074): keep 4 decimals like the A-20/1 form
+        // instead of the generic 2-decimal rounding applied to "%" results.
+        const result = evalFormula(d.formula!, next, d.test_key === "heat_loss_percent" ? null : d.unit);
         next[d.test_key] = result !== null ? String(result) : "";
       });
       return next;
