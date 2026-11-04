@@ -25,8 +25,6 @@ export type ReportFormType =
 /** Departmental mailboxes. Adjust addresses here as the org confirms them. */
 export const ROLE_EMAILS = {
   lab:        LAB_QC_EMAIL,                          // qcdombivli@jaishilsulphur.com
-  production: "production@jaishilsulphur.com",
-  stores:     "stores@jaishilsulphur.com",
   operator:   "operator@jaishilsulphur.com",
   factory:    FACTORY_EMAIL,                         // factory@jaishilsulphur.com
 } as const;
@@ -39,16 +37,15 @@ export type RoleKey = keyof typeof ROLE_EMAILS;
  */
 const FORM_TYPE_ROLES: Record<ReportFormType, RoleKey[]> = {
   // Raw-material incoming inspection — Stores raised the receipt, Lab tested it.
-  "incoming-inspection":       ["lab", "stores"],
+  "incoming-inspection":       ["lab", "factory"],
   // Final inspection of produced Sulphur Powder (A-20/1 batch analysis).
-  "final-inspection":          ["lab", "production", "stores"],
+  "final-inspection":          ["lab", "factory"],
   // In-process / finish-goods testing (partial, no party, or failed+rework).
-  // Same recipients as final inspection, per requirement.
-  "inprocess-inspection":      ["lab", "production", "stores"],
+  "inprocess-inspection":      ["lab", "factory"],
   // Final product inspection for A-20 SC/liquid products.
-  "product-final-inspection":  ["lab", "production", "stores"],
+  "product-final-inspection":  ["lab", "factory"],
   // Certificate of Analysis — Lab issues it, Stores dispatches against it.
-  "coa":                       ["lab", "stores"],
+  "coa":                       ["lab", "factory"],
   // Pulveriser job card (Lab QC OK) — automation@ + factory@ only.
   "job-card":                  ["factory"],
 };
