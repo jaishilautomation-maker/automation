@@ -57,7 +57,22 @@ export interface GenerateCoaInput {
   batchNumbers: string[];      // user order, 1..4
   createdBy:    string;        // auth user id
   checkedBy:    string;        // logged-in chemist's display name (printed "Checked By")
+  /** C7: "Code No." printed above the table. Blank/omitted = party's default. */
+  codeNumber?:  string;
+  /** C8: chemist-typed report number. Omitted = take the next sequence value. */
+  testReportNo?: number;
+  /**
+   * C9: text edits made in the review step, aligned by index to the resolved
+   * rows. ONLY label / method / remarks can change - actual values and spec
+   * limits always come from the QC record and the party spec, so an issued COA
+   * can never disagree with the data.
+   */
+  rowOverrides?: Array<{ label?: string; method?: string; remarks?: string } | null>;
 }
+
+const MAX_OVERRIDE_LEN = 200;
+const clean = (s: unknown): string | undefined =>
+  typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, MAX_OVERRIDE_LEN) : undefined;
 
 export type GenerateCoaResult =
   | { ok: true; id: string; testReportNo: number; emailStatus: "sent" | "failed"; emailError?: string; duplicateInvoice: boolean }
@@ -129,7 +144,11 @@ function buildSnapshot(
   testReportNo: number,
   customerName: string,
   resolved: ReturnType<typeof resolveCoa>,
+  codeNumber: string | null,
+  draft = false,
 ): CoaSnapshot {
+  // C11: print each actual at the decimals pinned for that parameter (catalog),
+  // falling back to whatever precision the form stored.
   const rows: SnapshotRow[] = resolved.rows.map((r) => ({
     sr: r.sr,
     sub: r.sub,
@@ -139,8 +158,22 @@ function buildSnapshot(
     method: r.method,
     remarks: r.remarks,
     hasSpec: r.hasSpec,
-    actuals: r.actuals.map((a) => (a.value == null ? "-" : String(a.value))),
+    actuals: r.actuals.map((a) => {
+      if (a.value == null) return "-";
+      return r.decimals != null ? a.value.toFixed(r.decimals) : String(a.value);
+    }),
   }));
+
+  // C9: apply review-step text edits (label / method / remarks only).
+  (input.rowOverrides ?? []).forEach((o, i) => {
+    if (!o || !rows[i]) return;
+    const label = clean(o.label);
+    const method = clean(o.method);
+    const remarks = clean(o.remarks);
+    if (label) rows[i].label = label;
+    if (method !== undefined) rows[i].method = method || null;
+    if (remarks !== undefined) rows[i].remarks = remarks || null;
+  });
 
   const lotNo = resolved.lotNos.join(", ") || "-";
   return {
@@ -158,6 +191,8 @@ function buildSnapshot(
     shipTo: input.shipTo,
     rows,
     checkedBy: input.checkedBy,
+    codeNumber: codeNumber ?? undefined,
+    draft: draft || undefined,
   };
 }
 
@@ -168,8 +203,16 @@ export async function generateCoa(input: GenerateCoaInput): Promise<GenerateCoaR
   if (input.batchNumbers.length > MAX_BATCHES_PER_COA) return { ok: false, code: "bad_input", message: `At most ${MAX_BATCHES_PER_COA} batches per COA.` };
   if (!input.shipTo.trim()) return { ok: false, code: "bad_input", message: "Ship-to address is required." };
   if (!Number.isFinite(input.quantityMt) || input.quantityMt <= 0) return { ok: false, code: "bad_input", message: "Quantity (MT) must be a positive number." };
+  if (input.testReportNo != null && (!Number.isInteger(input.testReportNo) || input.testReportNo <= 0)) {
+    return { ok: false, code: "bad_input", message: "Test Report No. must be a positive whole number." };
+  }
 
   const db = getServiceClient();
+
+  if (input.testReportNo != null) {
+    const { data: dupNo } = await db.from("coa_documents").select("id").eq("factory_id", input.factoryId).eq("test_report_no", input.testReportNo).maybeSingle();
+    if (dupNo) return { ok: false, code: "bad_input", message: `Test Report No. ${input.testReportNo} is already used.` };
+  }
 
   let specs: CoaSpec[];
   try {
@@ -226,13 +269,35 @@ export async function generateCoa(input: GenerateCoaInput): Promise<GenerateCoaR
   //    atomic — two concurrent callers get two distinct numbers — and the
   //    UNIQUE(test_report_no) constraint is the final guard. A double-click
   //    therefore can never produce two rows with the same number.
-  const { data: seqData, error: seqErr } = await db.rpc("fn_coa_next_report_no");
+  // C8: a chemist-typed number is honored (and the sequence is advanced past
+  // it); otherwise take the next value from coa_report_seq. Either way the
+  // claim is atomic in Postgres and the UNIQUE(test_report_no) constraint on
+  // insert is the final guard against a double-click or two chemists racing.
+  let { data: seqData, error: seqErr } = await db.rpc("fn_coa_claim_report_no", {
+    p_requested: input.testReportNo ?? null,
+  });
+  // Until migration 075 is applied the new RPC does not exist: fall back to the
+  // original sequence RPC when no number was typed (a typed number needs 075).
+  if (seqErr && input.testReportNo == null && /fn_coa_claim_report_no|schema cache|does not exist/i.test(seqErr.message ?? "")) {
+    ({ data: seqData, error: seqErr } = await db.rpc("fn_coa_next_report_no"));
+  }
   if (seqErr || seqData == null) {
-    return { ok: false, code: "error", message: "Failed to assign Test Report No.", detail: seqErr?.message };
+    return { ok: false, code: "error", message: seqErr?.message ?? "Failed to assign Test Report No." };
   }
   const testReportNo = Number(seqData);
 
-  const snapshot = buildSnapshot(input, testReportNo, customerName, resolved);
+  // C7: Code No. — explicit input wins, else the party's default.
+  let codeNumber = clean(input.codeNumber) ?? null;
+  if (!codeNumber) {
+    const { data: partyRow } = await db
+      .from("parties")
+      .select("code_number")
+      .eq("party_code", input.partyCode)
+      .maybeSingle();
+    codeNumber = (partyRow?.code_number as string) ?? null;
+  }
+
+  const snapshot = buildSnapshot(input, testReportNo, customerName, resolved, codeNumber);
 
   // ── INSERT coa_documents (unique test_report_no → double-submit safe). ────
   const insertRow: Record<string, unknown> = {
@@ -382,6 +447,68 @@ export async function retryCoaSend(coaId: string, factoryId: string): Promise<{ 
     db, coaId, snapshot, row.customer_name as string, row.invoice_no as string, (row.vehicle_no as string) ?? "", Number(row.test_report_no),
   );
   return { ok: emailStatus === "sent", emailStatus, emailError };
+}
+
+// ─── C8: next number due + list of generated COAs ───────────────────────────
+/** The number the sequence will hand out next (null until migration 075 is applied). */
+export async function peekNextReportNo(): Promise<number | null> {
+  const { data, error } = await getServiceClient().rpc("fn_coa_peek_next_report_no");
+  return error || data == null ? null : Number(data);
+}
+
+export interface CoaListRow {
+  id: string;
+  test_report_no: number;
+  customer_name: string;
+  doc_label: string | null;
+  invoice_no: string | null;
+  batch_no: string | null;
+  qty: string | null;
+  generated_at: string;
+  email_status: string | null;
+}
+
+export async function listCoas(factoryId: string, limit = 100): Promise<CoaListRow[]> {
+  const { data, error } = await getServiceClient()
+    .from("coa_documents")
+    .select("id, test_report_no, customer_name, doc_label, invoice_no, batch_no, qty, generated_at, email_status")
+    .eq("factory_id", factoryId)
+    .order("test_report_no", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as CoaListRow[];
+}
+
+// ─── C9: render the review-step PDF (DRAFT) without claiming a number ───────
+export type PreviewPdfResult =
+  | { ok: true; pdf: Buffer; testReportNo: number }
+  | { ok: false; message: string };
+
+export async function previewCoaPdf(input: GenerateCoaInput): Promise<PreviewPdfResult> {
+  if (!input.batchNumbers.length) return { ok: false, message: "At least one batch is required." };
+  const db = getServiceClient();
+  try {
+    const specs = await loadSpecs(db, input.partyCode);
+    if (specs.length === 0) return { ok: false, message: `No spec rows loaded for party ${input.partyCode}.` };
+    const batches = await Promise.all(input.batchNumbers.map((bn) => loadBatch(db, input.factoryId, bn)));
+    const resolved = resolveCoa(batches, specs);
+    if (resolved.anyMissing) return { ok: false, message: `No finalized QC found for batch ${resolved.missingBatches.join(", ")}.` };
+    if (resolved.anyGap) return { ok: false, message: "A required parameter has no QC source field." };
+    if (resolved.anyOutOfSpec) return { ok: false, message: "Out of spec - a COA cannot certify failing material." };
+
+    const { data: party } = await db.from("parties").select("customer_name").eq("party_code", input.partyCode).maybeSingle();
+    const customerName = (party?.customer_name as string) || input.partyCode;
+    // separate query: tolerates parties.code_number not existing until 075 is applied
+    const { data: codeRow } = await db.from("parties").select("code_number").eq("party_code", input.partyCode).maybeSingle();
+    const codeNumber = clean(input.codeNumber) ?? ((codeRow?.code_number as string) || null);
+
+    // Show the number the COA WOULD get (typed one, else next due); not claimed.
+    const shown = input.testReportNo ?? (await peekNextReportNo()) ?? 0;
+    const snapshot = buildSnapshot(input, shown, customerName, resolved, codeNumber, true);
+    return { ok: true, pdf: await renderCoaPdf(snapshot), testReportNo: shown };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 // XLSX_CONTENT_TYPE re-exported import kept intentionally unused here; the COA

@@ -38,12 +38,15 @@ export interface CoaPreviewResult {
     remarks: string | null;
     hasSpec: boolean;
     needsVerification: boolean;
+    decimals?: number;
     rowStatus: "pass" | "fail" | "none";
     actuals: Array<{ batchNumber: string; value: number | null; status: "pass" | "fail" | "none" }>;
   }>;
   batchNumbers: string[];
   customerName: string;
   defaultShipTo: string | null;
+  /** C7: party's default Code No. (parties.code_number), null if none set. */
+  defaultCodeNumber: string | null;
   shipToOptions: Array<{ label: string; address: string }>;
   lotNos: string[];
   mfgDates: string[];
@@ -116,6 +119,9 @@ export async function resolveCoaPreview(
   const resolved = resolveCoa(batches, specs);
   const customerName = (party.data?.customer_name as string) || partyCode;
 
+  // C7: separate query - tolerates parties.code_number not existing yet (075).
+  const { data: codeRow } = await client.from("parties").select("code_number").eq("party_code", partyCode).maybeSingle();
+
   const canGenerate =
     specs.length > 0 &&
     !resolved.anyMissing &&
@@ -133,12 +139,14 @@ export async function resolveCoaPreview(
       remarks: r.remarks,
       hasSpec: r.hasSpec,
       needsVerification: r.needsVerification,
+      decimals: r.decimals,
       rowStatus: r.rowStatus,
       actuals: r.actuals,
     })),
     batchNumbers,
     customerName,
     defaultShipTo: (party.data?.default_ship_to as string) ?? null,
+    defaultCodeNumber: (codeRow?.code_number as string) ?? null,
     shipToOptions: (shipTos.data ?? []) as Array<{ label: string; address: string }>,
     lotNos: resolved.lotNos,
     mfgDates: resolved.mfgDates,

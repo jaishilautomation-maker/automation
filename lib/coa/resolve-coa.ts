@@ -1,5 +1,5 @@
 // =============================================================================
-// COA resolver — turn (batch numbers + party) into fully-resolved rows.
+// COA resolver â€” turn (batch numbers + party) into fully-resolved rows.
 //
 // Shared by BOTH the live preview (client) and the submit path (server), so the
 // previewed table and the saved snapshot are guaranteed identical. Pure
@@ -69,13 +69,15 @@ export interface ResolvedRow {
   max:       number | null;
   method:    string | null;
   remarks:   string | null;
-  /** One entry per batch (per-batch columns — the confirmed layout). */
+  /** One entry per batch (per-batch columns â€” the confirmed layout). */
   actuals:   ResolvedActual[];
   /** Average across batches that have a value, at source precision. "-" if none. */
   average:   string;
   /** Does this row carry a party spec at all? */
   hasSpec:   boolean;
   needsVerification: boolean;
+  /** C11: decimals for the printed actual (undefined = as stored). */
+  decimals?: number;
   /** Overall row status (fail if ANY batch fails). */
   rowStatus: RowStatus;
 }
@@ -104,7 +106,7 @@ export interface ResolveResult {
   expiryDate: string | null;
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -137,7 +139,7 @@ function averageAtSourcePrecision(raws: unknown[]): string {
   return (sum / present.length).toFixed(maxDp);
 }
 
-// ─── main resolver ────────────────────────────────────────────────────────────
+// â”€â”€â”€ main resolver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * @param batches  resolved batches, in the order the user added them
@@ -254,6 +256,7 @@ function resolveSlot(
     average: averageAtSourcePrecision(rawPerBatch),
     hasSpec,
     needsVerification,
+    decimals: slot.decimals,
     rowStatus,
   };
 }

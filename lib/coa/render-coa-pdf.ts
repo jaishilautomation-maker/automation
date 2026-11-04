@@ -41,6 +41,10 @@ export interface CoaSnapshot {
   shipTo:       string;        // multi-line ship-to block
   rows:         SnapshotRow[];
   checkedBy:    string;        // logged-in chemist's name
+  /** C7: "Code No." printed above the table on every COA (blank = omitted). */
+  codeNumber?:  string;
+  /** C9: true for the review-step PDF; prints a DRAFT marker, never emailed. */
+  draft?:       boolean;
 }
 
 const A4 = { w: 595.28, h: 841.89 };
@@ -88,8 +92,20 @@ function wrap(font: PDFFont, s: string, size: number, maxW: number): string[] {
   return lines.length ? lines : [""];
 }
 
+/**
+ * Spec limit as printed. numeric(12,4) comes back as e.g. "99.0000"; Number()
+ * trims the trailing zeros so the value fits its narrow column (C6).
+ */
 function fmtLimit(v: number | null): string {
-  return v == null ? "-" : String(v);
+  return v == null ? "-" : String(Number(v));
+}
+
+/** Draw `s` in a cell, shrinking the font (to a floor) so it never spills into the next column. */
+function fitText(ctx: Ctx, s: string, x: number, y: number, colW: number, size: number, font?: PDFFont) {
+  const f = font ?? ctx.reg;
+  let sz = size;
+  while (sz > 4.5 && f.widthOfTextAtSize(s, sz) > colW - 4) sz -= 0.25;
+  text(ctx, s, x, y, sz, f);
 }
 
 export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
@@ -121,6 +137,11 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   hline(ctx, left, right, ctx.y, 1.2);
   ctx.y -= 18;
 
+  // C9: review-step PDF is marked so it can never be mistaken for an issued COA.
+  if (snap.draft) {
+    text(ctx, "DRAFT PREVIEW - NOT ISSUED", right - 150, A4.h - 18, 8, bold, rgb(0.75, 0.1, 0.1));
+  }
+
   // ── Title ─────────────────────────────────────────────────────────────────
   const title = COA_LETTERHEAD.title;
   const tw = bold.widthOfTextAtSize(title, 12);
@@ -130,8 +151,12 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   // ── Ship-to block ("TO,") ───────────────────────────────────────────────
   text(ctx, "TO,", left, ctx.y, 8.5, bold);
   ctx.y -= 11;
-  const shipLines = snap.shipTo.split("\n");
-  for (const l of shipLines) { text(ctx, l, left, ctx.y, 8); ctx.y -= 10; }
+  // C1: wrap each address line to the left half of the page (the right half is
+  // the meta grid) instead of letting a long line run off the edge / get cut.
+  const shipMaxW = contentW * 0.55;
+  for (const raw of snap.shipTo.split("\n")) {
+    for (const l of wrap(reg, raw.trim(), 8, shipMaxW)) { text(ctx, l, left, ctx.y, 8); ctx.y -= 10; }
+  }
   ctx.y -= 6;
 
   // ── Meta grid (two columns) ─────────────────────────────────────────────
@@ -162,6 +187,13 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   }
   ctx.y = Math.min(my, mry) - 6;
 
+  // ── C7: Code No. — standard line above the table on every COA ────────────
+  if (snap.codeNumber && snap.codeNumber.trim()) {
+    text(ctx, "CODE NO:", left, ctx.y, 8, bold);
+    text(ctx, snap.codeNumber.trim(), left + 50, ctx.y, 8);
+    ctx.y -= 14;
+  }
+
   // ── Parameter table ──────────────────────────────────────────────────────
   const nB = snap.batchNumbers.length;
   // Per-batch actual value font shrinks as batch count grows so 4–5 narrow
@@ -169,7 +201,7 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
   const actualSize = nB >= 5 ? 5.5 : nB === 4 ? 6 : 7;
   // Column widths: Sr | Parameters | Actual(nB sub-cols) | Min | Max | Method | Remarks
   const wSr = 22;
-  const wMin = 34, wMax = 34, wMethod = 50, wRemarks = 58;
+  const wMin = 38, wMax = 38, wMethod = 50, wRemarks = 56;
   const fixed = wSr + wMin + wMax + wMethod + wRemarks;
   const wActualTotal = Math.max(70, contentW * 0.28);
   const wParam = contentW - fixed - wActualTotal;
@@ -239,13 +271,13 @@ export async function renderCoaPdf(snap: CoaSnapshot): Promise<Buffer> {
     for (let i = 0; i < nB; i++) {
       const bx = xActual + i * wActualCol;
       const val = r.actuals[i] ?? "-";
-      text(ctx, val, bx + 2, baseY, actualSize, reg);
+      fitText(ctx, val, bx + 1, baseY, wActualCol, actualSize);
       if (i > 0) vline(ctx, bx, bot, top, 0.4, faint);
     }
 
     // Spec min/max
-    text(ctx, r.hasSpec ? fmtLimit(r.min) : "-", xMin + 4, baseY, 7, reg);
-    text(ctx, r.hasSpec ? fmtLimit(r.max) : "-", xMax + 4, baseY, 7, reg);
+    fitText(ctx, r.hasSpec ? fmtLimit(r.min) : "-", xMin + 2, baseY, wMin, 7);
+    fitText(ctx, r.hasSpec ? fmtLimit(r.max) : "-", xMax + 2, baseY, wMax, 7);
 
     // Method / remarks (wrapped, small)
     for (const [mx, mw, mtxt] of [

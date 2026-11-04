@@ -19,7 +19,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { generateCoa, retryCoaSend, type GenerateCoaInput } from "@/lib/coa/generate-coa";
+import { generateCoa, retryCoaSend, peekNextReportNo, listCoas, previewCoaPdf, type GenerateCoaInput } from "@/lib/coa/generate-coa";
 import { resolveCoaPreview } from "@/lib/coa/preview";
 import { renderCoaPdf, type CoaSnapshot } from "@/lib/coa/render-coa-pdf";
 import { createClient } from "@supabase/supabase-js";
@@ -86,8 +86,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── GENERATE ───────────────────────────────────────────────────────────────
-  if (action === "generate") {
+  // ── NEXT NUMBER DUE + LIST (C8) ──────────────────────────────────────────────
+  if (action === "next_no") {
+    return NextResponse.json({ ok: true, nextNo: await peekNextReportNo() });
+  }
+
+  if (action === "list") {
+    const factoryId = String(body.factoryId ?? "");
+    if (!factoryId) return NextResponse.json({ error: "factoryId required" }, { status: 400 });
+    try {
+      return NextResponse.json({ ok: true, rows: await listCoas(factoryId) });
+    } catch (err) {
+      return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+    }
+  }
+
+  // ── GENERATE / PREVIEW_PDF share one input shape ────────────────────────────
+  if (action === "generate" || action === "preview_pdf") {
+    const typedNo = body.testReportNo === undefined || body.testReportNo === null || body.testReportNo === ""
+      ? undefined
+      : Number(body.testReportNo);
+    if (typedNo !== undefined && (!Number.isInteger(typedNo) || typedNo <= 0)) {
+      return NextResponse.json({ ok: false, code: "bad_input", message: "Test Report No. must be a positive whole number." }, { status: 400 });
+    }
     const input: GenerateCoaInput = {
       factoryId:    String(body.factoryId ?? ""),
       partyCode:    String(body.partyCode ?? ""),
@@ -99,7 +120,17 @@ export async function POST(req: NextRequest) {
       batchNumbers: Array.isArray(body.batchNumbers) ? (body.batchNumbers as string[]).map(String) : [],
       createdBy:    user.id,
       checkedBy:    String(body.checkedBy ?? ""),
+      codeNumber:   typeof body.codeNumber === "string" ? body.codeNumber : undefined,
+      testReportNo: typedNo,
+      rowOverrides: Array.isArray(body.rowOverrides) ? (body.rowOverrides as GenerateCoaInput["rowOverrides"]) : undefined,
     };
+
+    if (action === "preview_pdf") {
+      const r = await previewCoaPdf(input);
+      if (!r.ok) return NextResponse.json({ ok: false, message: r.message }, { status: 409 });
+      return NextResponse.json({ ok: true, testReportNo: r.testReportNo, pdfBase64: r.pdf.toString("base64") });
+    }
+
     const result = await generateCoa(input);
     const status = result.ok ? 200 : (result.code === "error" ? 500 : 409);
     return NextResponse.json(result, { status });

@@ -69,7 +69,6 @@ export default function BatchAnalysisPage() {
     analysisDate: string;
     mfgDate: string;
     jobNo: string;
-    srNo: string;
     shift: string;
     lotNo: string;
     remarks: string;
@@ -110,7 +109,6 @@ export default function BatchAnalysisPage() {
   const [mfgDate, setMfgDate]           = useState(d0?.mfgDate ?? new Date().toISOString().slice(0, 10));
   // JSCI/QC/16 Final Inspection header fields (stored in test_results JSONB).
   const [jobNo, setJobNo]               = useState(d0?.jobNo ?? "");
-  const [srNo, setSrNo]                 = useState(d0?.srNo ?? "");
   const [shift, setShift]               = useState(d0?.shift ?? "");   // "day" | "night" | ""
   const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
   // Who physically ran the analysis (login user stays authoritative as chemist_id).
@@ -127,10 +125,10 @@ export default function BatchAnalysisPage() {
   useEffect(() => {
     draftSave({
       batchNumber, partyCode, values, analysisDate, mfgDate,
-      jobNo, srNo, shift, lotNo, remarks, reworkAction,
+      jobNo, shift, lotNo, remarks, reworkAction,
     });
   }, [batchNumber, partyCode, values, analysisDate, mfgDate,
-      jobNo, srNo, shift, lotNo, remarks, reworkAction, draftSave]);
+      jobNo, shift, lotNo, remarks, reworkAction, draftSave]);
 
 
   // -------------------------------------------------------------------------
@@ -355,7 +353,6 @@ export default function BatchAnalysisPage() {
           // Restore the JSCI/QC/16 header fields from test_results.
           const trh = (existing.test_results ?? {}) as Record<string, unknown>;
           setJobNo(trh.job_no != null ? String(trh.job_no) : "");
-          setSrNo(trh.sr_no != null ? String(trh.sr_no) : "");
           setMfgDate(trh.mfg_date != null ? String(trh.mfg_date) : new Date().toISOString().slice(0, 10));
           setShift(trh.shift != null ? String(trh.shift) : "");
           setLotNo(trh.lot_no != null ? String(trh.lot_no) : "");
@@ -389,7 +386,6 @@ export default function BatchAnalysisPage() {
     setRemarks("");
     setReworkAction("");
     setJobNo("");
-    setSrNo("");
     setMfgDate(new Date().toISOString().slice(0, 10));
     setShift("");
     setLotNo("");
@@ -501,7 +497,6 @@ export default function BatchAnalysisPage() {
       // JSCI/QC/16 header fields — stored alongside the test values so they
       // flow to the DB, the report, and the sheet without a schema change.
       if (jobNo.trim())  testResults["job_no"] = jobNo.trim();
-      if (srNo.trim())   testResults["sr_no"]  = srNo.trim();
       if (shift)         testResults["shift"]  = shift;
       if (lotNo.trim())  testResults["lot_no"] = lotNo.trim();
       if (analysisBy)    testResults[ANALYSIS_BY_KEY] = analysisBy;
@@ -727,18 +722,12 @@ export default function BatchAnalysisPage() {
         <>
           <div className="card">
             <h3>Analysis Details</h3>
-            {/* JSCI/QC/16 Final Inspection header fields */}
+            {/* JSCI/QC/16 Final Inspection header fields.
+                D1 (4 Nov meeting): Serial Number field removed from the
+                in-process / final-inspection form. sr_no is no longer
+                collected or saved to test_results; the COA's Test Report No.
+                (coa_report_seq) remains the only sequential number. */}
             <div className="row2">
-              <div>
-                <label>Sr No</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 393"
-                  value={srNo}
-                  onChange={e => setSrNo(e.target.value)}
-                  onBlur={() => audit.record("sr_no", srNo)}
-                />
-              </div>
               <div>
                 <label>Job No</label>
                 <input
@@ -749,8 +738,6 @@ export default function BatchAnalysisPage() {
                   onBlur={() => audit.record("job_no", jobNo)}
                 />
               </div>
-            </div>
-            <div className="row2">
               <div>
                 <label>Shift</label>
                 <select value={shift} onChange={e => { setShift(e.target.value); audit.record("shift", e.target.value); }}>
@@ -759,6 +746,8 @@ export default function BatchAnalysisPage() {
                   <option value="night">Night</option>
                 </select>
               </div>
+            </div>
+            <div className="row2">
               <div>
                 <label>Lot No</label>
                 <input
@@ -829,7 +818,30 @@ export default function BatchAnalysisPage() {
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Green fields are auto-calculated. Enter input values and they update automatically.
               </div>
-              {visibleDefs.map(def => {
+              {visibleDefs.map((def, idx) => {
+                // D2: section header whenever the section changes.
+                const sectionHeader =
+                  def.section_label && def.section_label !== (visibleDefs[idx - 1]?.section_label ?? null) ? (
+                    <div style={{
+                      margin: "20px 0 10px", padding: "7px 12px",
+                      background: "var(--bg-soft)", borderLeft: "4px solid var(--accent)",
+                      borderRadius: "0 6px 6px 0",
+                    }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {def.section_label}
+                      </span>
+                    </div>
+                  ) : null;
+
+                // D3: acetone solubility — chemist enters ONE number (e.g. 4.04);
+                // the portal shows 100 − value in brackets as % insoluble.
+                const acetoneRaw = def.test_key === "acetone_solubility" ? parseFloat(values[def.test_key] ?? "") : NaN;
+                const acetoneNote = def.test_key === "acetone_solubility" && !isNaN(acetoneRaw) ? (
+                  <div style={{ marginTop: -6, marginBottom: 12, fontSize: 13, color: "var(--ink-soft)" }}>
+                    ({(100 - acetoneRaw).toFixed(2)} % insoluble)
+                  </div>
+                ) : null;
+
                 // After a mesh_pct field, show W2 + % passing for passing-basis
                 // parties (MRF). Other parties keep % retained, unchanged.
                 const meshPctMatch = def.test_key.match(/^mesh(\d+)_pct$/);
@@ -856,7 +868,7 @@ export default function BatchAnalysisPage() {
                   />
                 );
 
-                if (!passingSpec) return <div key={def.id}>{fieldEl}</div>;
+                if (!passingSpec) return <div key={def.id}>{sectionHeader}{fieldEl}{acetoneNote}</div>;
 
                 // Compute W2 = M - m and % passing = W2 / M × 100
                 const mKey     = def.test_key.replace("_pct", "_m");
@@ -871,6 +883,7 @@ export default function BatchAnalysisPage() {
 
                 return (
                   <div key={def.id}>
+                    {sectionHeader}
                     {fieldEl}
                     {/* W2 + % passing read-only display (passing-basis only) */}
                     <div style={{

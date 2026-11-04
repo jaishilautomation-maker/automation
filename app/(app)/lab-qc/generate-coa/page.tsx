@@ -37,9 +37,24 @@ interface PreviewRow {
   remarks: string | null;
   hasSpec: boolean;
   needsVerification: boolean;
+  decimals?: number;
   rowStatus: "pass" | "fail" | "none";
   actuals: Array<{ batchNumber: string; value: number | null; status: "pass" | "fail" | "none" }>;
 }
+
+interface CoaListRow {
+  id: string;
+  test_report_no: number;
+  customer_name: string;
+  doc_label: string | null;
+  invoice_no: string | null;
+  batch_no: string | null;
+  qty: string | null;
+  generated_at: string;
+  email_status: string | null;
+}
+
+interface RowEdit { label?: string; method?: string; remarks?: string }
 
 interface PreviewResult {
   ok: boolean;
@@ -47,6 +62,7 @@ interface PreviewResult {
   batchNumbers: string[];
   customerName: string;
   defaultShipTo: string | null;
+  defaultCodeNumber: string | null;
   shipToOptions: Array<{ label: string; address: string }>;
   lotNos: string[];
   mfgDates: string[];
@@ -102,6 +118,18 @@ export default function GenerateCoaPage() {
   const [partyCode, setPartyCode] = useState("");
   const [shipToSel, setShipToSel] = useState<string>("");    // dropdown label or "__manual__"
   const [shipToManual, setShipToManual] = useState("");
+
+  // C7: Code No. (above the table). C8: typed report number + next due + list.
+  const [codeNumber, setCodeNumber] = useState("");
+  const [codeTouched, setCodeTouched] = useState(false);
+  const [reportNoInput, setReportNoInput] = useState("");
+  const [nextNo, setNextNo] = useState<number | null>(null);
+  const [coaList, setCoaList] = useState<CoaListRow[]>([]);
+  const [showList, setShowList] = useState(false);
+  // C9: editable review (label / method / remarks only) + draft PDF preview.
+  const [rowEdits, setRowEdits] = useState<Record<number, RowEdit>>({});
+  const [draftUrl, setDraftUrl] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
 
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -170,7 +198,32 @@ export default function GenerateCoaPage() {
   useEffect(() => {
     setShipToSel("");
     setShipToManual("");
+    setCodeTouched(false);
   }, [partyCode]);
+
+  // C7: Code No. defaults to the party's code (editable; stops following once touched).
+  useEffect(() => {
+    if (codeTouched) return;
+    setCodeNumber(preview?.defaultCodeNumber ?? partyCode ?? "");
+  }, [preview?.defaultCodeNumber, partyCode, codeTouched]);
+
+  // C9: review edits belong to one party/batch combination.
+  useEffect(() => { setRowEdits({}); setDraftUrl(null); }, [partyCode, batches]);
+
+  // C8: next number due + list of generated COAs.
+  const refreshNumbers = useCallback(async () => {
+    if (!activeFactory) return;
+    try {
+      const [n, l] = await Promise.all([
+        fetch("/api/coa/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "next_no" }) }).then((r) => r.json()),
+        fetch("/api/coa/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list", factoryId: activeFactory.id }) }).then((r) => r.json()),
+      ]);
+      setNextNo(typeof n.nextNo === "number" ? n.nextNo : null);
+      setCoaList(Array.isArray(l.rows) ? (l.rows as CoaListRow[]) : []);
+    } catch { /* non-fatal: the form still works without the hint/list */ }
+  }, [activeFactory]);
+
+  useEffect(() => { void refreshNumbers(); }, [refreshNumbers]);
 
   // Duplicate-invoice warning (client-side check as the user types the number).
   useEffect(() => {
@@ -202,7 +255,7 @@ export default function GenerateCoaPage() {
   const blockingReason = useMemo(() => {
     if (!preview) return "Add batch(es) and select a party to preview.";
     if (preview.noSpecRows) return `No spec rows loaded for this party — load the customer's spec before issuing a COA.`;
-    if (preview.anyMissing) return `No finalized QC found for batch ${preview.missingBatches.join(", ")}.`;
+    if (preview.anyMissing) return `No finalized QC found for batch ${preview.missingBatches.join(", ")}. Final QC results must be saved in Batch Analysis before a COA can be generated - ask QC to enter and save them, then retry.`;
     if (preview.anyGap) return `This party requires parameters with no QC source field: ${preview.gaps.map((g) => g.label).join(", ")}. Add them to the Final Inspection form first.`;
     if (preview.anyOutOfSpec) return `Out of spec — cannot certify failing material: ${preview.outOfSpec.map((o) => `${o.label} (batch ${o.batchNumber})`).join("; ")}.`;
     return null;
@@ -219,6 +272,71 @@ export default function GenerateCoaPage() {
 
   const canSubmit = formValid && !!preview?.canGenerate && !blockingReason && !submitting;
 
+  // Only rows the chemist actually changed are sent; the server limits edits to
+  // label / method / remarks (actuals + spec limits always come from the data).
+  const buildOverrides = () =>
+    (preview?.rows ?? []).map((r, i) => {
+      const e = rowEdits[i];
+      if (!e) return null;
+      const o: RowEdit = {};
+      if (e.label !== undefined && e.label !== r.label) o.label = e.label;
+      if (e.method !== undefined && e.method !== (r.method ?? "")) o.method = e.method;
+      if (e.remarks !== undefined && e.remarks !== (r.remarks ?? "")) o.remarks = e.remarks;
+      return Object.keys(o).length ? o : null;
+    });
+
+  const buildCoaBody = (action: "generate" | "preview_pdf") => ({
+    action,
+    factoryId: activeFactory!.id,
+    partyCode,
+    shipTo: resolvedShipTo,
+    docLabel: docKind,
+    docValue: docValue.trim(),
+    vehicleNo: vehicleNo.trim(),
+    quantityMt: Number(quantityMt),
+    batchNumbers: batches,
+    checkedBy: profile?.full_name ?? "",
+    codeNumber: codeNumber.trim(),
+    testReportNo: reportNoInput.trim() === "" ? undefined : Number(reportNoInput),
+    rowOverrides: buildOverrides(),
+  });
+
+  // C9: render the DRAFT PDF from the current (edited) values without issuing.
+  const handlePreviewPdf = async () => {
+    if (!activeFactory || !formValid) { showToast("Fill the form first.", true); return; }
+    setDraftLoading(true);
+    try {
+      const res = await fetch("/api/coa/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildCoaBody("preview_pdf")),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) { showToast(json.message || "Could not build the preview.", true); return; }
+      const bytes = Uint8Array.from(atob(json.pdfBase64 as string), (c) => c.charCodeAt(0));
+      setDraftUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Network error.", true);
+    } finally {
+      setDraftLoading(false);
+    }
+  };
+
+  const downloadCoa = async (id: string, no: number) => {
+    if (!activeFactory) return;
+    const res = await fetch("/api/coa/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "download", coaId: id, factoryId: activeFactory.id }),
+    });
+    if (!res.ok) { showToast("Download failed.", true); return; }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = `COA-${no}.pdf`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   // ── submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!canSubmit || !activeFactory || !user) return;
@@ -227,18 +345,7 @@ export default function GenerateCoaPage() {
       const res = await fetch("/api/coa/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "generate",
-          factoryId: activeFactory.id,
-          partyCode,
-          shipTo: resolvedShipTo,
-          docLabel: docKind,
-          docValue: docValue.trim(),
-          vehicleNo: vehicleNo.trim(),
-          quantityMt: Number(quantityMt),
-          batchNumbers: batches,
-          checkedBy: profile?.full_name ?? "",
-        }),
+        body: JSON.stringify(buildCoaBody("generate")),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
@@ -248,6 +355,7 @@ export default function GenerateCoaPage() {
       }
       // field audit flush (module 'coa', record_id = new COA id)
       await audit.flush(supabase, user.id, "coa", json.id);
+      void refreshNumbers();   // C8: bump "next due" + the generated list
       setSuccess({
         id: json.id,
         testReportNo: json.testReportNo,
@@ -300,6 +408,7 @@ export default function GenerateCoaPage() {
   const resetForm = useCallback(() => {
     setDocValue(""); setVehicleNo(""); setBatchInput(""); setBatches([]); setQuantityMt("");
     setPartyCode(""); setShipToSel(""); setShipToManual(""); setPreview(null); setDupInvoice(false);
+    setCodeNumber(""); setCodeTouched(false); setReportNoInput(""); setRowEdits({}); setDraftUrl(null);
     audit.reset();
   }, [audit]);
 
@@ -385,6 +494,23 @@ export default function GenerateCoaPage() {
             <NumericInput allowDecimal={true} min="0" value={quantityMt}
               onChange={(e) => setQuantityMt(e.target.value)}
               onBlur={() => audit.record("quantity_mt", quantityMt)} />
+          </div>
+
+          <div>
+            {/* C7: Code No. — printed above the table on every COA */}
+            <label>Code No.</label>
+            <input type="text" value={codeNumber}
+              placeholder={preview?.defaultCodeNumber ?? partyCode ?? "—"}
+              onChange={(e) => { setCodeNumber(e.target.value); setCodeTouched(true); }}
+              onBlur={() => audit.record("code_number", codeNumber)} />
+          </div>
+          <div>
+            {/* C8: typed Test Report No. — blank = take the next number due */}
+            <label>Test Report No. {nextNo != null && <span className="field-hint">(next due: {nextNo})</span>}</label>
+            <input type="text" inputMode="numeric" value={reportNoInput}
+              placeholder={nextNo != null ? String(nextNo) : "auto"}
+              onChange={(e) => setReportNoInput(e.target.value.replace(/[^\d]/g, ""))}
+              onBlur={() => audit.record("test_report_no", reportNoInput)} />
           </div>
         </div>
 
@@ -485,35 +611,117 @@ export default function GenerateCoaPage() {
                 </tr>
               </thead>
               <tbody>
-                {preview.rows.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--line, #eee)" }}>
-                    <td style={td}>{r.sub ? `${r.sr}${r.sub}` : r.sr}</td>
-                    <td style={{ ...td, textAlign: "left" }}>
-                      {r.label}
-                      {r.needsVerification && <span title="Spec needs verification" style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>}
-                    </td>
-                    {r.actuals.map((a) => (
-                      <td key={a.batchNumber} style={{ ...td, color: a.status === "fail" ? RED : a.status === "pass" ? GREEN : "inherit", fontWeight: a.status === "fail" ? 700 : 400 }}>
-                        {a.value == null ? "-" : a.value}
+                {preview.rows.map((r, i) => {
+                  const e = rowEdits[i] ?? {};
+                  const setEdit = (patch: RowEdit) => setRowEdits((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }));
+                  const cellInput: React.CSSProperties = { width: "100%", minWidth: 70, fontSize: 12, padding: "3px 5px" };
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--line, #eee)" }}>
+                      <td style={td}>{r.sub ? `${r.sr}${r.sub}` : r.sr}</td>
+                      <td style={{ ...td, textAlign: "left" }}>
+                        {/* C9: editable text (label / method / remarks) */}
+                        <input type="text" style={{ ...cellInput, minWidth: 180 }} value={e.label ?? r.label}
+                          onChange={(ev) => setEdit({ label: ev.target.value })} />
+                        {r.needsVerification && <span title="Spec needs verification" style={{ color: "var(--warn)", marginLeft: 4 }}>⚠</span>}
                       </td>
-                    ))}
-                    <td style={td}>{r.hasSpec && r.min != null ? r.min : "-"}</td>
-                    <td style={td}>{r.hasSpec && r.max != null ? r.max : "-"}</td>
-                    <td style={td}>{r.method || "-"}</td>
-                    <td style={td}>{r.remarks || "-"}</td>
-                  </tr>
-                ))}
+                      {/* Actuals are read-only: they always come from the QC record.
+                          C10: no pass/fail colouring here - the COA carries none. */}
+                      {r.actuals.map((a) => (
+                        <td key={a.batchNumber} style={td}>
+                          {a.value == null ? "-" : r.decimals != null ? a.value.toFixed(r.decimals) : a.value}
+                        </td>
+                      ))}
+                      <td style={td}>{r.hasSpec && r.min != null ? Number(r.min) : "-"}</td>
+                      <td style={td}>{r.hasSpec && r.max != null ? Number(r.max) : "-"}</td>
+                      <td style={td}>
+                        <input type="text" style={cellInput} value={e.method ?? (r.method ?? "")}
+                          onChange={(ev) => setEdit({ method: ev.target.value })} />
+                      </td>
+                      <td style={td}>
+                        <input type="text" style={cellInput} value={e.remarks ?? (r.remarks ?? "")}
+                          onChange={(ev) => setEdit({ remarks: ev.target.value })} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
+        {preview && preview.rows.length > 0 && (
+          <div className="field-hint" style={{ marginTop: 8 }}>
+            Parameter names, Test Method and Remarks above are editable. Actual values and spec limits
+            come from the QC record and the party spec and cannot be changed here.
+          </div>
+        )}
+
+        {/* ── C9: draft PDF review ── */}
+        {draftUrl && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <strong style={{ fontSize: 13 }}>Draft preview (not issued, no number used)</strong>
+              <div style={{ display: "flex", gap: 8 }}>
+                <a className="btn" href={draftUrl} target="_blank" rel="noreferrer">Open / print</a>
+                <button className="btn" type="button" onClick={() => setDraftUrl(null)}>Close</button>
+              </div>
+            </div>
+            <iframe title="COA draft preview" src={draftUrl} style={{ width: "100%", height: 720, border: "1px solid var(--line, #ccc)", borderRadius: 6 }} />
+          </div>
+        )}
+
         {/* ── Submit ── */}
-        <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 12 }}>
+          <button className="btn" type="button" disabled={!formValid || !preview?.canGenerate || draftLoading || submitting} onClick={handlePreviewPdf}>
+            {draftLoading ? "Building preview…" : "Preview PDF"}
+          </button>
           <button className="btn btn-primary" disabled={!canSubmit} onClick={handleSubmit}>
-            {submitting ? "Generating…" : "Generate COA"}
+            {submitting ? "Generating…" : "Generate & email COA"}
           </button>
         </div>
+      </div>
+
+      {/* ── C8: list of COAs generated so far ── */}
+      <div className="module-card" style={{ maxWidth: 980, margin: "16px auto 0" }}>
+        <button type="button" className="btn" onClick={() => setShowList((v) => !v)}>
+          {showList ? "Hide" : "Show"} generated COAs ({coaList.length})
+        </button>
+        {showList && (
+          <div style={{ marginTop: 12, overflowX: "auto" }}>
+            {coaList.length === 0 ? (
+              <div className="field-hint">No COAs generated yet.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--line, #ccc)" }}>
+                    <th style={th}>Report No.</th>
+                    <th style={{ ...th, textAlign: "left" }}>Customer</th>
+                    <th style={th}>Date</th>
+                    <th style={th}>Invoice / Challan</th>
+                    <th style={th}>Batches</th>
+                    <th style={th}>Qty</th>
+                    <th style={th}>Email</th>
+                    <th style={th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coaList.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: "1px solid var(--line, #eee)" }}>
+                      <td style={td}>{c.test_report_no}</td>
+                      <td style={{ ...td, textAlign: "left" }}>{c.customer_name}</td>
+                      <td style={td}>{new Date(c.generated_at).toLocaleDateString("en-IN")}</td>
+                      <td style={td}>{c.invoice_no || "-"}</td>
+                      <td style={td}>{c.batch_no || "-"}</td>
+                      <td style={td}>{c.qty || "-"}</td>
+                      <td style={{ ...td, color: c.email_status === "sent" ? GREEN : c.email_status === "failed" ? RED : "inherit" }}>{c.email_status || "-"}</td>
+                      <td style={td}><button className="btn" type="button" onClick={() => downloadCoa(c.id, c.test_report_no)}>Download</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
