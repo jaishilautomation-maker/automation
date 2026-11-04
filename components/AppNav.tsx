@@ -85,6 +85,13 @@ export default function AppNav() {
       if (dashIdx >= 0) links.splice(dashIdx, 0, coaLink);
       else links.push(coaLink);
     }
+    // Generate COA for Factory A-20 (product based) - sits right beside
+    // "Activities". Same roles as A-20/1: Lab (chemist) + admins.
+    if (isA20 && (role === "chemist" || role === "factory_admin" || role === "company_admin")) {
+      const actIdx = links.findIndex((l) => l.href === "/lab-qc");
+      const coaLink = { href: "/lab-qc/generate-coa-a20", label: "Generate COA" };
+      links.splice(actIdx >= 0 ? actIdx + 1 : links.length, 0, coaLink);
+    }
   } else if (isA20) {
     // ── A-20 job_card module ──
     if (role === "operator") {
