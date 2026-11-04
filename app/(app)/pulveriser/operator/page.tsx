@@ -37,14 +37,27 @@ import { buildOperatorEmail } from "@/lib/notifications/pulveriser-emails";
 interface HourlyRow {
   id: string;            // local row id (uuid from DB after save, or temp key)
   persistedId: string | null;
+  // NB: machine, start_time, stop_time, reading_date are now on ShiftHeader
+  // (shared for the whole job). These fields remain here for backward-compat
+  // when loading old DB rows, but are NOT shown in the per-entry UI.
   machine: string;
   start_time: string;
   stop_time: string;
+  reading_date: string;
+  // Per-entry production data (one row per job entry)
   planned_production: string;
-  low_production_reasons: string[];   // multi-select
+  low_production_reasons: string[];
   batch_no: string;
   bags: string;
+}
+
+// Shift-level fields entered ONCE for the whole job (machine, hour-meter).
+// Applied to every per-entry HourlyRow when saving so the DB schema is unchanged.
+interface ShiftHeader {
+  machine: string;
   reading_date: string;
+  start_time: string;
+  stop_time: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,13 +119,14 @@ function formatCodedHM(diff: number): string {
   return `${hours} घं ${minutes} मि`;
 }
 
-function blankRow(): HourlyRow {
+function blankRow(entryIndex?: number): HourlyRow {
   return {
-    id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}-${entryIndex ?? 0}`,
     persistedId: null,
     machine: "", start_time: "", stop_time: "",
+    reading_date: new Date().toISOString().slice(0, 10),
     planned_production: "", low_production_reasons: [],
-    batch_no: "", bags: "", reading_date: new Date().toISOString().slice(0, 10),
+    batch_no: "", bags: "",
   };
 }
 
@@ -162,6 +176,12 @@ export default function PulveriserOperatorPage() {
   const [rows, setRows]                   = useState<HourlyRow[]>([blankRow()]);
   const [closeEntries, setCloseEntries]   = useState<MachineCloseEntry[]>([blankCloseEntry()]);
 
+  // Shift-level fields — entered ONCE for the whole job, applied to every row on save.
+  const [shiftHeader, setShiftHeader]     = useState<ShiftHeader>({
+    machine: "", reading_date: new Date().toISOString().slice(0, 10),
+    start_time: "", stop_time: "",
+  });
+
   // ── Draft autosave ────────────────────────────────────────────────────────
   // Persist the operator's in-progress entry for the OPEN job card locally so a
   // closed tab/browser never loses typed data. Keyed by the active card id.
@@ -173,8 +193,8 @@ export default function PulveriserOperatorPage() {
     workDetails: string; chkClean: boolean; chkRoller: boolean; chkMesh: boolean;
     closeEntries: MachineCloseEntry[];
   }
-  // Job-LEVEL draft: the shared hourly readings (keyed by the primary job id).
-  interface JobDraft { rows: HourlyRow[]; }
+  // Job-LEVEL draft: the shared hourly readings + shift header (keyed by the primary job id).
+  interface JobDraft { rows: HourlyRow[]; shiftHeader?: ShiftHeader; }
 
   const draft = useFormDraft<OperatorDraft>(
     draftKey(pathname, user?.id, active?.id),
@@ -198,11 +218,11 @@ export default function PulveriserOperatorPage() {
       qcNote, storesNote, workDetails, chkClean, chkRoller, chkMesh,
       closeEntries, draftSave]);
 
-  // Autosave the job-level hourly readings whenever they change.
+  // Autosave the job-level hourly readings + shift header whenever they change.
   useEffect(() => {
     if (!primaryJobId) return;
-    jobDraftSave({ rows });
-  }, [primaryJobId, rows, jobDraftSave]);
+    jobDraftSave({ rows, shiftHeader });
+  }, [primaryJobId, rows, shiftHeader, jobDraftSave]);
 
   // Auto-fill वास्तविक उत्पादन (kg) = तैयार माल बैग × पैकिंग साइज़.
   // Called from the bags and packing-size handlers. If either value is missing
@@ -337,7 +357,8 @@ export default function PulveriserOperatorPage() {
   };
 
   // ── Load JOB-LEVEL hourly readings once (anchored to the primary entry id).
-  const loadJobHourlyReadings = async (primaryId: string) => {
+  // groupEntries is the full job group so we can build one row per entry.
+  const loadJobHourlyReadings = async (primaryId: string, groupEntries: PulveriserJobCard[]) => {
     const { data } = await supabase
       .from("pulveriser_hourly_readings")
       .select("*")
@@ -349,18 +370,62 @@ export default function PulveriserOperatorPage() {
       machine: r.machine ?? "",
       start_time: r.start_time ?? "",
       stop_time: r.stop_time ?? "",
+      reading_date: r.reading_date ?? new Date().toISOString().slice(0, 10),
       planned_production: r.planned_production?.toString() ?? "",
       low_production_reasons: r.low_production_reason
         ? r.low_production_reason.split(", ").filter(Boolean)
         : [],
       batch_no: r.batch_no ?? "",
       bags: r.bags?.toString() ?? "",
-      reading_date: r.reading_date ?? new Date().toISOString().slice(0, 10),
     })) as HourlyRow[];
+
     // A locally saved draft for the job's readings wins over the DB copy.
-    const jobDraft = peekDraft<JobDraft>(draftKey(pathname, user?.id, "job", primaryId));
-    if (jobDraft?.rows?.length) setRows(jobDraft.rows);
-    else setRows(existing.length ? existing : [blankRow()]);
+    const saved = peekDraft<JobDraft>(draftKey(pathname, user?.id, "job", primaryId));
+    if (saved?.rows?.length) {
+      setRows(saved.rows);
+      if (saved.shiftHeader) setShiftHeader(saved.shiftHeader);
+      else if (existing.length > 0) {
+        // Reconstruct shift header from first DB row
+        const first = existing[0];
+        setShiftHeader({
+          machine:      first.machine,
+          reading_date: first.reading_date,
+          start_time:   first.start_time,
+          stop_time:    first.stop_time,
+        });
+      }
+      return;
+    }
+
+    if (existing.length > 0) {
+      // Extract shift header from the first row
+      const first = existing[0];
+      setShiftHeader({
+        machine:      first.machine,
+        reading_date: first.reading_date,
+        start_time:   first.start_time,
+        stop_time:    first.stop_time,
+      });
+      // Map existing rows back to the per-entry rows by batch_no match
+      // (best effort — fall back to blank rows if no match)
+      const perEntryRows = groupEntries.map((entry, idx) => {
+        const match = existing.find(r => r.batch_no === entry.material_code)
+          ?? existing[idx]
+          ?? null;
+        return match
+          ? { ...match }
+          : blankRow(idx);
+      });
+      setRows(perEntryRows);
+    } else {
+      // No existing readings yet — create one blank row per entry
+      setRows(groupEntries.map((_, i) => blankRow(i)));
+      setShiftHeader({
+        machine: groupEntries[0]?.machine_number ?? "",
+        reading_date: new Date().toISOString().slice(0, 10),
+        start_time: "", stop_time: "",
+      });
+    }
   };
 
   // Open a whole job-number group: load its shared hourly readings once, then
@@ -368,7 +433,7 @@ export default function PulveriserOperatorPage() {
   const openGroup = async (entries: PulveriserJobCard[]) => {
     if (entries.length === 0) return;
     setActiveGroup(entries);
-    await loadJobHourlyReadings(entries[0].id);
+    await loadJobHourlyReadings(entries[0].id, entries);
     setActive(entries[0]);
     await loadEntryFields(entries[0]);
   };
@@ -383,6 +448,7 @@ export default function PulveriserOperatorPage() {
   const goBack = () => {
     setActiveGroup(null); setActive(null);
     setRows([blankRow()]); setCloseEntries([blankCloseEntry()]);
+    setShiftHeader({ machine: "", reading_date: new Date().toISOString().slice(0, 10), start_time: "", stop_time: "" });
     setVfdParam(null); setActualKg(""); setRejectionHistory([]);
   };
 
@@ -398,9 +464,6 @@ export default function PulveriserOperatorPage() {
     Number.isFinite(classifierReadingNum) &&
     (classifierReadingNum < classifierRange[0] || classifierReadingNum > classifierRange[1]);
 
-  const updateRow = (id: string, field: keyof HourlyRow, val: string | string[]) => {
-    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: val } : r));
-  };
 
   // ── Machine Close Time helpers ────────────────────────────────────────────
   const updateCloseEntry = (id: string, field: keyof MachineCloseEntry, val: string) => {
@@ -500,24 +563,27 @@ export default function PulveriserOperatorPage() {
 
   // Hourly readings are job-level: always anchored to the group's PRIMARY entry
   // id so one set of readings covers every entry of the job number.
+  // Shift header (machine, date, start/stop) is shared and injected into every row.
   const syncHourlyRows = async (jc: PulveriserJobCard) => {
     const anchorId = primaryJobId ?? jc.id;
     const anchorFactory = (activeGroup && activeGroup[0]?.factory_id) || jc.factory_id;
     for (const r of rows) {
-      const diff = codedDiff(r.start_time, r.stop_time);
+      const diff = codedDiff(shiftHeader.start_time, shiftHeader.stop_time);
       const hours = diff !== null ? codedToHours(diff) : null;
       const body = {
         job_card_id:           anchorId,
         factory_id:            anchorFactory,
-        machine:               r.machine.trim() || jc.machine_number,
-        start_time:            r.start_time.trim() || null,
-        stop_time:             r.stop_time.trim() || null,
+        // Shift-level: use shared header, fall back to job card machine_number
+        machine:               shiftHeader.machine.trim() || jc.machine_number,
+        start_time:            shiftHeader.start_time.trim() || null,
+        stop_time:             shiftHeader.stop_time.trim() || null,
         total_hours:           hours,
+        reading_date:          shiftHeader.reading_date || null,
+        // Per-entry production data
         planned_production:    r.planned_production.trim() === "" ? null : Number(r.planned_production),
         low_production_reason: r.low_production_reasons.length > 0 ? r.low_production_reasons.join(", ") : null,
         batch_no:              r.batch_no.trim() || null,
         bags:                  r.bags.trim() === "" ? null : Number(r.bags),
-        reading_date:          r.reading_date || null,
       };
       if (r.persistedId) {
         const { error } = await supabase
@@ -526,10 +592,18 @@ export default function PulveriserOperatorPage() {
           .eq("id", r.persistedId);
         if (error) throw error;
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from("pulveriser_hourly_readings")
-          .insert(body);
+          .insert(body)
+          .select("id")
+          .single();
         if (error) throw error;
+        // Promote temp id → real DB id
+        if (inserted) {
+          setRows(prev => prev.map(x =>
+            x.id === r.id ? { ...x, persistedId: inserted.id, id: inserted.id } : x
+          ));
+        }
       }
     }
   };
@@ -576,10 +650,10 @@ export default function PulveriserOperatorPage() {
           checkpointRollerCheck:     chkRoller,
           checkpointMeshClothCheck:  chkMesh,
           hourlyReadings: rows.map(r => ({
-            machine:     r.machine     || null,
-            start_time:  r.start_time  || null,
-            stop_time:   r.stop_time   || null,
-            total_hours: (() => { const d = (Number(r.stop_time) - Number(r.start_time)); return d > 0 ? d / 100 : null; })(),
+            machine:     shiftHeader.machine || null,
+            start_time:  shiftHeader.start_time  || null,
+            stop_time:   shiftHeader.stop_time   || null,
+            total_hours: (() => { const d = (Number(shiftHeader.stop_time) - Number(shiftHeader.start_time)); return d > 0 ? d / 100 : null; })(),
             batch_no:    r.batch_no    || null,
             bags:        r.bags.trim() === "" ? null : Number(r.bags),
           })),
@@ -626,10 +700,10 @@ export default function PulveriserOperatorPage() {
         // "Hourly Readings" tab of the Job Card sheet, tagged with job_number
         // + party_code so each reading traces back to its parent card.
         for (const r of rows) {
-          const diff = Number(r.stop_time) - Number(r.start_time);
+          const diff = Number(shiftHeader.stop_time) - Number(shiftHeader.start_time);
           const totalHours = diff > 0 ? diff / 100 : null;
           const hasData =
-            r.start_time.trim() !== "" || r.stop_time.trim() !== "" ||
+            shiftHeader.start_time.trim() !== "" || shiftHeader.stop_time.trim() !== "" ||
             r.batch_no.trim() !== "" || r.bags.trim() !== "";
           if (!hasData) continue;
           void notifyEvent({
@@ -643,10 +717,10 @@ export default function PulveriserOperatorPage() {
               values: [
                 active.job_number ?? active.id,
                 active.party_code ?? null,
-                r.reading_date || null,
-                r.machine || active.machine_number || null,
-                r.start_time || null,
-                r.stop_time || null,
+                shiftHeader.reading_date || null,
+                shiftHeader.machine || active.machine_number || null,
+                shiftHeader.start_time || null,
+                shiftHeader.stop_time || null,
                 totalHours,
                 r.planned_production.trim() === "" ? null : Number(r.planned_production),
                 r.batch_no || null,
@@ -1044,69 +1118,108 @@ export default function PulveriserOperatorPage() {
         </div>
       </div>
 
-      {/* तास रीडिंग — JOB-LEVEL, single reading for the whole job number */}
+      {/* तास रीडिंग — JOB-LEVEL, split into shift header (once) + per-entry production rows */}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>तास रीडिंग</h3>
+        <h3 style={{ marginTop: 0 }}>तास रीडिंग — मशीन जानकारी</h3>
         <div className="field-hint" style={{ marginBottom: 10 }}>
-          यह रीडिंग पूरे जॉब नंबर के लिए एक ही है।
+          मशीन, तारीख और घंटा मीटर रीडिंग <strong>एक बार</strong> भरें — नीचे हर एंट्री के लिए उत्पादन जानकारी अलग भरें।
         </div>
-        {(() => {
-          const r = rows[0];
-          if (!r) return null;
-          const diff = codedDiff(r.start_time, r.stop_time);
-          return (
-            <>
-              <div className="row2">
-                <div>
-                  <label>मशीन</label>
-                  <input type="text" placeholder={active.machine_number ?? ""} value={r.machine}
-                    onChange={e => updateRow(r.id, "machine", e.target.value)} />
-                </div>
-                <div>
-                  <label>रीडिंग तारीख</label>
-                  <DateField value={r.reading_date}
-                    onChange={v => updateRow(r.id, "reading_date", v)} />
-                </div>
-              </div>
-              <div className="row3">
-                <div>
-                  <label>शुरू रीडिंग</label>
-                  <NumericInput allowDecimal={false} placeholder="जैसे 780" value={r.start_time}
-                    onChange={e => updateRow(r.id, "start_time", e.target.value)} />
-                </div>
-                <div>
-                  <label>बंद रीडिंग</label>
-                  <NumericInput allowDecimal={false} placeholder="जैसे 930" value={r.stop_time}
-                    onChange={e => updateRow(r.id, "stop_time", e.target.value)} />
-                </div>
-                <div>
-                  <label>कुल घंटे</label>
-                  <input type="text" disabled
-                    value={diff !== null ? formatCodedHM(diff) : ""} placeholder="0 घं 0 मि" />
-                </div>
-              </div>
-              <label>कम उत्पादन का कारण (यदि कोई हो — एक से अधिक चुन सकते हैं)</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                {PULVERISER_LOW_PROD_REASONS.map(reason => (
-                  <label key={reason} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 400, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={r.low_production_reasons.includes(reason)}
-                      onChange={e => {
-                        const next = e.target.checked
-                          ? [...r.low_production_reasons, reason]
-                          : r.low_production_reasons.filter(x => x !== reason);
-                        updateRow(r.id, "low_production_reasons", next);
-                      }}
-                    />
-                    {reason}
-                  </label>
-                ))}
-              </div>
-            </>
-          );
-        })()}
+        <div className="row2">
+          <div>
+            <label>मशीन</label>
+            <input type="text" placeholder={active.machine_number ?? ""}
+              value={shiftHeader.machine}
+              onChange={e => setShiftHeader(h => ({ ...h, machine: e.target.value }))} />
+          </div>
+          <div>
+            <label>रीडिंग तारीख</label>
+            <DateField value={shiftHeader.reading_date}
+              onChange={v => setShiftHeader(h => ({ ...h, reading_date: v }))} />
+          </div>
+        </div>
+        <div className="row3">
+          <div>
+            <label>शुरू रीडिंग</label>
+            <NumericInput allowDecimal={false} placeholder="जैसे 780"
+              value={shiftHeader.start_time}
+              onChange={e => setShiftHeader(h => ({ ...h, start_time: e.target.value }))} />
+          </div>
+          <div>
+            <label>बंद रीडिंग</label>
+            <NumericInput allowDecimal={false} placeholder="जैसे 930"
+              value={shiftHeader.stop_time}
+              onChange={e => setShiftHeader(h => ({ ...h, stop_time: e.target.value }))} />
+          </div>
+          <div>
+            <label>कुल घंटे</label>
+            <input type="text" disabled
+              value={(() => {
+                const diff = codedDiff(shiftHeader.start_time, shiftHeader.stop_time);
+                return diff !== null ? formatCodedHM(diff) : "";
+              })()}
+              placeholder="0 घं 0 मि" />
+          </div>
+        </div>
       </div>
+
+      {/* Per-entry production rows — one card per entry in the job group */}
+      {activeGroup.map((entry, idx) => {
+        const row = rows[idx] ?? blankRow(idx);
+        return (
+          <div key={entry.id} className="card">
+            <h3 style={{ marginTop: 0 }}>
+              उत्पादन — एंट्री {idx + 1}
+              <span style={{ fontSize: 12, fontWeight: 400, color: "var(--ink-soft)", marginLeft: 8 }}>
+                बैच {entry.material_code ?? "—"} · {entry.party_code ?? "—"}
+              </span>
+            </h3>
+            <div className="row2">
+              <div>
+                <label>तैयार माल बैग (बोरी)</label>
+                <NumericInput allowDecimal={false} min="0" placeholder="0"
+                  value={row.bags}
+                  onChange={e => setRows(prev => prev.map((r, i) =>
+                    i === idx ? { ...r, bags: e.target.value } : r
+                  ))} />
+              </div>
+              <div>
+                <label>नियोजित उत्पादन (bags)</label>
+                <NumericInput allowDecimal={false} min="0" placeholder="0"
+                  value={row.planned_production}
+                  onChange={e => setRows(prev => prev.map((r, i) =>
+                    i === idx ? { ...r, planned_production: e.target.value } : r
+                  ))} />
+              </div>
+            </div>
+            <label>बैच नंबर</label>
+            <input type="text" placeholder={entry.material_code ?? "बैच नंबर"}
+              value={row.batch_no}
+              onChange={e => setRows(prev => prev.map((r, i) =>
+                i === idx ? { ...r, batch_no: e.target.value } : r
+              ))} />
+            <label style={{ marginTop: 10 }}>कम उत्पादन का कारण (यदि कोई हो)</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+              {PULVERISER_LOW_PROD_REASONS.map(reason => (
+                <label key={reason} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 400, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={row.low_production_reasons.includes(reason)}
+                    onChange={e => {
+                      const next = e.target.checked
+                        ? [...row.low_production_reasons, reason]
+                        : row.low_production_reasons.filter(x => x !== reason);
+                      setRows(prev => prev.map((r, i) =>
+                        i === idx ? { ...r, low_production_reasons: next } : r
+                      ));
+                    }}
+                  />
+                  {reason}
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="btn btn-ghost" type="button"
