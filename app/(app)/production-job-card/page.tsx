@@ -20,6 +20,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
@@ -320,12 +321,12 @@ function GenericJobCardForm({ product, factoryId, userId, onDone }: GenericJobCa
       <div className="card">
         <h3>Process Timing</h3>
         <div className="row2">
-          <div><label>Premix Start</label><input type="time" value={premixStart} onChange={e => setPremixStart(e.target.value)} /></div>
-          <div><label>Premix End</label><input type="time" value={premixEnd} onChange={e => setPremixEnd(e.target.value)} /></div>
+          <div><label>Premix Start</label><TimeField value={premixStart} onChange={setPremixStart} /></div>
+          <div><label>Premix End</label><TimeField value={premixEnd} onChange={setPremixEnd} /></div>
         </div>
         <div className="row2">
-          <div><label>Bead Mill Start</label><input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} /></div>
-          <div><label>Bead Mill End</label><input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} /></div>
+          <div><label>Bead Mill Start</label><TimeField value={beadMillStart} onChange={setBeadMillStart} /></div>
+          <div><label>Bead Mill End</label><TimeField value={beadMillEnd} onChange={setBeadMillEnd} /></div>
         </div>
         <div className="row2">
           <div><label>Flow Rate</label><NumericInput allowDecimal={true} placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
@@ -789,12 +790,25 @@ export default function ProductionJobCardPage() {
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<"job_cards" | "dashboard">("job_cards");
+  // Remember which tab was active when the operator opened a form so Back
+  // returns them to exactly that tab, not always the Dashboard.
+  const [tabBeforeForm, setTabBeforeForm] = useState<"job_cards" | "dashboard">("job_cards");
+
+  // Open a form — capture the current tab first so Back can restore it.
+  const openForm = (product: Product, cardId: string | null = null) => {
+    setTabBeforeForm(tab);
+    setEditCardId(cardId);
+    setActiveProduct(product);
+  };
 
   const handleDone = () => {
     setActiveProduct(null);
     setEditCardId(null);
     setRefreshKey(k => k + 1);
-    setTab("dashboard"); // after saving/cancelling, land on Dashboard so the record is visible
+    // Return to whichever tab the operator was on before opening the form.
+    // If they opened a new card from the tile grid → back to job_cards.
+    // If they clicked Edit from the dashboard → back to dashboard.
+    setTab(tabBeforeForm);
   };
 
   // ── Form view ─────────────────────────────────────────────────────────────
@@ -970,7 +984,7 @@ export default function ProductionJobCardPage() {
                     key={p.id}
                     product={p}
                     recentCount={recentCounts[p.id] ?? 0}
-                    onOpen={() => { setEditCardId(null); setActiveProduct(p); }}
+                    onOpen={() => openForm(p, null)}
                     lang={lang}
                   />
                 ))}
@@ -997,8 +1011,8 @@ export default function ProductionJobCardPage() {
               products={products}
               factoryId={activeFactory.id}
               refreshKey={refreshKey}
-              onEdit={(prod, cardId) => { setEditCardId(cardId); setActiveProduct(prod); }}
-              onNew={prod => { setEditCardId(null); setActiveProduct(prod); }}
+              onEdit={(prod, cardId) => openForm(prod, cardId)}
+              onNew={prod => openForm(prod, null)}
             />
           ) : null}
         </>

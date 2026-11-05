@@ -135,6 +135,7 @@ const T = {
   // ── Total Lot Weight ─────────────────────────────────────────────────────
   totalLotWeightConfirmed: { en: "Total Lot Weight (kg) — confirmed",     hi: "कुल लॉट वज़न (kg) — पुष्टि" },
   totalLotWtActual:     { en: "TOTAL LOT WT (kg) — confirmed actual",     hi: "कुल लॉट वज़न (kg) — पुष्टि वास्तविक" },
+  totalLotLitres:       { en: "Total Lot Weight (Litres)",                hi: "कुल लॉट वज़न (लीटर)" },
 
   // ── Buttons ──────────────────────────────────────────────────────────────
   saving:               { en: "Saving…",                                  hi: "सेव हो रहा है…" },
@@ -236,6 +237,16 @@ const T = {
   toastDraftSaved:      { en: "Draft saved ✓",                            hi: "ड्राफ्ट सेव हुआ ✓" },
   toastNetworkError:    { en: "Network error: ",                          hi: "नेटवर्क त्रुटि: " },
   toastUnknown:         { en: "unknown",                                  hi: "अज्ञात" },
+
+  // ── Meter Reading (UPL / SulphurSC / Nutrizin) ──────────────────────────
+  secMeterReading:      { en: "Machine Meter Reading",                    hi: "मशीन मीटर रीडिंग" },
+  meterInitial:         { en: "Initial Reading",                          hi: "प्रारंभिक रीडिंग" },
+  meterFinal:           { en: "Final Reading",                            hi: "अंतिम रीडिंग" },
+  meterRunningTime:     { en: "Total Machine Running Time",               hi: "कुल मशीन चलने का समय" },
+  meterHours:           { en: "Hours",                                    hi: "घंटे" },
+  meterMinutes:         { en: "Minutes",                                  hi: "मिनट" },
+  meterNegative:        { en: "⚠ Final Reading must be greater than or equal to Initial Reading.", hi: "⚠ अंतिम रीडिंग प्रारंभिक रीडिंग से अधिक या बराबर होनी चाहिए।" },
+  meterPlaceholder:     { en: "e.g. 780",                                 hi: "जैसे 780" },
 
   // ── Inline small text ────────────────────────────────────────────────────
   scaledProportionally: { en: " kg · quantities scaled proportionally",   hi: " kg · मात्राएँ अनुपात में" },

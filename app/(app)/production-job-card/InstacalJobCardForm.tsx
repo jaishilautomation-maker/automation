@@ -26,6 +26,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -71,6 +72,7 @@ type RowInputMap = Record<string, { addedQty: string; rmBatchNo: string; drumBag
 
 interface DraftShape {
   batchVariant: number;
+  customBatchKg: string;
   operatorName: string;
   lotNo: string;
   jobDate: string;
@@ -89,6 +91,7 @@ interface DraftShape {
   phaseBObs: string;
   // Final
   totalLotKg: string;
+  totalLotL: string;
   // QC / Remarks
   qcCalciumContent: string;
   qcClear: string;
@@ -106,6 +109,7 @@ type ExtCard = ProductionJobCard & {
   sulphur_bag_weights: { bag_no: number; weight_kg: number | null }[] | null;
   sulphur_added_kg: number | null;
   total_sc_collected_kg: number | null;   // Total Lot Weight
+  total_sc_collected_l: number | null;    // Total Lot Weight (Litres)
   qc_sulphur_content: string | null;      // Calcium Content
   qc_density: string | null;             // Clear
   qc_ph: string | null;
@@ -189,6 +193,11 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
   const [batchVariant, setBatchVariant] = useState<BatchVariant>(
     (d0?.batchVariant as BatchVariant) ?? 600,
   );
+  // batchIsCustom: true when operator wants to record a custom kg value
+  // outside the standard variants. Formula rows still use batchVariant since
+  // quantities are pre-stored per variant in the DB.
+  const [batchIsCustom, setBatchIsCustom] = useState<boolean>(false);
+  const [customBatchKg, setCustomBatchKg] = useState<string>(d0?.customBatchKg ?? "");
   const [operatorName, setOperatorName] = useState(d0?.operatorName ?? "");
   const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
   const [jobDate, setJobDate]           = useState(freshDate(d0?.jobDate));
@@ -224,6 +233,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
 
   // ── Final / QC ────────────────────────────────────────────────────────────
   const [totalLotKg, setTotalLotKg]         = useState(d0?.totalLotKg ?? "");
+  const [totalLotL, setTotalLotL]           = useState(d0?.totalLotL ?? "");
   const [qcCalciumContent, setQcCalciumContent] = useState(d0?.qcCalciumContent ?? "");
   const [qcClear, setQcClear]               = useState(d0?.qcClear ?? "");
   const [qcPh, setQcPh]                     = useState(d0?.qcPh ?? "");
@@ -301,6 +311,11 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         const savedVariant = [600, 573, 450, 335].includes(Number(card.batch_size_kg))
           ? (Number(card.batch_size_kg) as BatchVariant) : 600;
         setBatchVariant(savedVariant);
+        // If saved batch_size_kg is not one of the standard variants, expose as custom
+        if (card.batch_size_kg != null && ![600, 573, 450, 335].includes(Number(card.batch_size_kg))) {
+          setBatchIsCustom(true);
+          setCustomBatchKg(String(card.batch_size_kg));
+        }
         setOperatorName(card.operator_name ?? "");
         setLotNo(card.lot_no ?? "");
         setJobDate(card.job_date ?? todayISO());
@@ -309,6 +324,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         setPhaseBStart(card.bead_mill_start ?? "");
         setPhaseBEnd(card.bead_mill_end ?? "");
         setTotalLotKg(card.total_sc_collected_kg != null ? String(card.total_sc_collected_kg) : "");
+        setTotalLotL(card.total_sc_collected_l  != null ? String(card.total_sc_collected_l)  : "");
         setQcCalciumContent(card.qc_sulphur_content ?? "");
         setQcClear(card.qc_density ?? "");
         setQcPh(card.qc_ph ?? "");
@@ -369,20 +385,20 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
     const rowInputs: RowInputMap = {};
     rows.forEach(r => { rowInputs[r.formulaItemId] = { addedQty: r.addedQty, rmBatchNo: r.rmBatchNo, drumBagNo: r.drumBagNo, tds: r.tds }; });
     draftSave({
-      batchVariant, operatorName, lotNo, jobDate, rowInputs,
+      batchVariant, customBatchKg, operatorName, lotNo, jobDate, rowInputs,
       jsc45Bags, jsc45Added,
       phaseAStart, phaseAEnd, phaseAObs,
       phaseATotalAdded: String(phaseAddedTotal(pk_a)),
       phaseBStart, phaseBEnd, phaseBObs,
-      totalLotKg,
+      totalLotKg, totalLotL,
       qcCalciumContent, qcClear, qcPh,
       signOperator, signChemist, signManager,
     });
-  }, [batchVariant, operatorName, lotNo, jobDate, rows,
+  }, [batchVariant, customBatchKg, operatorName, lotNo, jobDate, rows,
       jsc45Bags, jsc45Added,
       phaseAStart, phaseAEnd, phaseAObs,
       phaseBStart, phaseBEnd, phaseBObs,
-      totalLotKg, qcCalciumContent, qcClear, qcPh,
+      totalLotKg, totalLotL, qcCalciumContent, qcClear, qcPh,
       signOperator, signChemist, signManager, draftSave, isEdit,
       pk_a]);
 
@@ -447,7 +463,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         lot_no:             lotNo.trim(),
         job_date:           jobDate,
         operator_id:        userId,
-        batch_size_kg:      batchVariant,
+        batch_size_kg:      batchIsCustom && customBatchKg ? parseFloat(customBatchKg) : batchVariant,
         operator_name:      operatorName.trim() || null,
         // Phase A mixing → premix_start/end
         premix_start:       phaseAStart || null,
@@ -458,8 +474,9 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         // JSC45 bags → sulphur_bag_weights
         sulphur_bag_weights: jsc45BagJson,
         sulphur_added_kg:   jsc45Added[vStr] ? parseFloat(jsc45Added[vStr]) : null,
-        // Total Lot Weight → total_sc_collected_kg
+        // Total Lot Weight → total_sc_collected_kg / l
         total_sc_collected_kg: totalLotKg ? parseFloat(totalLotKg) : lotWeight || null,
+        total_sc_collected_l:  totalLotL  ? parseFloat(totalLotL)  : null,
         // QC
         qc_sulphur_content: qcCalciumContent || null,
         qc_density:         qcClear          || null,
@@ -718,28 +735,72 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
           </div>
           <div>
             <label>{t("batchSizeKg")}</label>
-            <div className="chip-group" style={{ marginTop: 6, flexWrap: "wrap" }}>
-              {BATCH_OPTIONS.map(size => (
-                <div key={size}
-                  className={`chip${batchVariant === size ? " selected" : ""}`}
-                  onClick={() => !isEdit && setBatchVariant(size)}
-                  style={{ cursor: isEdit ? "not-allowed" : "pointer" }}
-                >
-                  {size} kg
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+              <select
+                value={batchIsCustom ? "__custom__" : String(batchVariant)}
+                onChange={e => {
+                  if (isEdit) return;
+                  if (e.target.value === "__custom__") {
+                    setBatchIsCustom(true);
+                  } else {
+                    setBatchIsCustom(false);
+                    setCustomBatchKg("");
+                    setBatchVariant(Number(e.target.value) as BatchVariant);
+                  }
+                }}
+                disabled={isEdit}
+                style={{
+                  fontSize: 14, fontWeight: 700,
+                  padding: "8px 12px", borderRadius: 8,
+                  border: `2px solid ${ACCENT}`,
+                  background: "#fff", color: ACCENT,
+                  cursor: isEdit ? "not-allowed" : "pointer",
+                  appearance: "auto",
+                }}
+              >
+                {BATCH_OPTIONS.map(size => (
+                  <option key={size} value={size}>{size} kg</option>
+                ))}
+                <option value="__custom__">{lang === "hi" ? "कस्टम मान दर्ज करें…" : "Enter custom value…"}</option>
+              </select>
+              {batchIsCustom && !isEdit && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="number"
+                    step="any"
+                    autoFocus
+                    placeholder={lang === "hi" ? "बैच kg दर्ज करें" : "Enter batch kg"}
+                    value={customBatchKg}
+                    onChange={e => setCustomBatchKg(e.target.value)}
+                    style={{
+                      fontSize: 14, fontWeight: 700,
+                      padding: "8px 12px", borderRadius: 8,
+                      border: `2px solid ${ACCENT}`,
+                      color: ACCENT, width: 140,
+                    }}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>kg</span>
                 </div>
-              ))}
+              )}
+              {batchIsCustom && !isEdit && (
+                <div className="field-hint" style={{ color: ACCENT }}>
+                  {lang === "hi"
+                    ? `फॉर्मूला पंक्तियाँ ${batchVariant} kg वेरिएंट के अनुसार दिखाई जाएंगी`
+                    : `Formula rows shown for the ${batchVariant} kg variant`}
+                </div>
+              )}
             </div>
             {isEdit && (
               <div className="field-hint" style={{ marginTop: 4 }}>
-                Batch variant cannot be changed when editing.
+                {t("batchVariantNotChange")}
               </div>
             )}
-            {batchVariant === 600 && (
+            {!batchIsCustom && batchVariant === 600 && (
               <div className="field-hint" style={{ color: ACCENT, marginTop: 4, fontWeight: 600 }}>
                 Uses JSC63 (row 5)
               </div>
             )}
-            {batchVariant !== 600 && (
+            {!batchIsCustom && batchVariant !== 600 && (
               <div className="field-hint" style={{ color: ACCENT, marginTop: 4, fontWeight: 600 }}>
                 Uses JSC64 (row 5){batchVariant === 573 ? " · includes RETURN INSTACAL" : ""}
               </div>
@@ -774,11 +835,11 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         <div className="row2">
           <div>
             <label>{t("startTime")}</label>
-            <input type="time" value={phaseAStart} onChange={e => setPhaseAStart(e.target.value)} />
+            <TimeField value={phaseAStart} onChange={setPhaseAStart} />
           </div>
           <div>
             <label>{t("endTime")}</label>
-            <input type="time" value={phaseAEnd} onChange={e => setPhaseAEnd(e.target.value)} />
+            <TimeField value={phaseAEnd} onChange={setPhaseAEnd} />
           </div>
         </div>
       </div>
@@ -817,11 +878,11 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         <div className="row2">
           <div>
             <label>{t("startTime")}</label>
-            <input type="time" value={phaseBStart} onChange={e => setPhaseBStart(e.target.value)} />
+            <TimeField value={phaseBStart} onChange={setPhaseBStart} />
           </div>
           <div>
             <label>{t("endTime")}</label>
-            <input type="time" value={phaseBEnd} onChange={e => setPhaseBEnd(e.target.value)} />
+            <TimeField value={phaseBEnd} onChange={setPhaseBEnd} />
           </div>
         </div>
       </div>
@@ -864,7 +925,12 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
               value={totalLotKg}
               onChange={e => setTotalLotKg(e.target.value)} />
           </div>
-          <div />
+          <div>
+            <label>{t("totalLotLitres")}</label>
+            <input type="number" step="any" placeholder="0"
+              value={totalLotL}
+              onChange={e => setTotalLotL(e.target.value)} />
+          </div>
         </div>
       </div>
 

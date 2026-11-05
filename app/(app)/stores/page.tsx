@@ -918,12 +918,10 @@ function JobCardsSection({ onGoToTab, onCreateSlip }: {
 // =============================================================================
 // TAB 3 -- RECEIVED ENTRY BOOK
 //
-// Mirrors the RECEIVED tab in the DPR Excel exactly.
-// Columns: Date | Particular | Transport | Materials | Vehicle No | O/WT |
-//     F/Wt | Bags/Loose | INV/CHL No | Remarks | PO No
-//
-// Remarks field has a searchable multi-select filter dropdown with all
-// predefined values from the Excel filter list.
+// Mirrors the RECEIVED worksheet in DPR For A20 26-27 Oct-26 to Mar-27.xlsm.
+// All 13 columns from the Excel: Date | Particular/Supplier | Transport |
+// Materials | Vehicle No. | O/WT | F/WT | Bags/Loose | INV No. |
+// Material Code/Old Code | Remarks | PO No. | Additional Remarks/QC Status
 // =============================================================================
 
 // =============================================================================
@@ -1512,8 +1510,13 @@ function CodeFilterDropdown({
 
 // =============================================================================
 // TAB 3 -- RECEIVED ENTRY BOOK
-// Columns: Date | Particular | Transport | Materials | Vehicle No | O/WT |
-//     F/Wt | Bags/Loose | INV/CHL No | Code (dropdown) | Remarks (free text) | PO No
+//
+// Mirrors the RECEIVED worksheet in DPR For A20 26-27 Oct-26 to Mar-27.xlsm
+//
+// Columns (all from the Excel RECEIVED worksheet):
+//   Date | Particular / Supplier Name | Transport | Materials | Vehicle No. |
+//   O/WT | F/WT | Bags / Loose | INV No. | Material Code / Old Code |
+//   Remarks | PO No. | Additional Remarks / QC Status
 // =============================================================================
 
 const RECEIVED_CODES = [
@@ -1537,21 +1540,57 @@ const RECEIVED_CODES = [
  "Liquid Sulphur(Molten)",
 ] as const;
 
+// Material code / old code suggestions — covers both internal item codes and
+// legacy codes from the Excel RECEIVED worksheet.
+const MATERIAL_CODE_SUGGESTIONS = [
+ // RM codes
+ "CRUDE_SULPHUR", "SULPHUR", "OIL", "ELASTO_541_OIL", "CHEM_GRIND_OIL",
+ "POWER_OIL_CITRINE", "GEAR_OIL_320", "MAGNESIUM_CARBONATE",
+ // PM codes (bag codes from Excel)
+ "BAG_CEAT_108_EXPORT", "BAG_MRF_M2615", "BAG_LANXESS", "BAG_CEAT_R5299",
+ "BAG_APOLLO_160108", "BAG_BRIDGESTONE_WE10", "BAG_RUBBER_MAKER_50KG",
+ "BAG_JKI_108_50KG", "BAG_OLD_BAGS",
+ // FG codes (party codes matching job cards)
+ "CEAT-108/EXPORT", "MRF-M2615", "R5299", "Lanxess", "BKT", "Rubber",
+ "Shakti", "JKI108", "160108",
+ // Legacy / old codes from the Excel
+ "C-108", "M-2615", "L-BG", "WE10", "RM50", "JK108",
+] as const;
+
+// QC Status / COA suggestions for Additional Remarks field
+const QC_STATUS_SUGGESTIONS = [
+ "COA Received",
+ "COA Pending",
+ "COA Attached",
+ "QC Approved",
+ "QC Rejected",
+ "QC Pending",
+ "Under QC Hold",
+ "Released after QC",
+ "Sample Sent to Lab",
+ "Test Report OK",
+ "Test Report Awaited",
+ "Conditional Release",
+ "Rejected — Return to Supplier",
+] as const;
+
 interface ReceivedEntry {
  date: string;
- particular: string;
+ particular: string;       // Particular / Supplier Name
  transport: string;
  materials: string;
  vehicle_no: string;
- o_wt: string;
- f_wt: string;
- bags_loose: string;
- inv_chl_no: string;
- code: string;
+ o_wt: string;             // Outer / Gross Weight
+ f_wt: string;             // Final / Net Weight
+ bags_loose: string;       // Bags / Loose quantity/description
+ inv_chl_no: string;       // INV No. (Invoice / Challan)
+ material_code: string;    // Material Code / Old Code
+ code: string;             // legacy code field (kept for backward compat)
  remarks: string;
  po_no: string;
+ qc_status: string;        // Additional Remarks / QC Status (COA, etc.)
  material_type: "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
- material_type_other: string;  // free text when material_type === "Other"
+ material_type_other: string;
 }
 interface SavedReceivedRow extends ReceivedEntry { id: string; _edited?: boolean; }
 
@@ -1559,7 +1598,8 @@ function blankReceivedEntry(date?: string): ReceivedEntry {
  return {
   date: date ?? today(), particular: "", transport: "", materials: "",
   vehicle_no: "", o_wt: "", f_wt: "", bags_loose: "",
-  inv_chl_no: "", code: "", remarks: "", po_no: "",
+  inv_chl_no: "", material_code: "", code: "", remarks: "", po_no: "",
+  qc_status: "",
   material_type: "", material_type_other: "",
  };
 }
@@ -1571,15 +1611,15 @@ function ReceivedSection() {
  const pathname = usePathname();
  const draft = useFormDraft<ReceivedEntry>(draftKey(pathname, "received", user?.id));
 
- const [entry, setEntry]      = useState<ReceivedEntry>(() => draft.restored ?? blankReceivedEntry());
+ const [entry, setEntry]     = useState<ReceivedEntry>(() => draft.restored ?? blankReceivedEntry());
  const draftSave = draft.save;
  useEffect(() => { draftSave(entry); }, [entry, draftSave]);
  const [submitting, setSubmitting] = useState(false);
- const [history, setHistory]    = useState<SavedReceivedRow[]>([]);
+ const [history, setHistory]   = useState<SavedReceivedRow[]>([]);
  const [histLoading, setHistLoading] = useState(true);
  const [filterCodes, setFilterCodes] = useState<string[]>([]);
  const [filterDropOpen, setFilterDropOpen] = useState(false);
- // Edit state
+ const [filterDate, setFilterDate] = useState("");
  const [editId, setEditId] = useState<string | null>(null);
 
  const setField = (k: keyof ReceivedEntry, v: string) =>
@@ -1588,11 +1628,22 @@ function ReceivedSection() {
  const startEdit = (row: SavedReceivedRow) => {
   setEditId(row.id);
   setEntry({
-   date: row.date, particular: row.particular, transport: row.transport,
-   materials: row.materials, vehicle_no: row.vehicle_no, o_wt: row.o_wt,
-   f_wt: row.f_wt, bags_loose: row.bags_loose, inv_chl_no: row.inv_chl_no,
-   code: row.code, remarks: row.remarks, po_no: row.po_no,
-   material_type: row.material_type, material_type_other: row.material_type_other,
+   date:              row.date,
+   particular:        row.particular,
+   transport:         row.transport,
+   materials:         row.materials,
+   vehicle_no:        row.vehicle_no,
+   o_wt:              row.o_wt,
+   f_wt:              row.f_wt,
+   bags_loose:        row.bags_loose,
+   inv_chl_no:        row.inv_chl_no,
+   material_code:     row.material_code,
+   code:              row.code,
+   remarks:           row.remarks,
+   po_no:             row.po_no,
+   qc_status:         row.qc_status,
+   material_type:     row.material_type,
+   material_type_other: row.material_type_other,
   });
   window.scrollTo({ top: 0, behavior: "smooth" });
  };
@@ -1605,7 +1656,7 @@ function ReceivedSection() {
 
  const loadHistory = useCallback(async () => {
   setHistLoading(true);
-  // Only fetch logbook rows (qty all zero) to avoid showing duplicate stock-update rows
+  // Only fetch logbook rows (qty all zero) to avoid duplicate stock-update rows
   const { data, error } = await supabase
    .from("stores_stock_ledger")
    .select("id, transaction_date, remark, created_at")
@@ -1622,62 +1673,82 @@ function ReceivedSection() {
    try {
     const p = JSON.parse(row.remark ?? "{}") as Partial<ReceivedEntry> & { _edited?: boolean };
     rows.push({
-     id: row.id, date: row.transaction_date,
-     particular: p.particular ?? "", transport: p.transport ?? "",
-     materials: p.materials ?? "", vehicle_no: p.vehicle_no ?? "",
-     o_wt: p.o_wt ?? "", f_wt: p.f_wt ?? "",
-     bags_loose: p.bags_loose ?? "", inv_chl_no: p.inv_chl_no ?? "",
-     code: p.code ?? (p as Record<string,string>).remark ?? "",
-     remarks: p.remarks ?? "", po_no: p.po_no ?? "",
+     id:            row.id,
+     date:          row.transaction_date,
+     particular:    p.particular ?? "",
+     transport:     p.transport ?? "",
+     materials:     p.materials ?? "",
+     vehicle_no:    p.vehicle_no ?? "",
+     o_wt:          p.o_wt ?? "",
+     f_wt:          p.f_wt ?? "",
+     bags_loose:    p.bags_loose ?? "",
+     inv_chl_no:    p.inv_chl_no ?? "",
+     material_code: p.material_code ?? "",
+     code:          p.code ?? (p as Record<string,string>).remark ?? "",
+     remarks:       p.remarks ?? "",
+     po_no:         p.po_no ?? "",
+     qc_status:     p.qc_status ?? "",
      material_type: (p.material_type as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "") ?? "",
      material_type_other: (p.material_type_other as string) ?? "",
-     _edited: p._edited ?? false,
+     _edited:       p._edited ?? false,
     });
    } catch { /* skip */ }
   }
-  setHistory(rows); setHistLoading(false);
+  setHistory(rows);
+  setHistLoading(false);
  }, [supabase, showToast]);
 
  useEffect(() => { loadHistory(); }, [loadHistory]);
 
  const [showAll, setShowAll] = useState(false);
 
- const histFiltered = filterCodes.length === 0
-  ? history
-  : history.filter(r => filterCodes.includes(r.code));
+ const histFiltered = history.filter(r => {
+  if (filterCodes.length > 0 && !filterCodes.includes(r.material_code) && !filterCodes.includes(r.code)) return false;
+  if (filterDate && r.date !== filterDate) return false;
+  return true;
+ });
 
- // Default: show only the 10 most recent rows. Expand when showAll or when
- // the row being edited is outside the first 10 (so it stays visible).
+ // Default: latest 10. Expand if the row being edited is beyond index 10.
  const editIdxInFiltered = editId ? histFiltered.findIndex(r => r.id === editId) : -1;
  const needsExpand = editIdxInFiltered >= 10;
  const histVisible = (showAll || needsExpand) ? histFiltered : histFiltered.slice(0, 10);
+
+ // ── Build the full payload object from form state ─────────────────────────
+ function buildPayload(edited: boolean): ReceivedEntry & { _edited?: boolean } {
+  return {
+   date:              entry.date,
+   particular:        entry.particular.trim(),
+   transport:         entry.transport.trim(),
+   materials:         entry.materials.trim(),
+   vehicle_no:        entry.vehicle_no.trim(),
+   o_wt:              entry.o_wt.trim(),
+   f_wt:              entry.f_wt.trim(),
+   bags_loose:        entry.bags_loose.trim(),
+   inv_chl_no:        entry.inv_chl_no.trim(),
+   material_code:     entry.material_code.trim(),
+   code:              entry.code,
+   remarks:           entry.remarks.trim(),
+   po_no:             entry.po_no.trim(),
+   qc_status:         entry.qc_status.trim(),
+   material_type:     entry.material_type,
+   material_type_other: entry.material_type_other.trim(),
+   ...(edited ? { _edited: true } : {}),
+  };
+ }
 
  const handleUpdate = async () => {
   if (!editId) return;
   if (!entry.date) { showToast("Enter a date.", true); return; }
   if (!entry.particular.trim() && !entry.materials.trim()) {
-   showToast("Enter at least Particular or Materials.", true); return;
+   showToast("Enter at least Particular / Supplier Name or Materials.", true); return;
   }
   if (!user) return;
   setSubmitting(true);
   try {
-   const payload: ReceivedEntry & { _edited: boolean } = {
-    date: entry.date, particular: entry.particular.trim(),
-    transport: entry.transport.trim(), materials: entry.materials.trim(),
-    vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
-    f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
-    inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
-    remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
-    material_type: entry.material_type,
-    material_type_other: entry.material_type_other.trim(),
-    _edited: true,
-   };
+   const payload = buildPayload(true);
    const { error } = await supabase
     .from("stores_stock_ledger")
-    .update({
-     transaction_date: entry.date,
-     remark: JSON.stringify(payload),
-    })
+    .update({ transaction_date: entry.date, remark: JSON.stringify(payload) })
     .eq("id", editId);
    if (error) { showToast("Update failed: " + error.message, true); return; }
    showToast("Received entry updated.");
@@ -1693,7 +1764,7 @@ function ReceivedSection() {
  const handleSave = async () => {
   if (!entry.date) { showToast("Enter a date.", true); return; }
   if (!entry.particular.trim() && !entry.materials.trim()) {
-   showToast("Enter at least Particular or Materials.", true); return;
+   showToast("Enter at least Particular / Supplier Name or Materials.", true); return;
   }
   if (!user) return;
   setSubmitting(true);
@@ -1705,41 +1776,62 @@ function ReceivedSection() {
     showToast("No stock items found. Run migration 027 in Supabase first.", true);
     setSubmitting(false); return;
    }
-   const payload: ReceivedEntry = {
-    date: entry.date, particular: entry.particular.trim(),
-    transport: entry.transport.trim(), materials: entry.materials.trim(),
-    vehicle_no: entry.vehicle_no.trim(), o_wt: entry.o_wt.trim(),
-    f_wt: entry.f_wt.trim(), bags_loose: entry.bags_loose.trim(),
-    inv_chl_no: entry.inv_chl_no.trim(), code: entry.code,
-    remarks: entry.remarks.trim(), po_no: entry.po_no.trim(),
-    material_type: entry.material_type,
-    material_type_other: entry.material_type_other.trim(),
-   };
-   // -- 1. Logbook row (always saved, qty all 0 � audit record) ----------
+   const payload = buildPayload(false);
+
+   // ── 1. Logbook row (audit record — qty all 0) ─────────────────────────
    const { error } = await supabase.from("stores_stock_ledger").insert({
-    item_id: itemData.id, factory_id: itemData.factory_id,
-    transaction_date: entry.date, transaction_source: "manual",
-    qty_received: 0, qty_issued: 0, dispatch_qty: 0, closing_balance: 0,
-    reference_type: "received_entry", remark: JSON.stringify(payload),
-    entered_by: user.id,
+    item_id:            itemData.id,
+    factory_id:         itemData.factory_id,
+    transaction_date:   entry.date,
+    transaction_source: "manual",
+    qty_received:       0,
+    qty_issued:         0,
+    dispatch_qty:       0,
+    closing_balance:    0,
+    reference_type:     "received_entry",
+    remark:             JSON.stringify(payload),
+    entered_by:         user.id,
    });
    if (error) { showToast("Save failed: " + error.message, true); return; }
 
-   // -- 2. Stock ledger update � add received qty to the matching item ----
-   // Match by materials field first (direct ILIKE against item_name),
-   // then fall back to the Code?pattern mapping if materials is empty.
-   const receivedQty = parseQty(entry.f_wt);
-   const materialsText = entry.materials.trim();
-   const codePattern   = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
-   const searchPattern = materialsText || codePattern;
-   if (searchPattern && receivedQty != null) {
-    const { data: stockItem } = await supabase
-     .from("stores_stock_items")
-     .select("id, factory_id, item_name, unit, category")
-     .eq("is_active", true)
-     .ilike("item_name", `%${searchPattern}%`)
-     .limit(1)
-     .maybeSingle();
+   // ── 2. Stock ledger update — credit received qty to matching item ──────
+   // Priority: material_code field > materials text ILIKE > code→pattern map
+   const receivedQty       = parseQty(entry.f_wt);
+   const materialsText     = entry.materials.trim();
+   const materialCodeText  = entry.material_code.trim();
+   const codePattern       = entry.code ? CODE_TO_ITEM_NAME_PATTERN[entry.code] : null;
+   // Try exact item_code match first, then ILIKE on item_name, then code pattern
+   if (receivedQty != null) {
+    let stockItem: { id: string; factory_id: string; item_name: string; unit: string; category: string } | null = null;
+
+    if (materialCodeText) {
+     const { data } = await supabase
+      .from("stores_stock_items")
+      .select("id, factory_id, item_name, unit, category")
+      .eq("is_active", true)
+      .eq("item_code", materialCodeText)
+      .limit(1).maybeSingle();
+     stockItem = data ?? null;
+    }
+    if (!stockItem && materialsText) {
+     const { data } = await supabase
+      .from("stores_stock_items")
+      .select("id, factory_id, item_name, unit, category")
+      .eq("is_active", true)
+      .ilike("item_name", `%${materialsText}%`)
+      .limit(1).maybeSingle();
+     stockItem = data ?? null;
+    }
+    if (!stockItem && codePattern) {
+     const { data } = await supabase
+      .from("stores_stock_items")
+      .select("id, factory_id, item_name, unit, category")
+      .eq("is_active", true)
+      .ilike("item_name", `%${codePattern}%`)
+      .limit(1).maybeSingle();
+     stockItem = data ?? null;
+    }
+
     if (stockItem) {
      const { data: lastRow } = await supabase
       .from("stores_stock_ledger")
@@ -1760,13 +1852,16 @@ function ReceivedSection() {
       closing_balance:    newBal,
       reference_type:     "received_entry",
       remark: JSON.stringify({
-       source: "Received Entry Book",
-       material: materialsText || null,
-       code: entry.code || null,
-       particular: payload.particular || null,
-       inv_chl_no: payload.inv_chl_no || null,
-       vehicle_no: payload.vehicle_no || null,
-       remark: payload.remarks || null,
+       source:        "Received Entry Book",
+       material:      materialsText || null,
+       material_code: materialCodeText || null,
+       code:          entry.code || null,
+       particular:    payload.particular || null,
+       inv_chl_no:    payload.inv_chl_no || null,
+       vehicle_no:    payload.vehicle_no || null,
+       remark:        payload.remarks || null,
+       qc_status:     payload.qc_status || null,
+       po_no:         payload.po_no || null,
       }),
       entered_by: user.id,
      });
@@ -1775,31 +1870,52 @@ function ReceivedSection() {
 
    const nowISO = new Date().toISOString();
    const { subject, html } = buildReceivedEmail({
-    date: entry.date, particular: payload.particular || null,
-    transport: payload.transport || null, materials: payload.materials || null,
-    vehicleNo: payload.vehicle_no || null, oWt: payload.o_wt || null,
-    fWt: payload.f_wt || null, bagsLoose: payload.bags_loose || null,
-    invChlNo: payload.inv_chl_no || null, code: payload.code || null,
-    poNo: payload.po_no || null, remarks: payload.remarks || null,
-    submittedByName: "Stores", submittedAt: nowISO,
+    date:          entry.date,
+    particular:    payload.particular || null,
+    transport:     payload.transport || null,
+    materials:     payload.materials || null,
+    vehicleNo:     payload.vehicle_no || null,
+    oWt:           payload.o_wt || null,
+    fWt:           payload.f_wt || null,
+    bagsLoose:     payload.bags_loose || null,
+    invChlNo:      payload.inv_chl_no || null,
+    code:          payload.material_code || payload.code || null,
+    poNo:          payload.po_no || null,
+    remarks:       [payload.remarks, payload.qc_status].filter(Boolean).join(" | ") || null,
+    submittedByName: "Stores",
+    submittedAt:   nowISO,
    });
    void notifyEvent({
-    eventType: "stores_received", subject, html, factoryId: itemData.factory_id,
+    eventType: "stores_received",
+    subject,
+    html,
+    factoryId: itemData.factory_id,
     sheetData: {
      type: "append", target: "stores", tab: "Received",
      values: [
-      entry.date, payload.particular || null, payload.transport || null,
-      payload.materials || null, payload.vehicle_no || null, payload.o_wt || null,
-      payload.f_wt || null, payload.bags_loose || null, payload.inv_chl_no || null,
-      payload.code || null, payload.po_no || null, payload.remarks || null,
-      "Stores", nowISO,
+      entry.date,
+      payload.particular || null,
+      payload.transport || null,
+      payload.materials || null,
+      payload.vehicle_no || null,
+      payload.o_wt || null,
+      payload.f_wt || null,
+      payload.bags_loose || null,
+      payload.inv_chl_no || null,
+      payload.material_code || payload.code || null,
+      payload.remarks || null,
+      payload.po_no || null,
+      payload.qc_status || null,
+      "Stores",
+      nowISO,
      ],
     },
    });
 
    showToast("Received entry saved -- " + entry.date + " " + (entry.particular || entry.materials));
    draft.clear();
-   setEntry(blankReceivedEntry(entry.date)); loadHistory();
+   setEntry(blankReceivedEntry(entry.date));
+   loadHistory();
   } catch (e: unknown) {
    showToast("Error: " + (e instanceof Error ? e.message : String(e)), true);
   } finally { setSubmitting(false); }
@@ -1807,24 +1923,28 @@ function ReceivedSection() {
 
  return (
   <>
+   {/* ── Entry form ── */}
    <div className="card">
     <h3>{editId ? "Edit Received Entry" : "Received Entry Book"}</h3>
+
     {editId && (
      <div style={{
       background: "#fff8e1", border: "1px solid #f57f17", borderRadius: 8,
       padding: "8px 14px", marginBottom: 12, fontSize: 13, color: "#e65100",
       fontWeight: 600,
      }}>
-      Editing existing record. Save to update, or cancel to discard changes.
+      Editing existing record. Save to update, or Cancel to discard.
      </div>
     )}
+
+    {/* Row 1 — Date | Material Type | Particular / Supplier Name */}
     <div className="row3">
      <div>
       <label>Date *</label>
       <DateField value={entry.date} onChange={v => setField("date", v)} />
      </div>
      <div>
-      <label>Material Type *</label>
+      <label>Material Type</label>
       <select value={entry.material_type}
        onChange={e => {
         const t = e.target.value as "RM" | "PM" | "FG" | "Maintenance" | "Other" | "";
@@ -1840,21 +1960,23 @@ function ReceivedSection() {
       </select>
       {entry.material_type === "Other" && (
        <input type="text"
-        placeholder="Enter material type..."
+        placeholder="Describe material type..."
         value={entry.material_type_other}
         onChange={e => setField("material_type_other", e.target.value)}
         style={{ marginTop: 6 }} />
       )}
      </div>
      <div>
-      <label>Particular</label>
+      <label>Particular / Supplier Name</label>
       <AutocompleteInput
        value={entry.particular}
        onChange={v => setField("particular", v)}
        suggestions={PARTICULARS_NAMES}
-       placeholder="Type to search or enter manually..." />
+       placeholder="Type to search suppliers or enter manually..." />
      </div>
     </div>
+
+    {/* Row 2 — Transport | Materials | Vehicle No. */}
     <div className="row3">
      <div>
       <label>Transport</label>
@@ -1865,7 +1987,9 @@ function ReceivedSection() {
        placeholder="Type to search or enter manually..." />
      </div>
      <div>
-      <label>Materials{entry.material_type && MATERIALS_BY_TYPE[entry.material_type] ? ` (${entry.material_type})` : ""}</label>
+      <label>
+       Materials{entry.material_type && MATERIALS_BY_TYPE[entry.material_type] ? ` (${entry.material_type})` : ""}
+      </label>
       <AutocompleteInput
        value={entry.materials}
        onChange={v => setField("materials", v)}
@@ -1877,202 +2001,308 @@ function ReceivedSection() {
      <div>
       <label>Vehicle No.</label>
       <input type="text" placeholder="e.g. MH05EL3625"
-       value={entry.vehicle_no} onChange={e => setField("vehicle_no", e.target.value)} />
+       value={entry.vehicle_no}
+       onChange={e => setField("vehicle_no", e.target.value)} />
      </div>
     </div>
+
+    {/* Row 3 — O/WT | F/WT | Bags / Loose */}
     <div className="row3">
      <div>
-      <label>O/WT</label>
-      <input type="text" placeholder="e.g. 2034.000"
-       value={entry.o_wt} onChange={e => setField("o_wt", e.target.value)} />
+      <label>O/WT (Gross Weight)</label>
+      <input type="text" placeholder="e.g. 25100.000 kg or 25.100 MT"
+       value={entry.o_wt}
+       onChange={e => setField("o_wt", e.target.value)} />
+      <div className="field-hint">Outer / gross weight from the weighbridge slip.</div>
      </div>
      <div>
-      <label>F/Wt</label>
-      <input type="text" placeholder="e.g. 2034 Nos"
-       value={entry.f_wt} onChange={e => setField("f_wt", e.target.value)} />
+      <label>F/WT (Net Weight)</label>
+      <input type="text" placeholder="e.g. 24900 kg | 2034 Nos | 500 MT"
+       value={entry.f_wt}
+       onChange={e => setField("f_wt", e.target.value)} />
+      <div className="field-hint">Final net weight — used for stock ledger update.</div>
      </div>
      <div>
       <label>Bags / Loose</label>
-      <input type="text" placeholder="e.g. Size 20x32 Printed"
-       value={entry.bags_loose} onChange={e => setField("bags_loose", e.target.value)} />
+      <input type="text" placeholder="e.g. 996 Bags | Loose | 20 Drums | 5 Sets"
+       value={entry.bags_loose}
+       onChange={e => setField("bags_loose", e.target.value)} />
+      <div className="field-hint">
+       Bag count, drum count, or &quot;Loose&quot; if not in bags.
+       Units: kg, MT, bags, nos, sets, drums, packets.
+      </div>
      </div>
     </div>
+
+    {/* Row 4 — INV No. | Material Code / Old Code | Remarks */}
     <div className="row3">
      <div>
-      <label>INV / CHL No.</label>
+      <label>INV No. (Invoice / Challan)</label>
       <input type="text" placeholder="e.g. AP/0049/2026-27"
-       value={entry.inv_chl_no} onChange={e => setField("inv_chl_no", e.target.value)} />
+       value={entry.inv_chl_no}
+       onChange={e => setField("inv_chl_no", e.target.value)} />
      </div>
      <div>
-      <label>Code</label>
-      <CodeDropdown codes={RECEIVED_CODES} value={entry.code}
-       onChange={v => setField("code", v)} placeholder="-- Select code --" />
+      <label>Material Code / Old Code</label>
+      <AutocompleteInput
+       value={entry.material_code}
+       onChange={v => setField("material_code", v)}
+       suggestions={MATERIAL_CODE_SUGGESTIONS}
+       placeholder="e.g. CRUDE_SULPHUR | BAG_CEAT_108_EXPORT | C-108..." />
+      <div className="field-hint">
+       Internal item code or legacy Excel code for stock ledger matching.
+      </div>
      </div>
      <div>
-      <label>Remarks (free text)</label>
-      <input type="text" placeholder="Enter remark manually..."
-       value={entry.remarks} onChange={e => setField("remarks", e.target.value)} />
+      <label>Remarks</label>
+      <input type="text" placeholder="Enter remarks..."
+       value={entry.remarks}
+       onChange={e => setField("remarks", e.target.value)} />
      </div>
+    </div>
+
+    {/* Row 5 — PO No. | Additional Remarks / QC Status */}
+    <div className="row3">
      <div>
       <label>PO No.</label>
       <input type="text" placeholder="e.g. 34/26-27"
-       value={entry.po_no} onChange={e => setField("po_no", e.target.value)} />
+       value={entry.po_no}
+       onChange={e => setField("po_no", e.target.value)} />
+     </div>
+     <div style={{ gridColumn: "span 2" }}>
+      <label>Additional Remarks / QC Status</label>
+      <AutocompleteInput
+       value={entry.qc_status}
+       onChange={v => setField("qc_status", v)}
+       suggestions={QC_STATUS_SUGGESTIONS}
+       placeholder="e.g. COA Received | QC Approved | COA Pending..." />
+      <div className="field-hint">
+       COA and QC receiving information — select from common values or type freely.
+      </div>
      </div>
     </div>
    </div>
 
+   {/* ── Action buttons ── */}
    <button className="btn btn-primary" type="button"
-    disabled={submitting} onClick={editId ? handleUpdate : handleSave}>
+    disabled={submitting}
+    onClick={editId ? handleUpdate : handleSave}>
     {submitting ? "Saving..." : editId ? "Update Received Entry" : "Save Received Entry"}
    </button>
    {editId && (
     <button className="btn btn-ghost" type="button"
      style={{ marginLeft: 10 }}
-     onClick={cancelEdit} disabled={submitting}>
+     onClick={cancelEdit}
+     disabled={submitting}>
      Cancel Edit
     </button>
    )}
 
+   {/* ── History table ── */}
    <div className="card" style={{ marginTop: 16 }}>
     <div className="helper-row">
      <h3 style={{ margin: 0 }}>
       Received History
-      {filterCodes.length > 0 ? " (filtered: " + filterCodes.length + ")" : " (all)"}
+      {(filterCodes.length > 0 || filterDate) ? " (filtered)" : " (all)"}
      </h3>
-     <div style={{ position: "relative" }}>
-      <button type="button"
-       onClick={() => setFilterDropOpen(p => !p)}
+     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      {/* Date filter */}
+      <input
+       type="date"
+       value={filterDate}
+       onChange={e => setFilterDate(e.target.value)}
        style={{
-        padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
-        background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
-        color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
-        fontSize: 12, fontWeight: 700, cursor: "pointer",
-       }}>
-       Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
-      </button>
-      {filterDropOpen && (
-       <CodeFilterDropdown
-        codes={RECEIVED_CODES}
-        selected={filterCodes}
-        onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
-        onClear={() => setFilterCodes([])}
-        onClose={() => setFilterDropOpen(false)}
-       />
-     )}
+        padding: "5px 10px", border: "1px solid var(--line)", borderRadius: 6,
+        fontSize: 12, fontWeight: 600, cursor: "pointer",
+        background: filterDate ? "var(--clay)" : "#fff",
+        color: filterDate ? "#fff" : "var(--ink-soft)",
+       }}
+       title="Filter by date"
+      />
+      {/* Code filter */}
+      <div style={{ position: "relative" }}>
+       <button type="button"
+        onClick={() => setFilterDropOpen(p => !p)}
+        style={{
+         padding: "6px 14px", border: "1px solid var(--line)", borderRadius: 6,
+         background: filterCodes.length > 0 ? "var(--clay)" : "#fff",
+         color: filterCodes.length > 0 ? "#fff" : "var(--ink-soft)",
+         fontSize: 12, fontWeight: 700, cursor: "pointer",
+        }}>
+        Filter Code {filterCodes.length > 0 ? "(" + filterCodes.length + ")" : ""}
+       </button>
+       {filterDropOpen && (
+        <CodeFilterDropdown
+         codes={RECEIVED_CODES}
+         selected={filterCodes}
+         onToggle={v => setFilterCodes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
+         onClear={() => setFilterCodes([])}
+         onClose={() => setFilterDropOpen(false)}
+        />
+       )}
+      </div>
+      {/* Clear all filters */}
+      {(filterCodes.length > 0 || filterDate) && (
+       <button type="button"
+        onClick={() => { setFilterCodes([]); setFilterDate(""); }}
+        style={{
+         padding: "6px 12px", border: "1px solid var(--line)", borderRadius: 6,
+         background: "#fff", color: "var(--ink-soft)",
+         fontSize: 12, cursor: "pointer",
+        }}>
+        Clear All
+       </button>
+      )}
      </div>
     </div>
-    {histLoading ? <div className="empty">Loading...</div>
-     : histFiltered.length === 0 ? <div className="empty">No entries found.</div>
-     : (
-      <>
-      <div style={{ overflowX: "auto" }}>
-       <table className="dash" style={{ minWidth: 1200 }}>
-        <thead>
-         <tr>
-          <th>Date</th><th>Type</th><th>Particular</th><th>Transport</th>
-          <th>Materials</th><th>Vehicle No.</th>
-          <th style={{ textAlign: "right" }}>O/WT</th>
-          <th style={{ textAlign: "right" }}>F/Wt</th>
-          <th>Bags/Loose</th><th>INV/CHL No.</th>
-          <th>Code</th><th>Remarks</th><th>PO No.</th>
-          <th>Action</th>
-         </tr>
-        </thead>
-        <tbody>
-         {histVisible.map(row => (
-          <tr key={row.id} style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
-           <td style={{ whiteSpace: "nowrap" }}>
-            {fmtDate(row.date)}
-            {row._edited && (
-             <span style={{
-              display: "inline-block", marginLeft: 5,
-              fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
-              background: "#e3f2fd", color: "#1565c0",
-             }}>Edited</span>
-            )}
-           </td>
-           <td>
-            {row.material_type ? (
-             <span style={{
-              fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 8,
-              background:
-               row.material_type === "RM" ? "var(--clay-soft)"
-               : row.material_type === "PM" ? "#e3f2fd"
-               : row.material_type === "FG" ? "var(--ok-soft)"
-               : row.material_type === "Maintenance" ? "#fff8e1"
-               : "#f3e5f5",
-              color:
-               row.material_type === "RM" ? "var(--clay)"
-               : row.material_type === "PM" ? "#1565c0"
-               : row.material_type === "FG" ? "var(--ok)"
-               : row.material_type === "Maintenance" ? "#f57f17"
-               : "#6a1b9a",
-             }}>
-              {row.material_type === "RM" ? "Raw Material"
-               : row.material_type === "PM" ? "Packing Material"
-               : row.material_type === "FG" ? "Finished Goods"
-               : row.material_type === "Maintenance" ? "Maintenance"
-               : row.material_type_other || "Others"}
-             </span>
-            ) : <span style={{ color: "var(--line)", fontSize: 11 }}>�</span>}
-           </td>
-           <td style={{ fontSize: 12 }}>{nilText(row.particular)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
-           <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
-           <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
-           <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.f_wt)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
-           <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>{nilText(row.code)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
-           <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
-           <td>
-            <button type="button"
-             onClick={() => startEdit(row)}
-             style={{
-              padding: "4px 10px", fontSize: 11, fontWeight: 700,
-              border: "1px solid var(--clay)", borderRadius: 6,
-              background: editId === row.id ? "var(--clay)" : "#fff",
-              color: editId === row.id ? "#fff" : "var(--clay)",
-              cursor: "pointer", whiteSpace: "nowrap",
-             }}>
-             {editId === row.id ? "Editing..." : "Edit"}
-            </button>
-           </td>
-          </tr>
-        ))}
-        </tbody>
-       </table>
-      </div>
-      {histFiltered.length > 10 && (
-       <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
-        {!showAll && !needsExpand ? (
-         <button type="button" onClick={() => setShowAll(true)}
-          style={{
-           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
-           border: "1px solid var(--clay)", borderRadius: 8,
-           background: "var(--clay-soft)", color: "var(--clay)",
-          }}>
-          View All History ({histFiltered.length} records)
-         </button>
-        ) : (
-         <button type="button" onClick={() => setShowAll(false)}
-          style={{
-           padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
-           border: "1px solid var(--line)", borderRadius: 8,
-           background: "#fff", color: "var(--ink-soft)",
-          }}>
-          Show Less
-         </button>
+
+    {histLoading
+     ? <div className="empty">Loading...</div>
+     : histFiltered.length === 0
+      ? <div className="empty">No entries found.</div>
+      : (
+       <>
+        <div style={{ overflowX: "auto" }}>
+         <table className="dash" style={{ minWidth: 1400 }}>
+          <thead>
+           <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Particular / Supplier</th>
+            <th>Transport</th>
+            <th>Materials</th>
+            <th>Vehicle No.</th>
+            <th style={{ textAlign: "right" }}>O/WT</th>
+            <th style={{ textAlign: "right" }}>F/WT</th>
+            <th>Bags / Loose</th>
+            <th>INV No.</th>
+            <th>Mat. Code</th>
+            <th>Remarks</th>
+            <th>PO No.</th>
+            <th>QC Status</th>
+            <th>Action</th>
+           </tr>
+          </thead>
+          <tbody>
+           {histVisible.map(row => (
+            <tr key={row.id}
+             style={{ background: editId === row.id ? "var(--clay-soft)" : undefined }}>
+             {/* Date + Edited badge */}
+             <td style={{ whiteSpace: "nowrap" }}>
+              {fmtDate(row.date)}
+              {row._edited && (
+               <span style={{
+                display: "inline-block", marginLeft: 5,
+                fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 6,
+                background: "#e3f2fd", color: "#1565c0",
+               }}>Edited</span>
+              )}
+             </td>
+             {/* Material Type badge */}
+             <td>
+              {row.material_type ? (
+               <span style={{
+                fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 8,
+                background:
+                 row.material_type === "RM" ? "var(--clay-soft)"
+                 : row.material_type === "PM" ? "#e3f2fd"
+                 : row.material_type === "FG" ? "var(--ok-soft)"
+                 : row.material_type === "Maintenance" ? "#fff8e1"
+                 : "#f3e5f5",
+                color:
+                 row.material_type === "RM" ? "var(--clay)"
+                 : row.material_type === "PM" ? "#1565c0"
+                 : row.material_type === "FG" ? "var(--ok)"
+                 : row.material_type === "Maintenance" ? "#f57f17"
+                 : "#6a1b9a",
+               }}>
+               {row.material_type === "RM" ? "RM"
+                : row.material_type === "PM" ? "PM"
+                : row.material_type === "FG" ? "FG"
+                : row.material_type === "Maintenance" ? "Maint."
+                : row.material_type_other || "Other"}
+               </span>
+              ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+             </td>
+             <td style={{ fontSize: 12, maxWidth: 140, whiteSpace: "normal" }}>{nilText(row.particular)}</td>
+             <td style={{ fontSize: 12 }}>{nilText(row.transport)}</td>
+             <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: "normal" }}>{nilText(row.materials)}</td>
+             <td style={{ fontSize: 12 }}>{nilText(row.vehicle_no)}</td>
+             <td style={{ textAlign: "right", fontSize: 12 }}>{nilText(row.o_wt)}</td>
+             <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600 }}>{nilText(row.f_wt)}</td>
+             <td style={{ fontSize: 12 }}>{nilText(row.bags_loose)}</td>
+             <td style={{ fontSize: 12 }}>{nilText(row.inv_chl_no)}</td>
+             <td style={{ fontSize: 12, color: "var(--clay)", fontWeight: 600 }}>
+              {nilText(row.material_code || row.code)}
+             </td>
+             <td style={{ fontSize: 12 }}>{nilText(row.remarks)}</td>
+             <td style={{ fontSize: 12 }}>{nilText(row.po_no)}</td>
+             <td style={{ fontSize: 11 }}>
+              {row.qc_status ? (
+               <span style={{
+                padding: "2px 7px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                background:
+                 row.qc_status.toLowerCase().includes("approv") ? "var(--ok-soft)"
+                 : row.qc_status.toLowerCase().includes("reject") ? "var(--warn-soft)"
+                 : row.qc_status.toLowerCase().includes("pending") ? "#fff8e1"
+                 : "#f3e5f5",
+                color:
+                 row.qc_status.toLowerCase().includes("approv") ? "var(--ok)"
+                 : row.qc_status.toLowerCase().includes("reject") ? "var(--warn)"
+                 : row.qc_status.toLowerCase().includes("pending") ? "#f57f17"
+                 : "#6a1b9a",
+               }}>
+               {row.qc_status}
+               </span>
+              ) : <span style={{ color: "var(--line)", fontSize: 11 }}>—</span>}
+             </td>
+             <td>
+              <button type="button"
+               onClick={() => startEdit(row)}
+               style={{
+                padding: "4px 10px", fontSize: 11, fontWeight: 700,
+                border: "1px solid var(--clay)", borderRadius: 6,
+                background: editId === row.id ? "var(--clay)" : "#fff",
+                color: editId === row.id ? "#fff" : "var(--clay)",
+                cursor: "pointer", whiteSpace: "nowrap",
+               }}>
+               {editId === row.id ? "Editing..." : "Edit"}
+              </button>
+             </td>
+            </tr>
+           ))}
+          </tbody>
+         </table>
+        </div>
+        {histFiltered.length > 10 && (
+         <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+          {!showAll && !needsExpand ? (
+           <button type="button" onClick={() => setShowAll(true)}
+            style={{
+             padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+             border: "1px solid var(--clay)", borderRadius: 8,
+             background: "var(--clay-soft)", color: "var(--clay)",
+            }}>
+            View All History ({histFiltered.length} records)
+           </button>
+          ) : (
+           <button type="button" onClick={() => setShowAll(false)}
+            style={{
+             padding: "7px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+             border: "1px solid var(--line)", borderRadius: 8,
+             background: "#fff", color: "var(--ink-soft)",
+            }}>
+            Show Less
+           </button>
+          )}
+         </div>
         )}
-       </div>
-      )}
-      </>
-    )}
+       </>
+      )
+    }
    </div>
   </>
-);
+ );
 }
 
 // =============================================================================

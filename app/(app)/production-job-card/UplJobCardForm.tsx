@@ -29,6 +29,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -87,6 +88,8 @@ interface DraftShape {
   flowRate: string;
   beadMillEnd: string;
   slurryA: string;
+  meterInitial: string;
+  meterFinal: string;
   // Phase B rows
   rowInputsB: Record<string, { addedQty: string; rmBatchNo: string; drumBagNo: string; tds: string }>;
   slurryB: string;
@@ -193,6 +196,11 @@ export default function UplJobCardForm({
   const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
   const [jobDate, setJobDate]           = useState(freshDate(d0?.jobDate));
   const [jsc3Selection, setJsc3Selection] = useState<string>(d0?.jsc3Selection ?? "");
+  // Tracks whether "Other…" was chosen so the free-text input is shown.
+  // Initialise true when a restored draft value is not one of the two standard codes.
+  const [jsc3IsCustom, setJsc3IsCustom] = useState<boolean>(
+    !!d0?.jsc3Selection && !JSC3_OPTIONS.includes(d0.jsc3Selection as Jsc3Option),
+  );
 
   // ── Phase A formula rows ─────────────────────────────────────────────────
   const [rowsA, setRowsA] = useState<FormulaRow[]>([]);
@@ -200,8 +208,9 @@ export default function UplJobCardForm({
 
   // ── Sulphur bags ─────────────────────────────────────────────────────────
   const [sulphurBags, setSulphurBags]     = useState<string[]>(d0?.sulphurBags ?? blankBags());
+  // sulphurAddedKg is always derived from the bag total — never entered manually.
+  // It is kept in state so the value persists in draft and in the DB payload.
   const [sulphurAddedKg, setSulphurAddedKg] = useState(d0?.sulphurAddedKg ?? "");
-  const [bagMismatchWarning, setBagMismatchWarning] = useState(false);
 
   // ── Phase A observations ─────────────────────────────────────────────────
   const [premixStart, setPremixStart]   = useState(d0?.premixStart ?? "");
@@ -210,6 +219,10 @@ export default function UplJobCardForm({
   const [flowRate, setFlowRate]         = useState(d0?.flowRate ?? "");
   const [beadMillEnd, setBeadMillEnd]   = useState(d0?.beadMillEnd ?? "");
   const [slurryA, setSlurryA]           = useState(d0?.slurryA ?? "");
+
+  // ── Meter readings ────────────────────────────────────────────────────────
+  const [meterInitial, setMeterInitial] = useState(d0?.meterInitial ?? "");
+  const [meterFinal, setMeterFinal]     = useState(d0?.meterFinal ?? "");
 
   // ── Phase B formula rows ─────────────────────────────────────────────────
   const [rowsB, setRowsB] = useState<FormulaRow[]>([]);
@@ -249,6 +262,25 @@ export default function UplJobCardForm({
   // Scaled instruction totals (for display)
   const phaseAInstructed = scaleQty(PHASE_A_TOTAL, REF_BATCH_KG, bsKg);
   const phaseBInstructed = scaleQty(PHASE_B_TOTAL, REF_BATCH_KG, bsKg);
+
+  // ── Meter reading calculation ─────────────────────────────────────────────
+  // Reading difference = Final - Initial.
+  // Hours   = Math.floor(diff / 100)
+  // Minutes = Math.round(((diff % 100) / 100) * 60)
+  const meterRunningTime: { hours: number; minutes: number } | null = (() => {
+    const ini = parseFloat(meterInitial);
+    const fin = parseFloat(meterFinal);
+    if (isNaN(ini) || isNaN(fin) || meterInitial === "" || meterFinal === "") return null;
+    if (fin < ini) return null; // negative — show validation message instead
+    const diff = fin - ini;
+    const hours   = Math.floor(diff / 100);
+    const minutes = Math.round(((diff % 100) / 100) * 60);
+    return { hours, minutes };
+  })();
+  const meterNegative =
+    meterInitial !== "" && meterFinal !== "" &&
+    !isNaN(parseFloat(meterInitial)) && !isNaN(parseFloat(meterFinal)) &&
+    parseFloat(meterFinal) < parseFloat(meterInitial);
 
   // ── Load formula items from DB ────────────────────────────────────────────
   const loadFormula = useCallback(async (batchKg: number, savedInputsA?: DraftShape["rowInputsA"], savedInputsB?: DraftShape["rowInputsB"]) => {
@@ -327,6 +359,10 @@ export default function UplJobCardForm({
         setLotNo(card.lot_no ?? "");
         setJobDate(card.job_date ?? todayISO());
         setJsc3Selection(card.jsc3_code_selection ?? "");
+        setJsc3IsCustom(
+          !!card.jsc3_code_selection &&
+          !JSC3_OPTIONS.includes(card.jsc3_code_selection as Jsc3Option),
+        );
 
         // Observations
         setPremixStart(card.premix_start ?? "");
@@ -337,12 +373,22 @@ export default function UplJobCardForm({
         setSlurryA(card.collected_slurry_phase_a_kg != null ? String(card.collected_slurry_phase_a_kg) : "");
         setSlurryB(card.collected_slurry_phase_b_kg != null ? String(card.collected_slurry_phase_b_kg) : "");
 
-        // Sulphur bags
+        // Meter readings
+        type UplCardExtra = typeof card & { meter_reading_initial: number | null; meter_reading_final: number | null };
+        const cardEx = card as unknown as UplCardExtra;
+        setMeterInitial(cardEx.meter_reading_initial != null ? String(cardEx.meter_reading_initial) : "");
+        setMeterFinal(cardEx.meter_reading_final   != null ? String(cardEx.meter_reading_final)   : "");
+
+        // Sulphur bags — load saved weights and recompute total as source of truth
         const bags = card.sulphur_bag_weights;
         if (Array.isArray(bags) && bags.length === BAG_COUNT) {
-          setSulphurBags(bags.map(b => b.weight_kg != null ? String(b.weight_kg) : ""));
+          const loaded = bags.map(b => b.weight_kg != null ? String(b.weight_kg) : "");
+          setSulphurBags(loaded);
+          const total = loaded.reduce((s, w) => s + num(w), 0);
+          setSulphurAddedKg(total > 0 ? total.toFixed(3) : "");
+        } else {
+          setSulphurAddedKg("");
         }
-        setSulphurAddedKg(card.sulphur_added_kg != null ? String(card.sulphur_added_kg) : "");
 
         // Final
         setTotalScKg(card.total_sc_collected_kg != null ? String(card.total_sc_collected_kg) : "");
@@ -425,6 +471,7 @@ export default function UplJobCardForm({
       operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowInputsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
+      meterInitial, meterFinal,
       rowInputsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -433,6 +480,7 @@ export default function UplJobCardForm({
   }, [operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
+      meterInitial, meterFinal,
       rowsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -446,42 +494,26 @@ export default function UplJobCardForm({
     setRowsB(prev => prev.map((r, i) => i === idx ? { ...r, [field]: val } : r));
   }
 
-  // Bag weight change — auto-fill sulphurAddedKg if not manually overridden
+  // Bag weight change — always recompute sulphurAddedKg from the full bag total.
+  // The bag total is the single source of truth; manual entry is not allowed.
   function updateBag(idx: number, val: string) {
     setSulphurBags(prev => {
       const next = [...prev];
       next[idx] = val;
       const total = next.reduce((s, w) => s + num(w), 0);
-      // Auto-fill sulphurAddedKg only if it's empty or equals the previous total
-      setSulphurAddedKg(prev2 => {
-        const prevTotal = prev.reduce((s, w) => s + num(w), 0);
-        if (!prev2 || Math.abs(num(prev2) - prevTotal) < 0.001) {
-          return total > 0 ? total.toFixed(3) : "";
-        }
-        return prev2;
-      });
-      setBagMismatchWarning(false);
+      setSulphurAddedKg(total > 0 ? total.toFixed(3) : "");
       return next;
     });
   }
 
-  // When operator manually changes sulphurAddedKg — check against bag total
-  function handleSulphurAddedChange(val: string) {
-    setSulphurAddedKg(val);
-    const manual = num(val);
-    if (val !== "" && Math.abs(manual - bagWeightTotal) > 0.01 && bagWeightTotal > 0) {
-      setBagMismatchWarning(true);
-    } else {
-      setBagMismatchWarning(false);
-    }
-  }
+  // No-op: sulphurAddedKg is controlled by the bag total only.
+  function handleSulphurAddedChange(_val: string) { /* read-only */ }
 
   // ── Validation ────────────────────────────────────────────────────────────
   function validate(): string | null {
     if (!lotNo.trim()) return t("valLotRequired");
     if (!batchSize || isNaN(parseFloat(batchSize))) return t("valBatchRequired");
     if (!jsc3Selection) return t("valJsc3Required");
-    if (bagMismatchWarning) return t("valSulphurMismatchUpl");
     return null;
   }
 
@@ -531,6 +563,8 @@ export default function UplJobCardForm({
         sign_operator:               signOperator || null,
         sign_chemist:                signChemist  || null,
         sign_manager:                signManager  || null,
+        meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
+        meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
         status:                      statusVal,
       };
 
@@ -627,8 +661,7 @@ export default function UplJobCardForm({
           <thead>
             <tr style={{ background: ACCENT + "10", borderBottom: `2px solid ${ACCENT}40` }}>
               <th style={th}>{t("colOrder")}</th>
-              <th style={th}>{t("colComponent")}</th>
-              <th style={th}>{t("colMaterialCode")}</th>
+              <th style={th}>{t("colComponents")}</th>
               <th style={{ ...th, textAlign: "right" }}>{t("colInstructedKg")}</th>
               <th style={{ ...th, textAlign: "right" }}>{t("colAddedKg")}</th>
               <th style={th}>{t("colRmBatchNo")}</th>
@@ -650,20 +683,45 @@ export default function UplJobCardForm({
                   }}
                 >
                   <td style={td}>{r.orderNo}</td>
-                  <td style={{ ...td, fontWeight: 600 }}>{r.componentName}</td>
-                  <td style={td}>
+                  {/* Components column — shows material code (jscCode) when available,
+                      falls back to component name for rows without a code (e.g. Water, Sulphur).
+                      Row 3 (Unitop FL / SOPROPHORFLR) is a selectable code — shown inline. */}
+                  <td style={{ ...td, fontWeight: 600 }}>
                     {isJsc3 ? (
-                      <select
-                        value={jsc3Selection}
-                        onChange={e => setJsc3Selection(e.target.value)}
-                        style={{ fontSize: 13, padding: "3px 6px", borderRadius: 4,
-                          border: !jsc3Selection ? "2px solid var(--warn)" : "1px solid var(--line)" }}
-                      >
-                        <option value="">{t("selectOption")}</option>
-                        {JSC3_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                      <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <select
+                          value={jsc3IsCustom ? "__other__" : jsc3Selection}
+                          onChange={e => {
+                            if (e.target.value === "__other__") {
+                              setJsc3IsCustom(true);
+                              setJsc3Selection("");
+                            } else {
+                              setJsc3IsCustom(false);
+                              setJsc3Selection(e.target.value);
+                            }
+                          }}
+                          style={{ fontSize: 13, padding: "3px 6px", borderRadius: 4,
+                            border: !jsc3Selection && !jsc3IsCustom ? "2px solid var(--warn)" : "1px solid var(--line)" }}
+                        >
+                          <option value="">{t("selectOption")}</option>
+                          {JSC3_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          <option value="__other__">{lang === "hi" ? "अन्य…" : "Other…"}</option>
+                        </select>
+                        {jsc3IsCustom && (
+                          <input
+                            type="text"
+                            autoFocus
+                            placeholder={lang === "hi" ? "JSC कोड दर्ज करें" : "Enter JSC code"}
+                            value={jsc3Selection}
+                            onChange={e => setJsc3Selection(e.target.value)}
+                            style={{ fontSize: 13, padding: "3px 6px", borderRadius: 4,
+                              border: !jsc3Selection ? "2px solid var(--warn)" : "1px solid var(--line)",
+                              width: 110 }}
+                          />
+                        )}
+                      </span>
                     ) : (
-                      <span style={{ color: "var(--ink-soft)" }}>{r.jscCode ?? "—"}</span>
+                      r.jscCode ?? r.componentName
                     )}
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: ACCENT }}>
@@ -677,7 +735,7 @@ export default function UplJobCardForm({
                         value={sulphurAddedKg}
                         onChange={e => handleSulphurAddedChange(e.target.value)}
                         style={{ width: 90, textAlign: "right",
-                          borderColor: bagMismatchWarning ? "var(--warn)" : undefined }} />
+                          borderColor: false ? "var(--warn)" : undefined }} />
                     ) : (
                       <NumericInput allowDecimal={true}
                         placeholder={r.instructedQty.toFixed(3)}
@@ -713,7 +771,7 @@ export default function UplJobCardForm({
           </tbody>
           <tfoot>
             <tr style={{ background: ACCENT + "08", fontWeight: 700, fontSize: 13 }}>
-              <td colSpan={phase === "A" ? 3 : 3} style={{ padding: "6px 10px" }}>
+              <td colSpan={2} style={{ padding: "6px 10px" }}>
                 {phase === "A" ? t("totalPhaseA") : t("totalPhaseB")}
               </td>
               <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
@@ -870,16 +928,6 @@ export default function UplJobCardForm({
             />
           </div>
         </div>
-
-        {bagMismatchWarning && (
-          <div style={{
-            marginTop: 10, padding: "10px 14px", borderRadius: 8,
-            background: "var(--warn-soft)", border: "1px solid var(--warn)",
-            fontSize: 13, color: "var(--warn)", fontWeight: 600,
-          }}>
-            {t("valSulphurMismatchUpl")}
-          </div>
-        )}
       </div>
 
       {/* ── 4. PHASE A — OBSERVATIONS ────────────────────────────────────── */}
@@ -889,18 +937,18 @@ export default function UplJobCardForm({
         <div className="row2">
           <div>
             <label>{t("startTime")}</label>
-            <input type="time" value={premixStart} onChange={e => setPremixStart(e.target.value)} />
+            <TimeField value={premixStart} onChange={setPremixStart} />
           </div>
           <div>
             <label>{t("endTime")}</label>
-            <input type="time" value={premixEnd} onChange={e => setPremixEnd(e.target.value)} />
+            <TimeField value={premixEnd} onChange={setPremixEnd} />
           </div>
         </div>
         <div style={{ fontWeight: 600, fontSize: 13, marginTop: 14, marginBottom: 8 }}>{t("beadMill")}</div>
         <div className="row2">
           <div>
             <label>{t("startTime")}</label>
-            <input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} />
+            <TimeField value={beadMillStart} onChange={setBeadMillStart} />
           </div>
           <div>
             <label>{t("flowRateSL")}</label>
@@ -911,7 +959,7 @@ export default function UplJobCardForm({
         <div className="row2" style={{ marginTop: 8 }}>
           <div>
             <label>{t("endTime")}</label>
-            <input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} />
+            <TimeField value={beadMillEnd} onChange={setBeadMillEnd} />
           </div>
           <div>
             <label>{t("totalPhaseAAddedCalc")}</label>
@@ -927,6 +975,38 @@ export default function UplJobCardForm({
           </div>
           <div />
         </div>
+      </div>
+
+      {/* ── 4b. MACHINE METER READING ────────────────────────────────────── */}
+      <div className="card">
+        <SectionHeader title={t("secMeterReading")} />
+        <div className="row2">
+          <div>
+            <label>{t("meterInitial")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterInitial} onChange={e => setMeterInitial(e.target.value)} />
+          </div>
+          <div>
+            <label>{t("meterFinal")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterFinal} onChange={e => setMeterFinal(e.target.value)} />
+          </div>
+        </div>
+        {meterNegative && (
+          <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8,
+            background: "#fff3e0", border: "1px solid #fb8c00",
+            fontSize: 13, color: "#e65100", fontWeight: 600 }}>
+            {t("meterNegative")}
+          </div>
+        )}
+        {meterRunningTime !== null && !meterNegative && (
+          <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 8,
+            background: ACCENT + "10", border: `1px solid ${ACCENT}40`,
+            fontSize: 14, fontWeight: 700, color: ACCENT }}>
+            {t("meterRunningTime")}:{" "}
+            {meterRunningTime.hours} {t("meterHours")} {meterRunningTime.minutes} {t("meterMinutes")}
+          </div>
+        )}
       </div>
 
       {/* ── 5. PHASE B — INGREDIENTS ─────────────────────────────────────── */}

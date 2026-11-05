@@ -30,6 +30,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -82,6 +83,8 @@ interface DraftShape {
   flowRate: string;
   beadMillEnd: string;
   slurryA: string;
+  meterInitial: string;
+  meterFinal: string;
   rowInputsB: Record<string, { addedQty: string; rmBatchNo: string; drumBagNo: string; tds: string }>;
   slurryB: string;
   totalScKg: string;
@@ -221,8 +224,8 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
 
   // ── Sulphur bags ──────────────────────────────────────────────────────────
   const [sulphurBags, setSulphurBags]       = useState<string[]>(d0?.sulphurBags ?? blankBags());
+  // sulphurAddedKg is always derived from the bag total — never entered manually.
   const [sulphurAddedKg, setSulphurAddedKg] = useState(d0?.sulphurAddedKg ?? "");
-  const [bagMismatch, setBagMismatch]       = useState(false);
 
   // ── Phase A observations ──────────────────────────────────────────────────
   const [premixStart, setPremixStart]       = useState(d0?.premixStart ?? "");
@@ -231,6 +234,10 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   const [flowRate, setFlowRate]             = useState(d0?.flowRate ?? "");
   const [beadMillEnd, setBeadMillEnd]       = useState(d0?.beadMillEnd ?? "");
   const [slurryA, setSlurryA]               = useState(d0?.slurryA ?? "");
+
+  // ── Meter readings ────────────────────────────────────────────────────────
+  const [meterInitial, setMeterInitial] = useState(d0?.meterInitial ?? "");
+  const [meterFinal, setMeterFinal]     = useState(d0?.meterFinal ?? "");
 
   // ── Final ─────────────────────────────────────────────────────────────────
   const [slurryB, setSlurryB]     = useState(d0?.slurryB ?? "");
@@ -269,6 +276,22 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   const phaseBInstructed = bsKg === REF_BATCH_KG
     ? PHASE_B_DISPLAY_TOTAL
     : Math.round(rowsB.reduce((s, r) => s + r.instructedQty, 0) * 100) / 100;
+
+  // ── Meter reading calculation ─────────────────────────────────────────────
+  const meterRunningTime: { hours: number; minutes: number } | null = (() => {
+    const ini = parseFloat(meterInitial);
+    const fin = parseFloat(meterFinal);
+    if (isNaN(ini) || isNaN(fin) || meterInitial === "" || meterFinal === "") return null;
+    if (fin < ini) return null;
+    const diff = fin - ini;
+    const hours   = Math.floor(diff / 100);
+    const minutes = Math.round(((diff % 100) / 100) * 60);
+    return { hours, minutes };
+  })();
+  const meterNegative =
+    meterInitial !== "" && meterFinal !== "" &&
+    !isNaN(parseFloat(meterInitial)) && !isNaN(parseFloat(meterFinal)) &&
+    parseFloat(meterFinal) < parseFloat(meterInitial);
 
   // ── Load formula ──────────────────────────────────────────────────────────
   const loadFormula = useCallback(async (
@@ -337,11 +360,21 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         setSlurryA(card.collected_slurry_phase_a_kg != null ? String(card.collected_slurry_phase_a_kg) : "");
         setSlurryB(card.collected_slurry_phase_b_kg != null ? String(card.collected_slurry_phase_b_kg) : "");
 
+        // Meter readings
+        type ExtCardExtra = typeof card & { meter_reading_initial: number | null; meter_reading_final: number | null };
+        const cardEx = card as unknown as ExtCardExtra;
+        setMeterInitial(cardEx.meter_reading_initial != null ? String(cardEx.meter_reading_initial) : "");
+        setMeterFinal(cardEx.meter_reading_final   != null ? String(cardEx.meter_reading_final)   : "");
+
         const bags = card.sulphur_bag_weights;
         if (Array.isArray(bags) && bags.length === BAG_COUNT) {
-          setSulphurBags(bags.map(b => b.weight_kg != null ? String(b.weight_kg) : ""));
+          const loaded = bags.map(b => b.weight_kg != null ? String(b.weight_kg) : "");
+          setSulphurBags(loaded);
+          const total = loaded.reduce((s, w) => s + num(w), 0);
+          setSulphurAddedKg(total > 0 ? total.toFixed(2) : "");
+        } else {
+          setSulphurAddedKg("");
         }
-        setSulphurAddedKg(card.sulphur_added_kg != null ? String(card.sulphur_added_kg) : "");
         setTotalScKg(card.total_sc_collected_kg != null ? String(card.total_sc_collected_kg) : "");
         setTotalScL(card.total_sc_collected_l  != null ? String(card.total_sc_collected_l)  : "");
         setCpCoolingTower(card.checkpoint_cooling_tower ?? "");
@@ -410,6 +443,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
       operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowInputsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
+      meterInitial, meterFinal,
       rowInputsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -418,6 +452,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   }, [operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
+      meterInitial, meterFinal,
       rowsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -430,26 +465,20 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   const updateRowB = (idx: number, field: RowField, val: string) =>
     setRowsB(prev => prev.map((r, i) => i === idx ? { ...r, [field]: val } : r));
 
+  // Bag weight change — always recompute sulphurAddedKg from the full bag total.
+  // The bag total is the single source of truth; manual entry is not allowed.
   function updateBag(idx: number, val: string) {
     setSulphurBags(prev => {
       const next = [...prev];
       next[idx] = val;
       const total = next.reduce((s, w) => s + num(w), 0);
-      setSulphurAddedKg(prev2 => {
-        const prevTotal = prev.reduce((s, w) => s + num(w), 0);
-        if (!prev2 || Math.abs(num(prev2) - prevTotal) < 0.001) {
-          return total > 0 ? total.toFixed(2) : "";
-        }
-        return prev2;
-      });
-      setBagMismatch(false);
+      setSulphurAddedKg(total > 0 ? total.toFixed(2) : "");
       return next;
     });
   }
 
-  function handleSulphurAddedChange(val: string) {
-    setSulphurAddedKg(val);
-    setBagMismatch(val !== "" && Math.abs(num(val) - bagWeightTotal) > 0.01 && bagWeightTotal > 0);
+  function handleSulphurAddedChange(_val: string) {
+    // No-op: sulphurAddedKg is read-only — controlled by the bag total only.
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -457,7 +486,6 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
     if (!lotNo.trim()) return t("valLotRequired");
     if (!batchSize || isNaN(parseFloat(batchSize))) return t("valBatchKgRequired");
     if (!jsc3Selection) return t("valJsc3Required");
-    if (bagMismatch) return t("valSulphurMismatch");
     return null;
   }
 
@@ -504,6 +532,8 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         sign_operator:               signOperator || null,
         sign_chemist:                signChemist  || null,
         sign_manager:                signManager  || null,
+        meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
+        meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
         status:                      statusVal,
       };
 
@@ -579,8 +609,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           <thead>
             <tr style={{ background: ACCENT + "10", borderBottom: `2px solid ${ACCENT}40` }}>
               <th style={thStyle}>{t("colOrder")}</th>
-              <th style={thStyle}>{t("colComponent")}</th>
-              <th style={thStyle}>{t("colMaterialCode")}</th>
+              <th style={thStyle}>{t("colComponents")}</th>
               <th style={{ ...thStyle, textAlign: "right" }}>{t("colInstructedKg")}</th>
               <th style={{ ...thStyle, textAlign: "right" }}>{t("colAddedKg")}</th>
               <th style={thStyle}>{t("colRmBatchNo")}</th>
@@ -597,8 +626,10 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                 <tr key={r.formulaItemId}
                   style={{ borderBottom: "1px solid var(--line)", background: isSulphur ? "#fff8f3" : undefined }}>
                   <td style={tdStyle}>{r.orderNo}</td>
-                  <td style={{ ...tdStyle, fontWeight: 600 }}>{r.componentName}</td>
-                  <td style={tdStyle}>
+                  {/* Components column — shows material code (jscCode) when available,
+                      falls back to component name for rows with no code (e.g. Water, Sulphur).
+                      Row 3 (Unitop FL / SOPROPHORFLR) is a selectable code — shown inline. */}
+                  <td style={{ ...tdStyle, fontWeight: 600 }}>
                     {isJsc3 ? (
                       <select value={jsc3Selection} onChange={e => setJsc3Selection(e.target.value)}
                         style={{ fontSize: 13, padding: "3px 6px", borderRadius: 4,
@@ -607,7 +638,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                         {JSC3_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : (
-                      <span style={{ color: "var(--ink-soft)" }}>{r.jscCode ?? "—"}</span>
+                      r.jscCode ?? r.componentName
                     )}
                   </td>
                   {/* Display at 2dp — stored values are already 2dp */}
@@ -619,7 +650,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                       value={isSulphur ? sulphurAddedKg : r.addedQty}
                       onChange={e => isSulphur ? handleSulphurAddedChange(e.target.value) : updater(idx, "addedQty", e.target.value)}
                       style={{ width: 90, textAlign: "right",
-                        borderColor: isSulphur && bagMismatch ? "var(--warn)" : undefined }} />
+                        borderColor: isSulphur && false ? "var(--warn)" : undefined }} />
                   </td>
                   <td style={{ ...tdStyle, padding: "4px 6px" }}>
                     <input type="text" placeholder={t("placeholderBatchNo")} value={r.rmBatchNo}
@@ -643,7 +674,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           </tbody>
           <tfoot>
             <tr style={{ background: ACCENT + "08", fontWeight: 700, fontSize: 13 }}>
-              <td colSpan={3} style={{ padding: "6px 10px" }}>{phase === "A" ? t("totalPhaseA") : t("totalPhaseB")}</td>
+              <td colSpan={2} style={{ padding: "6px 10px" }}>{phase === "A" ? t("totalPhaseA") : t("totalPhaseB")}</td>
               <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
                 {instrTotal.toFixed(2)} kg
               </td>
@@ -768,13 +799,6 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
               onChange={e => handleSulphurAddedChange(e.target.value)} style={{ width: 140 }} />
           </div>
         </div>
-        {bagMismatch && (
-          <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8,
-            background: "var(--warn-soft)", border: "1px solid var(--warn)",
-            fontSize: 13, color: "var(--warn)", fontWeight: 600 }}>
-            {t("valSulphurMismatch")}
-          </div>
-        )}
       </div>
 
       {/* ── 4. PHASE A OBSERVATIONS ───────────────────────────────────────── */}
@@ -782,16 +806,16 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <SectionHeader title={t("secPhaseAObs")} />
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{t("preMix")}</div>
         <div className="row2">
-          <div><label>{t("startTime")}</label><input type="time" value={premixStart} onChange={e => setPremixStart(e.target.value)} /></div>
-          <div><label>{t("endTime")}</label><input type="time" value={premixEnd} onChange={e => setPremixEnd(e.target.value)} /></div>
+          <div><label>{t("startTime")}</label><TimeField value={premixStart} onChange={setPremixStart} /></div>
+          <div><label>{t("endTime")}</label><TimeField value={premixEnd} onChange={setPremixEnd} /></div>
         </div>
         <div style={{ fontWeight: 600, fontSize: 13, marginTop: 14, marginBottom: 8 }}>{t("beadMill")}</div>
         <div className="row2">
-          <div><label>{t("startTime")}</label><input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} /></div>
+          <div><label>{t("startTime")}</label><TimeField value={beadMillStart} onChange={setBeadMillStart} /></div>
           <div><label>{t("flowRateSL")}</label><NumericInput allowDecimal={true} placeholder="0" value={flowRate} onChange={e => setFlowRate(e.target.value)} /></div>
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
-          <div><label>{t("endTime")}</label><input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} /></div>
+          <div><label>{t("endTime")}</label><TimeField value={beadMillEnd} onChange={setBeadMillEnd} /></div>
           <div>
             <label>{t("totalPhaseAAddedCalc")}</label>
             <input type="number" readOnly value={phaseATotalAdded > 0 ? phaseATotalAdded.toFixed(2) : ""}
@@ -803,6 +827,38 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             <NumericInput allowDecimal={true} placeholder="0" value={slurryA} onChange={e => setSlurryA(e.target.value)} /></div>
           <div />
         </div>
+      </div>
+
+      {/* ── 4b. MACHINE METER READING ────────────────────────────────────── */}
+      <div className="card">
+        <SectionHeader title={t("secMeterReading")} />
+        <div className="row2">
+          <div>
+            <label>{t("meterInitial")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterInitial} onChange={e => setMeterInitial(e.target.value)} />
+          </div>
+          <div>
+            <label>{t("meterFinal")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterFinal} onChange={e => setMeterFinal(e.target.value)} />
+          </div>
+        </div>
+        {meterNegative && (
+          <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8,
+            background: "#fff3e0", border: "1px solid #fb8c00",
+            fontSize: 13, color: "#e65100", fontWeight: 600 }}>
+            {t("meterNegative")}
+          </div>
+        )}
+        {meterRunningTime !== null && !meterNegative && (
+          <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 8,
+            background: ACCENT + "10", border: `1px solid ${ACCENT}40`,
+            fontSize: 14, fontWeight: 700, color: ACCENT }}>
+            {t("meterRunningTime")}:{" "}
+            {meterRunningTime.hours} {t("meterHours")} {meterRunningTime.minutes} {t("meterMinutes")}
+          </div>
+        )}
       </div>
 
       {/* ── 5. PHASE B ────────────────────────────────────────────────────── */}

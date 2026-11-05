@@ -33,6 +33,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -81,6 +82,7 @@ type RowInputMap = Record<string, { addedQty: string; rmBatchNo: string; drumBag
 
 interface DraftShape {
   batchVariant: number;
+  customBatchKg: string;
   operatorName: string;
   lotNo: string;
   jobDate: string;
@@ -96,6 +98,8 @@ interface DraftShape {
   beadMillEnd: string;
   slurryA: string;
   slurryB: string;
+  meterInitial: string;
+  meterFinal: string;
   totalScKg: string;
   totalScL: string;
   cpCoolingTower: string;
@@ -130,6 +134,8 @@ type ExtCard = ProductionJobCard & {
   sign_manager: string | null;
   // Stores extra NUTRIZIN fields as JSON
   water_tds_phase_a: string | null;
+  meter_reading_initial: number | null;
+  meter_reading_final:   number | null;
 };
 
 type ItemRow = {
@@ -205,6 +211,11 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
   const [batchVariant, setBatchVariant] = useState<BatchVariant>(
     (d0?.batchVariant as BatchVariant) ?? 843,
   );
+  // batchIsCustom: true when operator wants to record a custom kg value
+  // that doesn't match a standard variant. The formula rows still use
+  // batchVariant (843 or 808) since quantities are pre-stored per variant.
+  const [batchIsCustom, setBatchIsCustom] = useState<boolean>(false);
+  const [customBatchKg, setCustomBatchKg] = useState<string>(d0?.customBatchKg ?? "");
   const [operatorName, setOperatorName] = useState(d0?.operatorName ?? "");
   const [lotNo, setLotNo]               = useState(d0?.lotNo ?? "");
   const [jobDate, setJobDate]           = useState(freshDate(d0?.jobDate));
@@ -230,6 +241,10 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
   const [beadMillEnd, setBeadMillEnd]     = useState(d0?.beadMillEnd ?? "");
   const [slurryA, setSlurryA]             = useState(d0?.slurryA ?? "");
   const [slurryB, setSlurryB]             = useState(d0?.slurryB ?? "");
+
+  // ── Meter readings ────────────────────────────────────────────────────────
+  const [meterInitial, setMeterInitial] = useState(d0?.meterInitial ?? "");
+  const [meterFinal, setMeterFinal]     = useState(d0?.meterFinal ?? "");
 
   // ── Final / QC / sign-offs ─────────────────────────────────────────────
   const [totalScKg, setTotalScKg] = useState(d0?.totalScKg ?? "");
@@ -270,6 +285,22 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
     }, 0);
     return Math.round(sum * 100) / 100;
   }
+
+  // ── Meter reading calculation ─────────────────────────────────────────────
+  const meterRunningTime: { hours: number; minutes: number } | null = (() => {
+    const ini = parseFloat(meterInitial);
+    const fin = parseFloat(meterFinal);
+    if (isNaN(ini) || isNaN(fin) || meterInitial === "" || meterFinal === "") return null;
+    if (fin < ini) return null;
+    const diff = fin - ini;
+    const hours   = Math.floor(diff / 100);
+    const minutes = Math.round(((diff % 100) / 100) * 60);
+    return { hours, minutes };
+  })();
+  const meterNegative =
+    meterInitial !== "" && meterFinal !== "" &&
+    !isNaN(parseFloat(meterInitial)) && !isNaN(parseFloat(meterFinal)) &&
+    parseFloat(meterFinal) < parseFloat(meterInitial);
 
   // ── Load formula ──────────────────────────────────────────────────────────
   const loadFormula = useCallback(async (savedInputs?: RowInputMap) => {
@@ -316,6 +347,11 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         const card = rawCard as unknown as ExtCard;
 
         setBatchVariant((card.batch_size_kg === 808 ? 808 : 843) as BatchVariant);
+        // If saved batch_size_kg is not one of the standard variants, expose it as a custom value
+        if (card.batch_size_kg != null && card.batch_size_kg !== 808 && card.batch_size_kg !== 843) {
+          setBatchIsCustom(true);
+          setCustomBatchKg(String(card.batch_size_kg));
+        }
         setOperatorName(card.operator_name ?? "");
         setLotNo(card.lot_no ?? "");
         setJobDate(card.job_date ?? todayISO());
@@ -335,6 +371,10 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           if (Array.isArray(extra.znoBags808)) setZnoBags808(extra.znoBags808);
           setZnoAdded808(extra.znoAdded808 ?? "");
         } catch { /* ignore */ }
+
+        // Meter readings
+        setMeterInitial(card.meter_reading_initial != null ? String(card.meter_reading_initial) : "");
+        setMeterFinal(card.meter_reading_final   != null ? String(card.meter_reading_final)   : "");
 
         setTotalScKg(card.total_sc_collected_kg != null ? String(card.total_sc_collected_kg) : "");
         setTotalScL(card.total_sc_collected_l  != null ? String(card.total_sc_collected_l)  : "");
@@ -383,18 +423,20 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
     const rowInputs: RowInputMap = {};
     rows.forEach(r => { rowInputs[r.formulaItemId] = { addedQty: r.addedQty, rmBatchNo: r.rmBatchNo, drumBagNo: r.drumBagNo, tds: r.tds }; });
     draftSave({
-      batchVariant, operatorName, lotNo, jobDate, rowInputs,
+      batchVariant, customBatchKg, operatorName, lotNo, jobDate, rowInputs,
       znoBags843, znoAdded843, znoBags808, znoAdded808,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd,
-      slurryA, slurryB, totalScKg, totalScL,
+      slurryA, slurryB, meterInitial, meterFinal,
+      totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcZincContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
       signOperator, signChemist, signManager,
     });
-  }, [batchVariant, operatorName, lotNo, jobDate, rows,
+  }, [batchVariant, customBatchKg, operatorName, lotNo, jobDate, rows,
       znoBags843, znoAdded843, znoBags808, znoAdded808,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd,
-      slurryA, slurryB, totalScKg, totalScL,
+      slurryA, slurryB, meterInitial, meterFinal,
+      totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcZincContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
       signOperator, signChemist, signManager, draftSave, isEdit]);
@@ -456,7 +498,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         lot_no:                      lotNo.trim(),
         job_date:                    jobDate,
         operator_id:                 userId,
-        batch_size_kg:               batchVariant,
+        batch_size_kg:               batchIsCustom && customBatchKg ? parseFloat(customBatchKg) : batchVariant,
         operator_name:               operatorName.trim() || null,
         premix_start:                premixStart   || null,
         premix_end:                  premixEnd     || null,
@@ -481,6 +523,8 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         sign_operator:               signOperator   || null,
         sign_chemist:                signChemist    || null,
         sign_manager:                signManager    || null,
+        meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
+        meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
         status:                      statusVal,
       };
 
@@ -768,20 +812,64 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           </div>
           <div>
             <label>{t("batchSizeKg")}</label>
-            <div className="chip-group" style={{ marginTop: 6 }}>
-              {BATCH_OPTIONS.map(size => (
-                <div key={size}
-                  className={`chip${batchVariant === size ? " selected" : ""}`}
-                  onClick={() => !isEdit && setBatchVariant(size)}
-                  style={{ cursor: isEdit ? "not-allowed" : "pointer" }}
-                >
-                  {size} kg
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+              <select
+                value={batchIsCustom ? "__custom__" : String(batchVariant)}
+                onChange={e => {
+                  if (isEdit) return;
+                  if (e.target.value === "__custom__") {
+                    setBatchIsCustom(true);
+                  } else {
+                    setBatchIsCustom(false);
+                    setCustomBatchKg("");
+                    setBatchVariant(Number(e.target.value) as BatchVariant);
+                  }
+                }}
+                disabled={isEdit}
+                style={{
+                  fontSize: 14, fontWeight: 700,
+                  padding: "8px 12px", borderRadius: 8,
+                  border: `2px solid ${ACCENT}`,
+                  background: "#fff", color: ACCENT,
+                  cursor: isEdit ? "not-allowed" : "pointer",
+                  appearance: "auto",
+                }}
+              >
+                {BATCH_OPTIONS.map(size => (
+                  <option key={size} value={size}>{size} kg</option>
+                ))}
+                <option value="__custom__">{lang === "hi" ? "कस्टम मान दर्ज करें…" : "Enter custom value…"}</option>
+              </select>
+              {batchIsCustom && !isEdit && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="number"
+                    step="any"
+                    autoFocus
+                    placeholder={lang === "hi" ? "बैच kg दर्ज करें" : "Enter batch kg"}
+                    value={customBatchKg}
+                    onChange={e => setCustomBatchKg(e.target.value)}
+                    style={{
+                      fontSize: 14, fontWeight: 700,
+                      padding: "8px 12px", borderRadius: 8,
+                      border: `2px solid ${ACCENT}`,
+                      color: ACCENT, width: 140,
+                    }}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>kg</span>
                 </div>
-              ))}
+              )}
+              {batchIsCustom && !isEdit && (
+                <div className="field-hint" style={{ color: ACCENT }}>
+                  {lang === "hi"
+                    ? `फॉर्मूला पंक्तियाँ ${batchVariant} kg वेरिएंट के अनुसार दिखाई जाएंगी`
+                    : `Formula rows shown for the ${batchVariant} kg variant`}
+                </div>
+              )}
             </div>
             {isEdit && (
               <div className="field-hint" style={{ marginTop: 4 }}>
-                Batch size cannot be changed when editing.
+                {t("batchVariantNotChange")}
               </div>
             )}
           </div>
@@ -814,21 +902,21 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{t("preMix")}</div>
         <div className="row2">
           <div><label>{t("startTime")}</label>
-            <input type="time" value={premixStart} onChange={e => setPremixStart(e.target.value)} /></div>
+            <TimeField value={premixStart} onChange={setPremixStart} /></div>
           <div><label>{t("endTime")}</label>
-            <input type="time" value={premixEnd} onChange={e => setPremixEnd(e.target.value)} /></div>
+            <TimeField value={premixEnd} onChange={setPremixEnd} /></div>
         </div>
         <div style={{ fontWeight: 600, fontSize: 13, marginTop: 14, marginBottom: 8 }}>{t("beadMill")}</div>
         <div className="row2">
           <div><label>{t("startTime")}</label>
-            <input type="time" value={beadMillStart} onChange={e => setBeadMillStart(e.target.value)} /></div>
+            <TimeField value={beadMillStart} onChange={setBeadMillStart} /></div>
           <div><label>{t("flowRateSL")}</label>
             <NumericInput allowDecimal={true} placeholder="0" value={flowRate}
               onChange={e => setFlowRate(e.target.value)} /></div>
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
           <div><label>{t("endTime")}</label>
-            <input type="time" value={beadMillEnd} onChange={e => setBeadMillEnd(e.target.value)} /></div>
+            <TimeField value={beadMillEnd} onChange={setBeadMillEnd} /></div>
           <div>
             <label>{t("totalPhaseAAddedCalc")}</label>
             <input type="number" readOnly value={addedTotal(pk_a) > 0 ? addedTotal(pk_a).toFixed(2) : ""}
@@ -843,6 +931,38 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           </div>
           <div />
         </div>
+      </div>
+
+      {/* ── 4b. MACHINE METER READING ────────────────────────────────────── */}
+      <div className="card">
+        <SectionHeader title={t("secMeterReading")} />
+        <div className="row2">
+          <div>
+            <label>{t("meterInitial")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterInitial} onChange={e => setMeterInitial(e.target.value)} />
+          </div>
+          <div>
+            <label>{t("meterFinal")}</label>
+            <NumericInput allowDecimal={false} placeholder={t("meterPlaceholder")}
+              value={meterFinal} onChange={e => setMeterFinal(e.target.value)} />
+          </div>
+        </div>
+        {meterNegative && (
+          <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8,
+            background: "#fff3e0", border: "1px solid #fb8c00",
+            fontSize: 13, color: "#e65100", fontWeight: 600 }}>
+            {t("meterNegative")}
+          </div>
+        )}
+        {meterRunningTime !== null && !meterNegative && (
+          <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 8,
+            background: ACCENT + "10", border: `1px solid ${ACCENT}40`,
+            fontSize: 14, fontWeight: 700, color: ACCENT }}>
+            {t("meterRunningTime")}:{" "}
+            {meterRunningTime.hours} {t("meterHours")} {meterRunningTime.minutes} {t("meterMinutes")}
+          </div>
+        )}
       </div>
 
       {/* ── 5. PHASE B ────────────────────────────────────────────────────── */}

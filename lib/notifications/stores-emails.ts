@@ -132,9 +132,14 @@ export interface ReceivedEmailArgs {
   fWt: string | null;
   bagsLoose: string | null;
   invChlNo: string | null;
+  /** Material Code / Old Code from the Excel RECEIVED worksheet */
+  materialCode?: string | null;
+  /** Legacy code field — kept for backward compatibility */
   code: string | null;
   poNo: string | null;
   remarks: string | null;
+  /** Additional Remarks / QC Status — COA and receiving QC information */
+  qcStatus?: string | null;
   submittedByName: string;
   submittedAt: string;
 }
@@ -147,17 +152,18 @@ export function buildReceivedEmail(d: ReceivedEmailArgs): { subject: string; htm
     `<p style="margin:0 0 16px;color:#555;font-size:14px">A new Received Entry Book row has been saved.</p>
     ${table([
       ["Date", fmtDate(d.date)],
-      ["Particular", d.particular || "—"],
+      ["Particular / Supplier", d.particular || "—"],
       ["Transport", d.transport || "—"],
       ["Materials", d.materials || "—"],
-      ["Vehicle No", d.vehicleNo || "—"],
+      ["Vehicle No.", d.vehicleNo || "—"],
       ["O/WT", d.oWt || "—"],
-      ["F/Wt", d.fWt || "—"],
+      ["F/WT", d.fWt || "—"],
       ["Bags / Loose", d.bagsLoose || "—"],
-      ["INV/CHL No", d.invChlNo || "—"],
-      ["Code", d.code || "—"],
-      ["PO No", d.poNo || "—"],
+      ["INV No.", d.invChlNo || "—"],
+      ["Material Code / Old Code", d.materialCode || d.code || "—"],
       ["Remarks", d.remarks || "—"],
+      ["PO No.", d.poNo || "—"],
+      ["QC Status / Additional Remarks", d.qcStatus || "—"],
       ["Entered By", d.submittedByName],
       ["Entered At", fmtTs(d.submittedAt)],
     ])}`,

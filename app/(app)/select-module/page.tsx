@@ -99,12 +99,22 @@ const DEMO_ROLES: { role: AppRole; label: string; labelHi: string; icon: string;
 function landingPath(module: ActivityModule, role: AppRole | null, factoryCode?: string): string {
   const code = factoryCode ?? getEffectiveFactoryCode();
   if (module === "job_card") {
-    if (code === "A20") return "/production-job-card";
-    if (role === "operator")                          return "/pulveriser/operator";
-    if (role === "stores")                            return "/stores";
-    if (role === "production_incharge")               return "/pulveriser/production";
-    if (role === "chemist" || role === "lab_manager") return "/pulveriser/lab";
-    return "/dashboard";
+    // Role takes priority on ALL deployments. Factory code only used as a
+    // tiebreaker where the same role has a different page on A-20 vs A-20/1.
+    if (role === "stores")              return "/stores";
+    if (role === "operator") {
+      return code === "A20" ? "/production-job-card" : "/pulveriser/operator";
+    }
+    if (role === "production_incharge") {
+      return code === "A20" ? "/production-job-card" : "/pulveriser/production";
+    }
+    if (role === "chemist" || role === "lab_manager") {
+      // A-20 has no pulveriser pages — go straight to lab-qc
+      return code === "A20" ? "/lab-qc" : "/pulveriser/lab";
+    }
+    if (role === "viewer")              return "/dashboard";
+    // factory_admin / company_admin / unknown
+    return code === "A20" ? "/production-job-card" : "/dashboard";
   }
   return "/lab-qc";
 }

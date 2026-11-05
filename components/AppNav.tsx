@@ -87,7 +87,6 @@ export default function AppNav() {
     }
   } else if (isA20) {
     // ── A-20 job_card module ──
-    // operator on A-20 handles all three production / packing modules
     if (role === "operator") {
       links = [
         { href: "/production-job-card", label: "Production Job Card" },
@@ -95,11 +94,35 @@ export default function AppNav() {
         { href: "/packing-breakdown",   label: "Packing Breakdown" },
         { href: "/dashboard",           label: "Dashboard" },
       ];
+    } else if (role === "production_incharge") {
+      links = [
+        { href: "/production-job-card", label: "Production Job Card" },
+        { href: "/breakdown",           label: "Breakdown Register" },
+        { href: "/maintenance",         label: "Preventive Maintenance" },
+        { href: "/dashboard",           label: "Dashboard" },
+      ];
+    } else if (role === "stores") {
+      links = [
+        { href: "/stores", label: "Stores" },
+      ];
+    } else if (role === "chemist" || role === "lab_manager") {
+      // A-20 chemist/lab_manager only has Lab QC — no pulveriser pages
+      links = [
+        { href: "/lab-qc",         label: "Lab QC" },
+        { href: "/lab-qc/records", label: "Records" },
+        { href: "/lab-qc/search",  label: "Search" },
+        { href: "/dashboard",      label: "Dashboard" },
+      ];
+    } else if (role === "viewer") {
+      links = [
+        { href: "/dashboard", label: "Dashboard" },
+      ];
     } else if (role === "factory_admin" || role === "company_admin") {
       links = [
         { href: "/production-job-card", label: "Production Job Card" },
         { href: "/packing-maintenance", label: "Packing Maintenance" },
         { href: "/packing-breakdown",   label: "Packing Breakdown" },
+        { href: "/stores",              label: "Stores" },
         { href: "/dashboard",           label: "Dashboard" },
       ];
     }

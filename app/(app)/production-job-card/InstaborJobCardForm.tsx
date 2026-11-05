@@ -49,6 +49,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import DateField from "@/components/DateField";
 import NumericInput from '@/components/NumericInput';
+import TimeField from "@/components/TimeField";
 import { createClient } from "@/lib/supabase-browser";
 import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
@@ -100,6 +101,7 @@ interface DraftShape {
   phaseBMixEnd: string;
   phaseBObs: string;
   totalLotKg: string;
+  totalLotL: string;
   remarks: string;
   qcBoronContent: string;
   qcAppearance: string;
@@ -121,6 +123,7 @@ type ExtCard = ProductionJobCard & {
   sulphur_bag_weights: { bag_no: number; weight_kg: number | null }[] | null;
   sulphur_added_kg: number | null;
   total_sc_collected_kg: number | null;
+  total_sc_collected_l: number | null;
   qc_sulphur_content: string | null;
   qc_density: string | null;
   qc_ph: string | null;
@@ -235,6 +238,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
 
   // ── Final / QC ────────────────────────────────────────────────────────────
   const [totalLotKg, setTotalLotKg]         = useState(d0?.totalLotKg ?? "");
+  const [totalLotL, setTotalLotL]           = useState(d0?.totalLotL ?? "");
   const [remarks, setRemarks]               = useState(d0?.remarks ?? "");
   const [qcBoronContent, setQcBoronContent] = useState(d0?.qcBoronContent ?? "");
   const [qcAppearance, setQcAppearance]     = useState(d0?.qcAppearance ?? "");
@@ -332,6 +336,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
         setPhaseBMixStart(card.bead_mill_start ?? "");
         setPhaseBMixEnd(card.bead_mill_end ?? "");
         setTotalLotKg(card.total_sc_collected_kg != null ? String(card.total_sc_collected_kg) : "");
+        setTotalLotL(card.total_sc_collected_l  != null ? String(card.total_sc_collected_l)  : "");
         setQcBoronContent(card.qc_sulphur_content ?? "");
         setQcAppearance(card.qc_density ?? "");
         setQcPh(card.qc_ph ?? "");
@@ -405,7 +410,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
       boricAcidBags, boricAcidAdded,
       phaseAMixStart, phaseAMixEnd, heatingStart, heatingStop, phaseAObs,
       phaseBMixStart, phaseBMixEnd, phaseBObs,
-      totalLotKg, remarks,
+      totalLotKg, totalLotL, remarks,
       qcBoronContent, qcAppearance, qcPh, qcSpGravity,
       signOperator, signChemist, signManager,
     });
@@ -413,7 +418,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
       boricAcidBags, boricAcidAdded,
       phaseAMixStart, phaseAMixEnd, heatingStart, heatingStop, phaseAObs,
       phaseBMixStart, phaseBMixEnd, phaseBObs,
-      totalLotKg, remarks,
+      totalLotKg, totalLotL, remarks,
       qcBoronContent, qcAppearance, qcPh, qcSpGravity,
       signOperator, signChemist, signManager, draftSave, isEdit]);
 
@@ -483,6 +488,7 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
         sulphur_bag_weights:  boricBagJson,
         sulphur_added_kg:     boricAcidAdded ? parseFloat(boricAcidAdded) : null,
         total_sc_collected_kg: totalLotKg ? parseFloat(totalLotKg) : (calcLotWt || null),
+        total_sc_collected_l:  totalLotL  ? parseFloat(totalLotL)  : null,
         qc_sulphur_content:   qcBoronContent || null,
         qc_density:           qcAppearance   || null,
         qc_ph:                qcPh           || null,
@@ -758,16 +764,16 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{t("phaseAMixingSubhead")}</div>
         <div className="row2">
           <div><label>{t("startTime")}</label>
-            <input type="time" value={phaseAMixStart} onChange={e => setPhaseAMixStart(e.target.value)} /></div>
+            <TimeField value={phaseAMixStart} onChange={setPhaseAMixStart} /></div>
           <div><label>{t("endTime")}</label>
-            <input type="time" value={phaseAMixEnd} onChange={e => setPhaseAMixEnd(e.target.value)} /></div>
+            <TimeField value={phaseAMixEnd} onChange={setPhaseAMixEnd} /></div>
         </div>
         <div style={{ fontWeight: 600, fontSize: 13, marginTop: 14, marginBottom: 8 }}>{t("heatingSubhead")}</div>
         <div className="row2">
           <div><label>{t("heatingStartTime")}</label>
-            <input type="time" value={heatingStart} onChange={e => setHeatingStart(e.target.value)} /></div>
+            <TimeField value={heatingStart} onChange={setHeatingStart} /></div>
           <div><label>{t("heatingStopTime")}</label>
-            <input type="time" value={heatingStop} onChange={e => setHeatingStop(e.target.value)} /></div>
+            <TimeField value={heatingStop} onChange={setHeatingStop} /></div>
         </div>
       </div>
 
@@ -800,9 +806,9 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
         <SectionHeader title={t("secPhaseBMixing")} />
         <div className="row2">
           <div><label>{t("startTime")}</label>
-            <input type="time" value={phaseBMixStart} onChange={e => setPhaseBMixStart(e.target.value)} /></div>
+            <TimeField value={phaseBMixStart} onChange={setPhaseBMixStart} /></div>
           <div><label>{t("endTime")}</label>
-            <input type="time" value={phaseBMixEnd} onChange={e => setPhaseBMixEnd(e.target.value)} /></div>
+            <TimeField value={phaseBMixEnd} onChange={setPhaseBMixEnd} /></div>
         </div>
       </div>
 
@@ -839,7 +845,12 @@ export default function InstaborJobCardForm({ product, factoryId, userId, editCa
               value={totalLotKg}
               onChange={e => setTotalLotKg(e.target.value)} />
           </div>
-          <div />
+          <div>
+            <label>{t("totalLotLitres")}</label>
+            <input type="number" step="any" placeholder="0"
+              value={totalLotL}
+              onChange={e => setTotalLotL(e.target.value)} />
+          </div>
         </div>
       </div>
 
