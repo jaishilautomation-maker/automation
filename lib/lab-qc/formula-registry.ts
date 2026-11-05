@@ -115,13 +115,27 @@ export const FORMULA_REGISTRY: FormulaEntry[] = [
   // Guard: if suspension_sample_m is 0 or missing → show "—" (handled in formula.ts)
   // 111% guard: shows warning if result > 100 (handled in frontend page.tsx)
   // ---------------------------------------------------------------------------
+  // Titre-based suspensibility (worked example, migration 034). Same shape for
+  // both phases; each references its own iodine-normality key.
+  //   A = sulphur_content × susp_sample_wt / 100
+  //   B = sediment_titre × 0.03206 × N
+  //   Suspensibility % = (A − B) / (A × 9) × 1000
+  // Check: S=56.08, susp_sample_wt=0.6208, titre=18.4, N=0.0976 -> ~92.7%
+  {
+    key: "suspensibility",
+    product: "SULPHUR_SC",
+    phase: "A",
+    formula: "((sulphur_content * suspension_sample_m / 100) - (sediment_aliquot_v2 * 0.03206 * phase_a_iodine_normality)) / ((sulphur_content * suspension_sample_m / 100) * 9) * 1000",
+    status: "confirmed",
+    sopRef: "Sulphur SC Suspensibility worked example (titre method) — Part A/B",
+  },
   {
     key: "suspensibility",
     product: "SULPHUR_SC",
     phase: "B",
-    formula: "1000 * (suspension_sample_m - suspension_sediment_m) / (9 * suspension_sample_m)",
+    formula: "((sulphur_content * suspension_sample_m / 100) - (sediment_aliquot_v2 * 0.03206 * phase_b_iodine_normality)) / ((sulphur_content * suspension_sample_m / 100) * 9) * 1000",
     status: "confirmed",
-    sopRef: "SULPHUR SC SOP — Determination of Suspensibility (IS: 6940-1982-11.1)",
+    sopRef: "Sulphur SC Suspensibility worked example (titre method) — Part A/B",
   },
 
   // ---------------------------------------------------------------------------
