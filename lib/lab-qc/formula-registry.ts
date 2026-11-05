@@ -159,6 +159,104 @@ export const FORMULA_REGISTRY: FormulaEntry[] = [
   },
 
   // ---------------------------------------------------------------------------
+  // ZIDDI — Tebuconazole Content % (by GC, internal standard = DOP)
+  // SOP: "Determination of Tebuconazole 10% WG by G.C method"
+  //   STD ratio    = tebu_std_area_tebu    / tebu_std_area_dop
+  //   Sample ratio = tebu_sample_area_tebu / tebu_sample_area_dop
+  //   Content %    = (Sample ratio / STD ratio)
+  //                × (Wt of standard / Wt of sample)   (DOP cancels — same stock)
+  //                × Purity of standard
+  //   Prep: std 0.2 g + 10 mL DOP stock -> 100 mL; sample 2 g + 10 mL -> 100 mL.
+  // Migration 030_ziddi_tebuconazole_gc.sql
+  // Check: both areas equal ratios 1.0 at 0.2 g std / 2 g sample / 100% purity
+  //        -> 1.0 × (0.2/2) × 100 = 10.00
+  // ---------------------------------------------------------------------------
+  {
+    key: "tebu_std_ratio",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "tebu_std_area_tebu / tebu_std_area_dop",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG by G.C method — STD area ratio",
+  },
+  {
+    key: "tebu_sample_ratio",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "tebu_sample_area_tebu / tebu_sample_area_dop",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG by G.C method — Sample area ratio",
+  },
+  {
+    key: "gc_tebu_content",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "(tebu_sample_ratio / tebu_std_ratio) * (tebu_std_wt / tebu_sample_wt) * tebu_std_purity",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG by G.C method — content (internal standard)",
+    checkInputs: {
+      tebu_sample_ratio: 1.0, tebu_std_ratio: 1.0,
+      tebu_std_wt: 0.2, tebu_sample_wt: 2.0, tebu_std_purity: 100,
+    },
+    checkResult: 10.0,
+  },
+
+  // ---------------------------------------------------------------------------
+  // ZIDDI — Tebuconazole Suspensibility % (GC-based, 111 factor)
+  // Guide: "TEBUCONAZOLE 10% WG — Actual GC Assay and Suspension Calculation"
+  //   susp ratio  = tebu_susp_area_tebu / tebu_susp_area_dop
+  //   susp assay  = (susp ratio / std ratio) × (std wt / susp prep wt) × purity
+  //   C           = initial sample wt × (assay % / 100)       [a.i. in portion]
+  //   Q           = residue wt × residue assay fraction        [a.i. in residue]
+  //   Suspensibility % = 111 × (C − Q) / C
+  //   111 ≈ 100 × (250/225) volume/percentage correction factor.
+  // Migration 031_ziddi_tebuconazole_suspensibility_gc.sql
+  // Check (guide §6): C=0.1467, Q=0.4440×0.09081=0.04032 -> ~80.5%
+  // ---------------------------------------------------------------------------
+  {
+    key: "tebu_susp_ratio",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "tebu_susp_area_tebu / tebu_susp_area_dop",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG — suspension GC response ratio",
+  },
+  {
+    key: "tebu_susp_assay",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "(tebu_susp_ratio / tebu_std_ratio) * (tebu_std_wt / tebu_susp_prep_wt) * tebu_std_purity",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG — suspension-prep assay (internal standard)",
+  },
+  {
+    key: "tebu_susp_c",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "tebu_susp_init_wt * gc_tebu_content / 100",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG §3.1 — C = initial sample wt × assay fraction",
+  },
+  {
+    key: "tebu_susp_q",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "tebu_susp_residue_wt * tebu_susp_residue_fraction",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG §3.2 — Q = residue wt × residue fraction",
+  },
+  {
+    key: "gc_tebu_suspensibility",
+    product: "ZIDDI",
+    phase: "none",
+    formula: "111 * (tebu_susp_c - tebu_susp_q) / tebu_susp_c",
+    status: "confirmed",
+    sopRef: "Tebuconazole 10% WG §4 — Suspension % = 111 × (C − Q) / C",
+    checkInputs: { tebu_susp_c: 0.1467, tebu_susp_q: 0.04032 },
+    checkResult: 80.49,
+  },
+
+  // ---------------------------------------------------------------------------
   // ZINC SC Phase B — Zinc Content %
   // SOP: "Determination of Zinc Content (%) and Suspension (%) in Zinc SC"
   //   Section 7.2: Zinc % = (V2 − V1) × 0.0098012 × 65.38
