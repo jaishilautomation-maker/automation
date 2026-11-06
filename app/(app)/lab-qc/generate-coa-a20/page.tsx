@@ -352,7 +352,7 @@ export default function GenerateCoaA20Page() {
             </select>
           </div>
           <div>
-            <label>Batch Number</label>
+            <label>Batch Number/Lot Number</label>
             <input type="text" value={batchNo} placeholder="e.g. JS-04020" onChange={(e) => setBatchNo(e.target.value)} />
           </div>
 

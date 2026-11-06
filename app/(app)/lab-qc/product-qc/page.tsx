@@ -85,6 +85,7 @@ const BURETTE_PAIRS: [string, string, string][] = [
   ["content_iodine_blank", "content_iodine_vol", "sulphur_content"],   // Ziddi B2>B1
   ["zc_v1_with_cyanide", "zc_v2_without_cyanide", "zinc_content"],      // Zinc SC B
   ["v1_with_cyanide",    "v2_without_cyanide",     "zinc_content_a"],   // Zinc SC A
+  ["susp_v1_sediment",   "susp_v2_sediment",       "suspension"],       // Zinc SC B suspension
 ];
 
 // Suspensibility keys that should show ">100" warning
@@ -299,17 +300,39 @@ export default function ProductQcPage() {
     }
     setBatchLookupState("searching");
     if (batchDebounceRef.current) clearTimeout(batchDebounceRef.current);
+    let cancelled = false;
     batchDebounceRef.current = setTimeout(async () => {
-      const { data } = await supabase
+      // The field accepts a batch number OR a lot number: try the batch number
+      // first, then fall back to the lot number (newest batch of this product).
+      const cols = "id, batch_number, lot_number, production_date";
+      let found: BatchOption | null = null;
+
+      const byBatch = await supabase
         .from("batches")
-        .select("id, batch_number, lot_number, production_date")
+        .select(cols)
         .eq("factory_id", activeFactory.id)
         .eq("product_id", productId)
         .eq("batch_number", bn)
         .maybeSingle();
-      if (data) {
-        setLookedUpBatch(data as BatchOption);
-        setBatchId(data.id);
+      found = (byBatch.data as BatchOption | null) ?? null;
+
+      if (!found) {
+        const byLot = await supabase
+          .from("batches")
+          .select(cols)
+          .eq("factory_id", activeFactory.id)
+          .eq("product_id", productId)
+          .eq("lot_number", bn)
+          .order("production_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        found = (byLot.data as BatchOption | null) ?? null;
+      }
+
+      if (cancelled) return; // the user kept typing - a newer lookup owns the state
+      if (found) {
+        setLookedUpBatch(found);
+        setBatchId(found.id);
         setBatchLookupState("found");
       } else {
         setLookedUpBatch(null);
@@ -317,6 +340,7 @@ export default function ProductQcPage() {
         setBatchLookupState("not_found");
       }
     }, 400);
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directBatchNumber, productId, activeFactory]);
 
@@ -349,6 +373,9 @@ export default function ProductQcPage() {
           testDefs.forEach(d => {
             const v = tr[d.test_key];
             prefill[d.test_key] = v !== undefined && v !== null ? String(v) : "";
+            // restore the "Other - please specify" text of select fields
+            const o = tr[d.test_key + "_other"];
+            if (o !== undefined && o !== null) prefill[d.test_key + "_other"] = String(o);
           });
           testDefs
             .filter(d => d.is_calculated && d.formula)
@@ -455,7 +482,7 @@ export default function ProductQcPage() {
     if (!user || !activeFactory)       { showToast("Session error — refresh.", true); return; }
     if (!productId)                    { showToast("Select a product.", true); return; }
     if (!isA20 && !batchId)            { showToast("Select a batch.", true); return; }
-    if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number.", true); return; }
+    if (isA20 && !directBatchNumber.trim()) { showToast("Enter a batch number or lot number.", true); return; }
 
     // A11: decision gate. Required decision; Rejected -> reason required;
     // Approved while any parameter is red (out of spec) -> reason required too.
@@ -526,6 +553,17 @@ export default function ProductQcPage() {
         appearanceOkRaw === "true" ? true :
         appearanceOkRaw === "false" ? false : null;
 
+      // Appearance text saved on product_qc.appearance (and used by emails, the
+      // sheet and the A-20 COA). It now comes from the Appearance dropdown; the
+      // old free-text "Color & Physical State" field is only a fallback for
+      // forms that still carry it. "Other" uses the typed description.
+      const appearanceDropdown = (values["appearance_dropdown"] ?? "").trim();
+      const appearanceText: string | null = appearanceDropdown
+        ? (appearanceDropdown === "Other"
+            ? ((values["appearance_dropdown_other"] ?? "").trim() || "Other")
+            : appearanceDropdown)
+        : (values["colour_physical_state"] ?? null);
+
       if (existingRecord) {
         const { error } = await supabase
           .from("product_qc")
@@ -533,7 +571,7 @@ export default function ProductQcPage() {
             test_date:     testDate,
             mfg_date:      mfgDate || null,
             analysed_by:   analysisBy || null,
-            appearance:    values["colour_physical_state"] ?? null,
+            appearance:    appearanceText,
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
@@ -557,7 +595,7 @@ export default function ProductQcPage() {
           overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
           testDate,
           testResults,
-          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
+          extra: { product_name: selectedProduct?.name ?? null, appearance: appearanceText, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
         });
 
         if (isA20) void notifyReport({ source: "product_qc", recordId: existingRecord.id });
@@ -568,7 +606,7 @@ export default function ProductQcPage() {
           batchNumber:     batches.find(b => b.id === existingRecord.batch_id)?.batch_number,
           phase,
           testDate,
-          appearance:      values["colour_physical_state"] ?? null,
+          appearance:      appearanceText,
           appearanceOk,
           testResults:     testResults as Record<string, unknown>,
           remarks:         remarks.trim() || null,
@@ -592,7 +630,7 @@ export default function ProductQcPage() {
               existingRecord.id, selectedProduct?.name ?? null,
               batches.find(b => b.id === existingRecord.batch_id)?.batch_number ?? null,
               phase, testDate,
-              values["colour_physical_state"] ?? null, appearanceOk,
+              appearanceText, appearanceOk,
               "pending", JSON.stringify(testResults),
               remarks.trim() || null, profile?.full_name ?? null,
               pqcUpdISO, true, activeFactory.id,
@@ -609,7 +647,10 @@ export default function ProductQcPage() {
           .from("product_qc")
           .insert({
             batch_id:      effectiveBatchId,
-            batch_no:      isA20 ? effectiveBatchNo : undefined,
+            // When a lot number was typed and it linked to a batch, store that
+            // batch's real number (not the lot text) so the record is found by
+            // its batch number everywhere (COA, search, reports).
+            batch_no:      isA20 ? (lookedUpBatch?.batch_number ?? effectiveBatchNo) : undefined,
             factory_id:    activeFactory.id,
             product_id:    productId,
             phase,
@@ -617,7 +658,7 @@ export default function ProductQcPage() {
             test_date:     testDate,
             mfg_date:      mfgDate || null,
             analysed_by:   analysisBy || null,
-            appearance:    values["colour_physical_state"] ?? null,
+            appearance:    appearanceText,
             appearance_ok: appearanceOk,
             test_results:  testResults,
             remarks:       remarks.trim() || null,
@@ -641,7 +682,7 @@ export default function ProductQcPage() {
           overallResult: fresh?.overall_result ?? (appearanceOk === true ? "pass" : appearanceOk === false ? "fail" : "pending"),
           testDate,
           testResults,
-          extra: { product_name: selectedProduct?.name ?? null, appearance: values["colour_physical_state"] ?? null, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
+          extra: { product_name: selectedProduct?.name ?? null, appearance: appearanceText, remarks: remarks.trim() || null, approval_decision: approvalDecision || null, approval_reason: approvalReason || null },
         });
 
         if (isA20) void notifyReport({ source: "product_qc", recordId: newRow.id });
@@ -655,7 +696,7 @@ export default function ProductQcPage() {
           batchNumber:     batchNum,
           phase,
           testDate,
-          appearance:      values["colour_physical_state"] ?? null,
+          appearance:      appearanceText,
           appearanceOk,
           testResults:     testResults as Record<string, unknown>,
           remarks:         remarks.trim() || null,
@@ -678,7 +719,7 @@ export default function ProductQcPage() {
             values: [
               newRow.id, selectedProduct?.name ?? null, batchNum,
               phase, testDate,
-              values["colour_physical_state"] ?? null, appearanceOk,
+              appearanceText, appearanceOk,
               "pending", JSON.stringify(testResults),
               remarks.trim() || null, profile?.full_name ?? null,
               pqcInsISO, false, activeFactory.id,
@@ -833,10 +874,10 @@ export default function ProductQcPage() {
       {isA20 && productId && (
         <div className="card">
           <h3>Batch</h3>
-          <label>Batch Number *</label>
+          <label>Batch Number/Lot Number *</label>
           <input
             type="text"
-            placeholder="e.g. SSC-260824-001"
+            placeholder="Enter batch number or lot number"
             value={directBatchNumber}
             onChange={e => {
               setDirectBatchNumber(e.target.value);
@@ -845,7 +886,7 @@ export default function ProductQcPage() {
           />
           {batchLookupState === "found" && lookedUpBatch && (
             <div className="field-hint" style={{ color: "var(--ok)", marginTop: 4 }}>
-              ✓ Linked to Production Job Card batch · {lookedUpBatch.production_date}
+              ✓ Linked to Production Job Card batch {lookedUpBatch.batch_number} · {lookedUpBatch.production_date}
               {lookedUpBatch.lot_number ? ` · Lot ${lookedUpBatch.lot_number}` : ""}
             </div>
           )}
@@ -981,7 +1022,26 @@ export default function ProductQcPage() {
                     // A10: spec pass/fail badge (merged with other warnings)
                     const specBadgeEl = buildSpecBadge(def.test_key);
 
-                    const warnBadge = (sieveWarn || buretteWarn || suspWarn || reviewBadge || specBadgeEl) ? (
+                    // Blank calculated result: say what it is waiting for, so a
+                    // result that depends on inputs in ANOTHER section (e.g. Zinc SC
+                    // suspension needs the Zinc Content titres) is not a mystery.
+                    const calcHint = (() => {
+                      if (!def.is_calculated || !def.formula) return undefined;
+                      if ((values[def.test_key] ?? "") !== "") return undefined;
+                      if (values[def.test_key + "_manual_mode"] === "1") return undefined;
+                      if (buretteWarn) return undefined; // the burette warning already explains it
+                      const tokens = Array.from(new Set(def.formula.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []));
+                      const hasNum = (k: string) => !isNaN(parseFloat(values[k] ?? ""));
+                      if (!tokens.some(hasNum)) return undefined; // untouched: stay quiet
+                      const missing = tokens.filter(t => !hasNum(t));
+                      if (missing.length > 0) {
+                        const labelOf = (k: string) => testDefs.find(x => x.test_key === k)?.label ?? k;
+                        return `Waiting for: ${missing.map(labelOf).join("; ")}`;
+                      }
+                      return "Cannot calculate - check the readings (a titre difference of 0 or a zero weight cannot be used).";
+                    })();
+
+                    const warnBadge = (sieveWarn || buretteWarn || suspWarn || reviewBadge || specBadgeEl || calcHint) ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                         {specBadgeEl}
                         {sieveWarn && (
@@ -1000,6 +1060,11 @@ export default function ProductQcPage() {
                           </div>
                         )}
                         {reviewBadge}
+                        {calcHint && (
+                          <div style={{ fontSize: 12, color: "var(--ink-soft)", fontStyle: "italic" }}>
+                            ⓘ {calcHint}
+                          </div>
+                        )}
                       </div>
                     ) : undefined;
 

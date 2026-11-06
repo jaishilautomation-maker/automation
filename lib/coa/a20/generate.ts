@@ -106,9 +106,16 @@ async function loadQc(db: DB, factoryId: string, tpl: A20ProductTemplate, batchN
   if (!product) return null;
 
   // Batch may be a linked batches row or just a typed batch_no on product_qc.
-  const { data: batchRow } = await db
+  // Product QC accepts a batch number OR a lot number, so resolve either here.
+  let { data: batchRow } = await db
     .from("batches").select("id, production_date")
     .eq("factory_id", factoryId).eq("batch_number", batchNumber).maybeSingle();
+  if (!batchRow) {
+    ({ data: batchRow } = await db
+      .from("batches").select("id, production_date")
+      .eq("factory_id", factoryId).eq("product_id", product.id).eq("lot_number", batchNumber)
+      .order("production_date", { ascending: false }).limit(1).maybeSingle());
+  }
 
   const cols = "test_results, appearance, mfg_date, test_date, approval_decision";
   let qc: QcLoad["qc"] = null;
