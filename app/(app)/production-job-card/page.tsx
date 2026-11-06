@@ -28,6 +28,7 @@ import { useToast } from "@/lib/toast-context";
 import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { LanguageContext } from "@/lib/job-card-lang-context";
+import { statusColors, statusLabel } from "@/lib/job-card/phase-workflow";
 import UplJobCardForm from "./UplJobCardForm";
 import SulphurScJobCardForm from "./SulphurScJobCardForm";
 import NutrizinJobCardForm from "./NutrizinJobCardForm";
@@ -464,10 +465,10 @@ function RecentCards({ product, factoryId, refreshKey, onEdit }: RecentCardsProp
             <span style={{ fontWeight: 700 }}>{c.lot_no}</span>
             <span style={{
               fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12,
-              background: c.status === "submitted" ? "var(--ok-soft)" : "#fff3e0",
-              color: c.status === "submitted" ? "var(--ok)" : "var(--warn)",
+              background: statusColors(c.status).bg,
+              color: statusColors(c.status).fg,
             }}>
-              {c.status}
+              {statusLabel(c.status)}
             </span>
           </div>
           <div className="pi-sub" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -475,7 +476,7 @@ function RecentCards({ product, factoryId, refreshKey, onEdit }: RecentCardsProp
               {c.batch_size_kg} kg · {fmtDate(c.job_date)}
               {(c as unknown as { operator_name?: string }).operator_name ? ` · ${(c as unknown as { operator_name?: string }).operator_name}` : ""}
             </span>
-            {onEdit && (c.status === "draft" || c.status === "submitted") && (
+            {onEdit && (
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); onEdit(c.id); }}
@@ -700,11 +701,11 @@ function Dashboard({ products, factoryId, refreshKey, onEdit, onNew }: Dashboard
                     <td style={tdS}>
                       <span style={{
                         fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10,
-                        background: r.status === "submitted" ? "var(--ok-soft)" : "#fff3e0",
-                        color: r.status === "submitted" ? "var(--ok)" : "var(--warn)",
+                        background: statusColors(r.status).bg,
+                        color: statusColors(r.status).fg,
                         whiteSpace: "nowrap",
                       }}>
-                        {r.status}
+                        {statusLabel(r.status)}
                       </span>
                     </td>
                     <td style={{ ...tdS, textAlign: "center", whiteSpace: "nowrap" }}>

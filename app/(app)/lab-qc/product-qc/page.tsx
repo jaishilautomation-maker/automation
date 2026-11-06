@@ -49,6 +49,7 @@ import { notifyEvent } from "@/lib/notifications/notify-client";
 import { notifyReport } from "@/lib/reports/notify-report-client";
 import { buildProductQcEmail } from "@/lib/notifications/lab-qc-emails";
 import { ANALYSIS_BY_OPTIONS, ANALYSIS_BY_KEY } from "@/lib/lab-qc/analysis-by";
+import { normalizeLot } from "@/lib/job-card/phase-b-calc";
 
 interface BatchOption {
   id: string;
@@ -291,7 +292,7 @@ export default function ProductQcPage() {
   // ── A-20: silent background batch lookup ─────────────────────────────────
   useEffect(() => {
     if (!isA20 || !productId || !activeFactory) return;
-    const bn = directBatchNumber.trim();
+    const bn = normalizeLot(directBatchNumber);
     if (!bn) {
       setBatchLookupState("idle");
       setLookedUpBatch(null);
@@ -304,30 +305,12 @@ export default function ProductQcPage() {
     batchDebounceRef.current = setTimeout(async () => {
       // The field accepts a batch number OR a lot number: try the batch number
       // first, then fall back to the lot number (newest batch of this product).
-      const cols = "id, batch_number, lot_number, production_date";
-      let found: BatchOption | null = null;
-
-      const byBatch = await supabase
-        .from("batches")
-        .select(cols)
-        .eq("factory_id", activeFactory.id)
-        .eq("product_id", productId)
-        .eq("batch_number", bn)
-        .maybeSingle();
-      found = (byBatch.data as BatchOption | null) ?? null;
-
-      if (!found) {
-        const byLot = await supabase
-          .from("batches")
-          .select(cols)
-          .eq("factory_id", activeFactory.id)
-          .eq("product_id", productId)
-          .eq("lot_number", bn)
-          .order("production_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        found = (byLot.data as BatchOption | null) ?? null;
-      }
+      // Normalised (trim + collapse spaces) and case-insensitive: see fn_find_batch_by_lot
+      // (migration 039). Batch-number matches win over lot-number matches.
+      const rpc = await supabase.rpc("fn_find_batch_by_lot", {
+        p_factory_id: activeFactory.id, p_product_id: productId, p_text: bn,
+      });
+      const found: BatchOption | null = ((rpc.data ?? []) as BatchOption[])[0] ?? null;
 
       if (cancelled) return; // the user kept typing - a newer lookup owns the state
       if (found) {
@@ -399,7 +382,6 @@ export default function ProductQcPage() {
   // ── Field change + live recalc ────────────────────────────────────────────
   const SIEVE_PAIRS: [string, string][] = [
     ["wet_sieve200_residue",  "wet_sieve200_sample"],
-    ["wet_sieve325_residue",  "wet_sieve325_sample"],
     ["sieve100_retained",     "sieve100_sample"],
     ["sieve200_retained",     "sieve200_sample"],
     ["sieve325_retained",     "sieve325_sample"],
@@ -503,7 +485,7 @@ export default function ProductQcPage() {
     setSubmitting(true);
     try {
       const effectiveBatchId = batchId || null;
-      const effectiveBatchNo = directBatchNumber.trim();
+      const effectiveBatchNo = normalizeLot(directBatchNumber);
 
       if (isA20) {
         let dupQuery = supabase
@@ -516,7 +498,8 @@ export default function ProductQcPage() {
         if (effectiveBatchId) {
           dupQuery = dupQuery.eq("batch_id", effectiveBatchId);
         } else {
-          dupQuery = dupQuery.eq("batch_no", effectiveBatchNo).is("batch_id", null);
+          // case-insensitive (escape LIKE wildcards so the lot is matched literally)
+          dupQuery = dupQuery.ilike("batch_no", effectiveBatchNo.replace(/[\\%_]/g, "\\$&")).is("batch_id", null);
         }
 
         const { data: dup } = await dupQuery.maybeSingle();

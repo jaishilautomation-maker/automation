@@ -833,7 +833,10 @@ export interface ProductionJobCard {
   collected_slurry_phase_a_kg: number | null;
   collected_slurry_phase_b_kg: number | null;
   ph: number | null;
-  status: "draft" | "submitted";
+  /** 'draft' | 'submitted' for every product; the Phase A -> chemist -> Phase B
+   *  products also use phase_a_submitted | phase_b_ready | phase_b_started |
+   *  rejected_limit_exceeded (migration 039). */
+  status: "draft" | "submitted" | "phase_a_submitted" | "phase_b_ready" | "phase_b_started" | "rejected_limit_exceeded";
   created_at: string;
   updated_at: string;
 }

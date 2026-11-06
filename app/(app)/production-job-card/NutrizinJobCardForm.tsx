@@ -40,6 +40,10 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
+import { normalizeLot } from "@/lib/job-card/phase-b-calc";
+import PhaseWorkflowPanel from "@/components/PhaseWorkflowPanel";
+import PhaseWorkflowActions from "@/components/PhaseWorkflowActions";
+import type { PhaseBSnapshot } from "@/lib/job-card/phase-b-review";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -136,10 +140,15 @@ type ExtCard = ProductionJobCard & {
   water_tds_phase_a: string | null;
   meter_reading_initial: number | null;
   meter_reading_final:   number | null;
+  // migration 039 (Phase A -> chemist -> Phase B workflow)
+  phase_b_calc: PhaseBSnapshot | null;
+  limit_exceeded_case: number | null;
+  limit_remark: string | null;
 };
 
 type ItemRow = {
   formula_item_id: string;
+  instructed_qty_kg: number | null;
   added_qty_kg: number | null;
   rm_batch_no: string | null;
   drum_bag_no: string | null;
@@ -263,6 +272,18 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
 
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Phase A -> chemist -> Phase B workflow state (loaded from the card) ───
+  // Legacy cards (saved "submitted" before the workflow) keep the old behaviour.
+  const [wfStatus, setWfStatus]       = useState<string>("draft");
+  const [snapshot, setSnapshot]       = useState<PhaseBSnapshot | null>(null);
+  const [limitCase, setLimitCase]     = useState<number | null>(null);
+  const [limitRemark, setLimitRemark] = useState("");
+  const isLegacy       = wfStatus === "submitted" && !snapshot;
+  const phaseBHasQty   = !!snapshot?.outputs && wfStatus !== "draft" && wfStatus !== "phase_a_submitted";
+  const phaseBPending  = !isLegacy && !phaseBHasQty;
+  // Phase B actuals unlock only once the operator starts Phase B.
+  const phaseBEditable = wfStatus === "phase_b_started" || isLegacy;
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const rowsOf = (pk: string) => rows.filter(r => r.phaseKey === pk);
   const bagTotal843 = znoBags843.reduce((s, w) => s + num(w), 0);
@@ -338,7 +359,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         const [{ data: rawCard }, { data: items }, { data: formulaDefs }] = await Promise.all([
           supabase.from("production_job_cards").select("*").eq("id", editCardId).single(),
           supabase.from("production_job_card_items")
-            .select("formula_item_id, added_qty_kg, rm_batch_no, drum_bag_no, remark")
+            .select("formula_item_id, instructed_qty_kg, added_qty_kg, rm_batch_no, drum_bag_no, remark")
             .eq("job_card_id", editCardId),
           supabase.from("product_formula_items").select("*")
             .eq("product_id", product.id).order("phase").order("order_no"),
@@ -346,6 +367,10 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         if (!rawCard) { showToast(t("toastLoadFailed"), true); onDone(); return; }
         const card = rawCard as unknown as ExtCard;
 
+        setWfStatus(card.status);
+        setSnapshot(card.phase_b_calc ?? null);
+        setLimitCase(card.limit_exceeded_case ?? null);
+        setLimitRemark(card.limit_remark ?? "");
         setBatchVariant((card.batch_size_kg === 808 ? 808 : 843) as BatchVariant);
         // If saved batch_size_kg is not one of the standard variants, expose it as a custom value
         if (card.batch_size_kg != null && card.batch_size_kg !== 808 && card.batch_size_kg !== 843) {
@@ -401,7 +426,10 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
             phaseKey:      d.phase ?? "",
             componentName: d.component_name,
             jscCode:       d.jsc_code,
-            instructedQty: d.instructed_qty_kg,
+            // Phase B: the chemist's stored quantity (full precision, shown at 2 dp).
+            instructedQty: (d.phase ?? "").toUpperCase().startsWith("B") && card.phase_b_calc && it?.instructed_qty_kg != null
+              ? Number(it.instructed_qty_kg)
+              : d.instructed_qty_kg,
             addedQty:      it?.added_qty_kg != null ? String(it.added_qty_kg) : "",
             rmBatchNo:     it?.rm_batch_no  ?? "",
             drumBagNo:     it?.drum_bag_no  ?? "",
@@ -468,15 +496,31 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
 
   // ── Validation ────────────────────────────────────────────────────────────
   function validate(): string | null {
-    if (!lotNo.trim()) return t("valLotRequired");
+    if (!normalizeLot(lotNo)) return t("valLotRequired");
     if (batchVariant === 843 && bagMismatch843) return t("valZno843Mismatch");
     if (batchVariant === 808 && bagMismatch808) return t("valZno808Mismatch");
     return null;
   }
 
+  /** Extra checks before Phase A goes to the chemist. */
+  function validateForChemist(): string | null {
+    const base = validate();
+    if (base) return base;
+    if (!(parseFloat(slurryA) > 0)) {
+      return lang === "hi"
+        ? "केमिस्ट को भेजने से पहले 'Collected slurry Phase A (kg)' भरें।"
+        : "Enter the collected Phase A slurry (kg) before submitting to the chemist.";
+    }
+    return null;
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = async (statusVal: "draft" | "submitted") => {
-    const err = validate();
+  // statusVal: status to move to, or null to keep the current one.
+  //   new card : "draft" | "phase_a_submitted"
+  //   edit     : null | "phase_b_started" | "submitted"  (rules: DB trigger)
+  const handleSave = async (statusVal: string | null) => {
+    const nextStatus = isEdit ? (statusVal ?? wfStatus) : (statusVal ?? "draft");
+    const err = nextStatus === "phase_a_submitted" ? validateForChemist() : validate();
     if (err) { showToast(err, true); return; }
     setSubmitting(true);
     try {
@@ -495,7 +539,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
       const cardPayload = {
         factory_id:                  factoryId,
         product_id:                  product.id,
-        lot_no:                      lotNo.trim(),
+        lot_no:                      normalizeLot(lotNo),
         job_date:                    jobDate,
         operator_id:                 userId,
         batch_size_kg:               batchIsCustom && customBatchKg ? parseFloat(customBatchKg) : batchVariant,
@@ -525,7 +569,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         sign_manager:                signManager    || null,
         meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
         meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
-        status:                      statusVal,
+        status:                      nextStatus,
       };
 
       // Only save formula rows for the active batch variant
@@ -542,6 +586,26 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         if (error || !data) { showToast(t("toastUpdateFailed") + (error?.message ?? t("toastUnknown")), true); return; }
         cardId = editCardId;
         for (const r of activeRows) {
+          if (r.phaseKey === pk_b) {
+            // Phase B: the instructed quantity belongs to the chemist; the operator's
+            // save never writes it (the DB would also reject it once calculated).
+            const actuals = {
+              added_qty_kg: r.addedQty ? parseFloat(r.addedQty) : null,
+              rm_batch_no:  r.rmBatchNo || null,
+              drum_bag_no:  r.drumBagNo || null,
+              remark:       r.tds || null,
+            };
+            const { data: upd } = await supabase.from("production_job_card_items")
+              .update(actuals).eq("job_card_id", cardId).eq("formula_item_id", r.formulaItemId)
+              .select("formula_item_id");
+            if (!upd || upd.length === 0) {
+              await supabase.from("production_job_card_items").insert({
+                job_card_id: cardId, formula_item_id: r.formulaItemId,
+                instructed_qty_kg: r.instructedQty, ...actuals,
+              });
+            }
+            continue;
+          }
           await supabase.from("production_job_card_items").upsert({
             job_card_id: cardId, formula_item_id: r.formulaItemId,
             instructed_qty_kg: r.instructedQty,
@@ -572,7 +636,13 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
         draft.clear();
       }
 
-      showToast(isEdit ? t("toastUpdated") : statusVal === "submitted" ? t("toastSubmitted") : t("toastDraftSaved"));
+      if (nextStatus === "phase_a_submitted" && (!isEdit || wfStatus !== "phase_a_submitted")) {
+        showToast(lang === "hi" ? "फेज़ A केमिस्ट को भेज दिया गया ✓" : "Phase A sent to the chemist ✓");
+      } else if (nextStatus === "phase_b_started" && wfStatus !== "phase_b_started") {
+        showToast(lang === "hi" ? "फेज़ B शुरू हुआ ✓" : "Phase B started ✓");
+      } else {
+        showToast(isEdit ? t("toastUpdated") : nextStatus === "submitted" ? t("toastSubmitted") : t("toastDraftSaved"));
+      }
       onDone();
     } catch (e: unknown) {
       showToast(t("toastNetworkError") + (e instanceof Error ? e.message : String(e)), true);
@@ -593,9 +663,14 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
     const stated = STATED_TOTALS[phaseKey] ?? 0;
     const sumIngr = sumIngredients(phaseKey);
     const diff = Math.round((sumIngr - stated) * 100) / 100;
-    const hasMismatch = Math.abs(diff) >= DISCREPANCY_THRESHOLD;
-    const addedTotalVal = addedTotal(phaseKey);
     const isPhaseA = phaseKey.startsWith("A");
+    // Workflow Phase B: quantities come from the chemist, not the template, so the
+    // template-total discrepancy banner no longer applies.
+    const wfB = !isPhaseA && !isLegacy;
+    const hasMismatch = !wfB && Math.abs(diff) >= DISCREPANCY_THRESHOLD;
+    const addedTotalVal = addedTotal(phaseKey);
+    const noQty = wfB && (phaseBPending || limitCase === 1);
+    const lockB = wfB && !phaseBEditable;
 
     if (loadingFormula) return <div className="empty">{t("loading")}</div>;
     if (groupRows.length === 0) return (
@@ -640,12 +715,17 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                     <td style={tdS}>{r.orderNo}</td>
                     <td style={{ ...tdS, fontWeight: 600 }}>{r.componentName}</td>
                     <td style={{ ...tdS, padding: "4px 6px" }}>
-                      <input type="text" placeholder={t("colBatchNoLower")} value={r.rmBatchNo}
+                      <input type="text" placeholder={t("colBatchNoLower")} value={r.rmBatchNo} disabled={lockB}
                         onChange={e => updateRow(r.formulaItemId, "rmBatchNo", e.target.value)}
                         style={{ width: 90 }} />
                     </td>
-                    <td style={{ ...tdS, textAlign: "right", fontWeight: 700, color: ACCENT }}>
-                      {r.instructedQty.toFixed(2)}
+                    <td style={{ ...tdS, textAlign: "right", fontWeight: 700, color: ACCENT }}
+                        title={wfB && !noQty ? "Set by the chemist (read-only)" : undefined}>
+                      {wfB && phaseBPending
+                        ? <span style={{ fontWeight: 500, fontSize: 12, color: "var(--ink-soft)" }}>Awaiting chemist</span>
+                        : wfB && limitCase === 1
+                          ? <span style={{ fontWeight: 500, fontSize: 12, color: "#b71c1c" }}>No quantity</span>
+                          : r.instructedQty.toFixed(2)}
                     </td>
                     <td style={{ ...tdS, padding: "4px 6px", textAlign: "right" }}>
                       {isZno ? (
@@ -661,7 +741,8 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                             borderColor: mismatch ? "var(--warn)" : undefined }} />
                       ) : (
                         <NumericInput allowDecimal={true}
-                          placeholder={r.instructedQty.toFixed(2)}
+                          placeholder={noQty ? "—" : r.instructedQty.toFixed(2)}
+                          disabled={lockB}
                           value={r.addedQty}
                           onChange={e => updateRow(r.formulaItemId, "addedQty", e.target.value)}
                           style={{ width: 90, textAlign: "right" }} />
@@ -673,11 +754,11 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                           onChange={e => updateRow(r.formulaItemId, "drumBagNo", e.target.value)}
                           style={{ width: 90 }} />
                       ) : isWater ? (
-                        <input type="text" placeholder={t("placeholderTds")} value={r.tds}
+                        <input type="text" placeholder={t("placeholderTds")} value={r.tds} disabled={lockB}
                           onChange={e => updateRow(r.formulaItemId, "tds", e.target.value)}
                           style={{ width: 80 }} />
                       ) : (
-                        <input type="text" placeholder={t("placeholderDrumBag")} value={r.drumBagNo}
+                        <input type="text" placeholder={t("placeholderDrumBag")} value={r.drumBagNo} disabled={lockB}
                           onChange={e => updateRow(r.formulaItemId, "drumBagNo", e.target.value)}
                           style={{ width: 90 }} />
                       )}
@@ -698,7 +779,7 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
                 </td>
                 <td style={{ padding: "6px 10px" }} />
                 <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
-                  {stated.toFixed(2)}
+                  {wfB ? (noQty ? "—" : `${sumIngr.toFixed(2)}`) : stated.toFixed(2)}
                 </td>
                 <td style={{ padding: "6px 10px", textAlign: "right" }}>
                   {addedTotalVal > 0 ? addedTotalVal.toFixed(2) : "—"}
@@ -802,6 +883,20 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
       </div>
 
       {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}
+      {/* ── 0. WORKFLOW STATUS (Phase A -> chemist -> Phase B) ─────────────── */}
+      {!isLegacy && (
+        <PhaseWorkflowPanel
+          jobCardId={editCardId ?? null}
+          status={wfStatus}
+          snapshot={snapshot}
+          limitCase={limitCase}
+          limitRemark={limitRemark}
+          onRemarkSaved={r => setLimitRemark(r)}
+          activeIngredient="Zinc"
+          accent={ACCENT}
+        />
+      )}
+
       <div className="card">
         <SectionHeader title={t("secJobCardHeader")} />
         <div className="row2">
@@ -878,7 +973,14 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
           <div>
             <label>{t("lotNo")}</label>
             <input type="text" placeholder={t("placeholderLotNo")} value={lotNo}
-              onChange={e => setLotNo(e.target.value)} />
+              disabled={wfStatus === "phase_b_started"}
+              onChange={e => setLotNo(e.target.value)}
+              onBlur={() => setLotNo(v => normalizeLot(v))} />
+            <div className="field-hint">
+              {lang === "hi"
+                ? "इसी लॉट नंबर से केमिस्ट Product QC का फेज़ A रिज़ल्ट खोजता है।"
+                : "The chemist uses this lot number to find the Phase A QC result (spaces and case are ignored)."}
+            </div>
           </div>
           <div>
             <label>{t("date")}</label>
@@ -1013,21 +1115,16 @@ export default function NutrizinJobCardForm({ product, factoryId, userId, editCa
       </div>
 
       {/* ── Actions ───────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
-        <button className="btn btn-primary" type="button" disabled={submitting}
-          onClick={() => handleSave("submitted")}>
-          {submitting ? t("saving") : isEdit ? t("saveChanges") : t("submitJobCard")}
-        </button>
-        {!isEdit && (
-          <button className="btn btn-secondary" type="button" disabled={submitting}
-            onClick={() => handleSave("draft")}>
-            {t("saveAsDraft")}
-          </button>
-        )}
-        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>
-          {t("cancel")}
-        </button>
-      </div>
+      <PhaseWorkflowActions
+        isEdit={isEdit} isLegacy={isLegacy} status={wfStatus}
+        limitCase={limitCase} limitRemark={limitRemark}
+        submitting={submitting} hindi={lang === "hi"}
+        labels={{
+          saving: t("saving"), saveChanges: t("saveChanges"), saveAsDraft: t("saveAsDraft"),
+          submitJobCard: t("submitJobCard"), cancel: t("cancel"),
+        }}
+        onSave={handleSave} onCancel={onDone}
+      />
     </>
   );
 }
