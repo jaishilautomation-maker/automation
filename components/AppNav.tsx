@@ -113,8 +113,9 @@ export default function AppNav() {
         { href: "/stores", label: "Stores" },
       ];
     } else if (role === "chemist" || role === "lab_manager") {
-      // A-20 chemist/lab_manager only has Lab QC — no pulveriser pages
+      // A-20 chemist/lab_manager: Lab QC + Production Job Card review
       links = [
+        { href: "/production-job-card/chemist-review", label: "Job Card Review" },
         { href: "/lab-qc",         label: "Lab QC" },
         { href: "/lab-qc/records", label: "Records" },
         { href: "/lab-qc/search",  label: "Search" },
@@ -126,7 +127,8 @@ export default function AppNav() {
       ];
     } else if (role === "factory_admin" || role === "company_admin") {
       links = [
-        { href: "/production-job-card", label: "Production Job Card" },
+        { href: "/production-job-card",                label: "Production Job Card" },
+        { href: "/production-job-card/chemist-review", label: "Job Card Review" },
         { href: "/packing-maintenance", label: "Packing Maintenance" },
         { href: "/packing-breakdown",   label: "Packing Breakdown" },
         { href: "/stores",              label: "Stores" },

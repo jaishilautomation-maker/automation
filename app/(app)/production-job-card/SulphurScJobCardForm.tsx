@@ -37,9 +37,11 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
-import { normalizeLot } from "@/lib/job-card/phase-b-calc";
-import PhaseWorkflowPanel from "@/components/PhaseWorkflowPanel";
-import type { PhaseBSnapshot } from "@/lib/job-card/phase-b-review";
+import DynamicIngredientRows, { type ExtraRow } from "@/components/DynamicIngredientRows";
+import { parseExtraRows, serialiseExtraRows, extraInstructedTotal, extraAddedTotal } from "@/lib/extra-ingredient-rows";
+import JobCardWorkflowBanner from "@/components/JobCardWorkflowBanner";
+import JobCardPhaseActions from "@/components/JobCardPhaseActions";
+import { type JobCardStatus, phaseAApproved, isCompleted } from "@/lib/job-card-workflow";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -90,6 +92,7 @@ interface DraftShape {
   meterFinal: string;
   rowInputsB: Record<string, { addedQty: string; rmBatchNo: string; drumBagNo: string; tds: string }>;
   slurryB: string;
+  extraRows: ExtraRow[];
   totalScKg: string;
   totalScL: string;
   cpCoolingTower: string;
@@ -174,15 +177,10 @@ type ExtCard = ProductionJobCard & {
   sign_operator: string | null;
   sign_chemist: string | null;
   sign_manager: string | null;
-  // migration 039 (Phase A -> chemist -> Phase B workflow)
-  phase_b_calc: PhaseBSnapshot | null;
-  limit_exceeded_case: number | null;
-  limit_remark: string | null;
 };
 
 type ItemRow = {
   formula_item_id: string;
-  instructed_qty_kg: number | null;
   added_qty_kg: number | null;
   rm_batch_no: string | null;
   drum_bag_no: string | null;
@@ -247,6 +245,9 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   const [meterInitial, setMeterInitial] = useState(d0?.meterInitial ?? "");
   const [meterFinal, setMeterFinal]     = useState(d0?.meterFinal ?? "");
 
+  // ── Dynamic extra ingredient rows ─────────────────────────────────────────
+  const [extraRows, setExtraRows] = useState<ExtraRow[]>(d0?.extraRows ?? []);
+
   // ── Final ─────────────────────────────────────────────────────────────────
   const [slurryB, setSlurryB]     = useState(d0?.slurryB ?? "");
   const [totalScKg, setTotalScKg] = useState(d0?.totalScKg ?? "");
@@ -271,17 +272,14 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
 
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Phase A -> chemist -> Phase B workflow state (loaded from the card) ───
-  // "draft" for a new card. Legacy cards saved before the workflow stay "submitted"
-  // with no snapshot and keep the old, fully editable behaviour.
-  const [wfStatus, setWfStatus]         = useState<string>("draft");
-  const [snapshot, setSnapshot]         = useState<PhaseBSnapshot | null>(null);
-  const [limitCase, setLimitCase]       = useState<number | null>(null);
-  const [limitRemark, setLimitRemark]   = useState("");
-  const isLegacy        = wfStatus === "submitted" && !snapshot;
-  const phaseBHasQty    = !!snapshot?.outputs && wfStatus !== "draft" && wfStatus !== "phase_a_submitted";
-  // Phase B actuals can only be entered once the operator has started Phase B.
-  const phaseBEditable  = wfStatus === "phase_b_started" || isLegacy;
+  // ── Workflow status ────────────────────────────────────────────────────────
+  const [cardStatus, setCardStatus] = useState<JobCardStatus>("draft");
+  const [chemistRemarksA, setChemistRemarksA] = useState<string | null>(null);
+  const [chemistRemarksB, setChemistRemarksB] = useState<string | null>(null);
+
+  // Phase B is visible only after the chemist has approved Phase A.
+  // Derived from the saved DB status so it survives refresh / navigation.
+  const showPhaseB = phaseAApproved(cardStatus);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const bsKg           = parseFloat(batchSize) || REF_BATCH_KG;
@@ -293,13 +291,15 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   const phaseAInstructed = bsKg === REF_BATCH_KG
     ? PHASE_A_DISPLAY_TOTAL
     : Math.round(rowsA.reduce((s, r) => s + r.instructedQty, 0) * 100) / 100;
-  // Legacy cards: the template total. Workflow cards: the chemist's total (unrounded sum).
-  const phaseBInstructed = (phaseBHasQty && !isLegacy)
-    ? rowsB.reduce((s, r) => s + r.instructedQty, 0)
-    : bsKg === REF_BATCH_KG
-      ? PHASE_B_DISPLAY_TOTAL
-      : Math.round(rowsB.reduce((s, r) => s + r.instructedQty, 0) * 100) / 100;
-  const phaseBPending = !isLegacy && !phaseBHasQty;
+  const phaseBInstructed = bsKg === REF_BATCH_KG
+    ? PHASE_B_DISPLAY_TOTAL
+    : Math.round(rowsB.reduce((s, r) => s + r.instructedQty, 0) * 100) / 100;
+
+  // Extra row contributions
+  const extraAInstr  = extraInstructedTotal(extraRows, "A");
+  const extraBInstr  = extraInstructedTotal(extraRows, "B");
+  const extraAAdded  = extraAddedTotal(extraRows, "A");
+  const extraBAdded  = extraAddedTotal(extraRows, "B");
 
   // ── Meter reading calculation ─────────────────────────────────────────────
   const meterRunningTime: { hours: number; minutes: number } | null = (() => {
@@ -363,7 +363,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         const [{ data: rawCard }, { data: items }, { data: formulaDefs }] = await Promise.all([
           supabase.from("production_job_cards").select("*").eq("id", editCardId).single(),
           supabase.from("production_job_card_items")
-            .select("formula_item_id, instructed_qty_kg, added_qty_kg, rm_batch_no, drum_bag_no, remark")
+            .select("formula_item_id, added_qty_kg, rm_batch_no, drum_bag_no, remark")
             .eq("job_card_id", editCardId),
           supabase.from("product_formula_items").select("*")
             .eq("product_id", product.id).order("phase").order("order_no"),
@@ -371,10 +371,6 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         if (!rawCard) { showToast(t("toastLoadFailed"), true); onDone(); return; }
         const card = rawCard as unknown as ExtCard;
 
-        setWfStatus(card.status);
-        setSnapshot(card.phase_b_calc ?? null);
-        setLimitCase(card.limit_exceeded_case ?? null);
-        setLimitRemark(card.limit_remark ?? "");
         setOperatorName(card.operator_name ?? "");
         setBatchSize(String(card.batch_size_kg ?? REF_BATCH_KG));
         setLotNo(card.lot_no ?? "");
@@ -393,6 +389,10 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         const cardEx = card as unknown as ExtCardExtra;
         setMeterInitial(cardEx.meter_reading_initial != null ? String(cardEx.meter_reading_initial) : "");
         setMeterFinal(cardEx.meter_reading_final   != null ? String(cardEx.meter_reading_final)   : "");
+
+        // Extra dynamic rows
+        type ExtCardFull = typeof cardEx & { extra_ingredient_rows: unknown };
+        setExtraRows(parseExtraRows((card as unknown as ExtCardFull).extra_ingredient_rows));
 
         const bags = card.sulphur_bag_weights;
         if (Array.isArray(bags) && bags.length === BAG_COUNT) {
@@ -417,6 +417,11 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         setSignChemist(card.sign_chemist ?? "");
         setSignManager(card.sign_manager ?? "");
 
+        // Workflow status
+        setCardStatus((card.status as JobCardStatus) ?? "draft");
+        setChemistRemarksA(card.chemist_remarks_phase_a ?? null);
+        setChemistRemarksB(card.chemist_remarks_phase_b ?? null);
+
         const itemMap: Record<string, ItemRow> = {};
         for (const it of (items ?? []) as ItemRow[]) itemMap[it.formula_item_id] = it;
 
@@ -429,11 +434,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             phase:         d.phase as "A" | "B",
             componentName: d.component_name,
             jscCode:       d.jsc_code,
-            // Phase B: the chemist's stored quantity (full precision, shown at 2 dp).
-            // Phase A / legacy: the formula value, as before.
-            instructedQty: d.phase === "B" && card.phase_b_calc && it?.instructed_qty_kg != null
-              ? Number(it.instructed_qty_kg)
-              : d.instructed_qty_kg,
+            instructedQty: d.instructed_qty_kg,   // stored at 2dp; display as-is
             addedQty:      it?.added_qty_kg != null ? String(it.added_qty_kg) : "",
             rmBatchNo:     it?.rm_batch_no  ?? "",
             drumBagNo:     it?.drum_bag_no  ?? "",
@@ -479,7 +480,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
       rowInputsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
-      signOperator, signChemist, signManager,
+      signOperator, signChemist, signManager, extraRows,
     });
   }, [operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowsA, sulphurBags, sulphurAddedKg,
@@ -488,7 +489,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
       rowsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
-      signOperator, signChemist, signManager, draftSave, isEdit]);
+      signOperator, signChemist, signManager, draftSave, isEdit, extraRows]);
 
   // ── Row updaters ──────────────────────────────────────────────────────────
   type RowField = keyof Pick<FormulaRow, "addedQty" | "rmBatchNo" | "drumBagNo" | "tds">;
@@ -515,31 +516,15 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
 
   // ── Validation ────────────────────────────────────────────────────────────
   function validate(): string | null {
-    if (!normalizeLot(lotNo)) return t("valLotRequired");
+    if (!lotNo.trim()) return t("valLotRequired");
     if (!batchSize || isNaN(parseFloat(batchSize))) return t("valBatchKgRequired");
     if (!jsc3Selection) return t("valJsc3Required");
     return null;
   }
 
-  /** Extra checks before Phase A goes to the chemist. */
-  function validateForChemist(): string | null {
-    const base = validate();
-    if (base) return base;
-    if (!(parseFloat(slurryA) > 0)) {
-      return lang === "hi"
-        ? "केमिस्ट को भेजने से पहले 'Collected slurry Phase A (kg)' भरें।"
-        : "Enter the collected Phase A slurry (kg) before submitting to the chemist.";
-    }
-    return null;
-  }
-
   // ── Save ──────────────────────────────────────────────────────────────────
-  // statusVal: the status to move to, or null to keep the card's current status.
-  //   new card : "draft" | "phase_a_submitted" (submit Phase A to the chemist)
-  //   edit     : null (save) | "phase_b_started" | "submitted" (rules: DB trigger)
-  const handleSave = async (statusVal: string | null) => {
-    const nextStatus = isEdit ? (statusVal ?? wfStatus) : (statusVal ?? "draft");
-    const err = nextStatus === "phase_a_submitted" ? validateForChemist() : validate();
+  const handleSave = async (statusVal: JobCardStatus) => {
+    const err = validate();
     if (err) { showToast(err, true); return; }
     setSubmitting(true);
     try {
@@ -552,7 +537,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
       const cardPayload = {
         factory_id:                  factoryId,
         product_id:                  product.id,
-        lot_no:                      normalizeLot(lotNo),
+        lot_no:                      lotNo.trim(),
         job_date:                    jobDate,
         operator_id:                 userId,
         batch_size_kg:               batchKg,
@@ -582,7 +567,8 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         sign_manager:                signManager  || null,
         meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
         meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
-        status:                      nextStatus,
+        extra_ingredient_rows:       serialiseExtraRows(extraRows),
+        status:                      statusVal,
       };
 
       let cardId: string;
@@ -597,7 +583,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         if (error || !data) { showToast(t("toastUpdateFailed") + (error?.message ?? t("toastUnknown")), true); return; }
         cardId = editCardId;
 
-        for (const r of rowsA) {
+        for (const r of [...rowsA, ...rowsB]) {
           await supabase.from("production_job_card_items").upsert({
             job_card_id:       cardId,
             formula_item_id:   r.formulaItemId,
@@ -607,25 +593,6 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             drum_bag_no:       r.drumBagNo || null,
             remark:            r.tds       || null,
           }, { onConflict: "job_card_id,formula_item_id" });
-        }
-        // Phase B: the instructed quantity belongs to the chemist, so the operator's
-        // save never writes it (it would also be rejected by the DB once calculated).
-        for (const r of rowsB) {
-          const actuals = {
-            added_qty_kg: r.addedQty ? parseFloat(r.addedQty) : null,
-            rm_batch_no:  r.rmBatchNo || null,
-            drum_bag_no:  r.drumBagNo || null,
-            remark:       r.tds       || null,
-          };
-          const { data: upd } = await supabase.from("production_job_card_items")
-            .update(actuals).eq("job_card_id", cardId).eq("formula_item_id", r.formulaItemId)
-            .select("formula_item_id");
-          if (!upd || upd.length === 0) {
-            await supabase.from("production_job_card_items").insert({
-              job_card_id: cardId, formula_item_id: r.formulaItemId,
-              instructed_qty_kg: r.instructedQty, ...actuals,
-            });
-          }
         }
       } else {
         const { data, error } = await supabase
@@ -654,13 +621,13 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         draft.clear();
       }
 
-      if (nextStatus === "phase_a_submitted" && (!isEdit || wfStatus !== "phase_a_submitted")) {
-        showToast(lang === "hi" ? "फेज़ A केमिस्ट को भेज दिया गया ✓" : "Phase A sent to the chemist ✓");
-      } else if (nextStatus === "phase_b_started" && wfStatus !== "phase_b_started") {
-        showToast(lang === "hi" ? "फेज़ B शुरू हुआ ✓" : "Phase B started ✓");
-      } else {
-        showToast(isEdit ? t("toastUpdated") : nextStatus === "submitted" ? t("toastJobSubmitted") : t("toastDraftSaved"));
-      }
+      const workflowToast = () => {
+        if (statusVal === "draft") return lang === "hi" ? "ड्राफ्ट सेव हुआ ✓" : "Draft saved ✓";
+        if (statusVal === "phase_a_pending") return lang === "hi" ? "फेज़ A केमिस्ट को भेजा ✓" : "Phase A submitted for chemist review ✓";
+        if (statusVal === "phase_b_pending") return lang === "hi" ? "फेज़ B केमिस्ट को भेजा ✓" : "Phase B submitted for chemist review ✓";
+        return t("toastUpdated");
+      };
+      showToast(workflowToast());
       onDone();
     } catch (e: unknown) {
       showToast(t("toastNetworkError") + (e instanceof Error ? e.message : String(e)), true);
@@ -676,7 +643,10 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
   function renderTable(rows: FormulaRow[], updater: (idx: number, field: RowField, val: string) => void, phase: "A" | "B") {
     const instrTotal = Math.round(rows.reduce((s, r) => s + r.instructedQty, 0) * 100) / 100;
     const addedTotal = rows.reduce((s, r) => s + num(r.addedQty), 0);
+    const extraInstr = phase === "A" ? extraAInstr : extraBInstr;
+    const extraAdded = phase === "A" ? extraAAdded : extraBAdded;
     return (
+      <>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -695,8 +665,6 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
               const isSulphur = r.componentName.toLowerCase() === "sulphur" && phase === "A";
               const isJsc3    = r.orderNo === 3 && phase === "A";
               const isWater   = r.componentName.toLowerCase() === "water";
-              // Phase B actuals stay disabled until the operator starts Phase B.
-              const lockB     = phase === "B" && !phaseBEditable;
               return (
                 <tr key={r.formulaItemId}
                   style={{ borderBottom: "1px solid var(--line)", background: isSulphur ? "#fff8f3" : undefined }}>
@@ -717,29 +685,22 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
                     )}
                   </td>
                   {/* Display at 2dp — stored values are already 2dp */}
-                  <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, color: ACCENT }}
-                      title={phase === "B" && !phaseBPending ? "Set by the chemist (read-only)" : undefined}>
-                    {phase === "B" && phaseBPending
-                      ? <span style={{ fontWeight: 500, fontSize: 12, color: "var(--ink-soft)" }}>Awaiting chemist</span>
-                      : phase === "B" && limitCase === 1
-                        ? <span style={{ fontWeight: 500, fontSize: 12, color: "#b71c1c" }}>No quantity</span>
-                        : r.instructedQty.toFixed(2)}
+                  <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, color: ACCENT }}>
+                    {r.instructedQty.toFixed(2)}
                   </td>
                   <td style={{ ...tdStyle, padding: "4px 6px" }}>
-                    <NumericInput allowDecimal={true}
-                      placeholder={phase === "B" && (phaseBPending || limitCase === 1) ? "—" : r.instructedQty.toFixed(2)}
-                      disabled={lockB}
+                    <NumericInput allowDecimal={true} placeholder={r.instructedQty.toFixed(2)}
                       value={isSulphur ? sulphurAddedKg : r.addedQty}
                       onChange={e => isSulphur ? handleSulphurAddedChange(e.target.value) : updater(idx, "addedQty", e.target.value)}
                       style={{ width: 90, textAlign: "right",
                         borderColor: isSulphur && false ? "var(--warn)" : undefined }} />
                   </td>
                   <td style={{ ...tdStyle, padding: "4px 6px" }}>
-                    <input type="text" placeholder={t("placeholderBatchNo")} value={r.rmBatchNo} disabled={lockB}
+                    <input type="text" placeholder={t("placeholderBatchNo")} value={r.rmBatchNo}
                       onChange={e => updater(idx, "rmBatchNo", e.target.value)} style={{ width: 100 }} />
                   </td>
                   <td style={{ ...tdStyle, padding: "4px 6px" }}>
-                    <input type="text" placeholder={t("placeholderDrumBag")} value={r.drumBagNo} disabled={lockB}
+                    <input type="text" placeholder={t("placeholderDrumBag")} value={r.drumBagNo}
                       onChange={e => updater(idx, "drumBagNo", e.target.value)} style={{ width: 90 }} />
                   </td>
                   {phase === "A" && (
@@ -758,16 +719,27 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
             <tr style={{ background: ACCENT + "08", fontWeight: 700, fontSize: 13 }}>
               <td colSpan={2} style={{ padding: "6px 10px" }}>{phase === "A" ? t("totalPhaseA") : t("totalPhaseB")}</td>
               <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
-                {phase === "B" && (phaseBPending || limitCase === 1) ? "—" : `${instrTotal.toFixed(2)} kg`}
+                {(instrTotal + extraInstr).toFixed(2)} kg
               </td>
               <td style={{ padding: "6px 10px", textAlign: "right" }}>
-                {addedTotal > 0 ? addedTotal.toFixed(2) : "—"} kg
+                {(addedTotal + extraAdded) > 0 ? (addedTotal + extraAdded).toFixed(2) : "—"} kg
               </td>
               <td colSpan={phase === "A" ? 3 : 2} />
             </tr>
           </tfoot>
         </table>
       </div>
+      <DynamicIngredientRows
+        rows={extraRows.filter(r => r.phase === phase)}
+        onChange={updated => setExtraRows([
+          ...extraRows.filter(r => r.phase !== phase),
+          ...updated,
+        ])}
+        phase={phase}
+        accent={ACCENT}
+        lang={lang}
+      />
+      </>
     );
   }
 
@@ -787,17 +759,13 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         {isEdit && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{t("editingBanner")}</div>}
       </div>
 
-      {/* ── 0. WORKFLOW STATUS (Phase A -> chemist -> Phase B) ─────────────── */}
-      {!isLegacy && (
-        <PhaseWorkflowPanel
-          jobCardId={editCardId ?? null}
-          status={wfStatus}
-          snapshot={snapshot}
-          limitCase={limitCase}
-          limitRemark={limitRemark}
-          onRemarkSaved={r => setLimitRemark(r)}
-          activeIngredient="Sulphur"
-          accent={ACCENT}
+      {/* ── Workflow status banner ─────────────────────────────────────────── */}
+      {isEdit && (
+        <JobCardWorkflowBanner
+          status={cardStatus}
+          chemistRemarksA={chemistRemarksA}
+          chemistRemarksB={chemistRemarksB}
+          lang={lang}
         />
       )}
 
@@ -824,15 +792,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         <div className="row2">
           <div>
             <label>{t("lotNo")}</label>
-            <input type="text" placeholder={t("placeholderLotNo")} value={lotNo}
-              disabled={wfStatus === "phase_b_started"}
-              onChange={e => setLotNo(e.target.value)}
-              onBlur={() => setLotNo(v => normalizeLot(v))} />
-            <div className="field-hint">
-              {lang === "hi"
-                ? "इसी लॉट नंबर से केमिस्ट Product QC का फेज़ A रिज़ल्ट खोजता है।"
-                : "The chemist uses this lot number to find the Phase A QC result (spaces and case are ignored)."}
-            </div>
+            <input type="text" placeholder={t("placeholderLotNo")} value={lotNo} onChange={e => setLotNo(e.target.value)} />
           </div>
           <div>
             <label>{t("date")}</label>
@@ -843,9 +803,7 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
           <InfoRow label={t("phaseAInstrTotal2")}
             value={<b style={{ color: ACCENT }}>{phaseAInstructed.toFixed(2)} kg</b>} />
           <InfoRow label={t("phaseBInstrTotal2")}
-            value={phaseBPending || limitCase === 1
-              ? <b style={{ color: "var(--ink-soft)" }}>Awaiting chemist</b>
-              : <b style={{ color: ACCENT }}>{phaseBInstructed.toFixed(2)} kg</b>} />
+            value={<b style={{ color: ACCENT }}>{phaseBInstructed.toFixed(2)} kg</b>} />
         </div>
       </div>
 
@@ -967,6 +925,10 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         )}
       </div>
 
+      {/* ── PHASE B (gated by chemist approval of Phase A) ──────────────── */}
+      {showPhaseB ? (
+      <fieldset disabled={cardStatus === "phase_b_pending" || isCompleted(cardStatus)} style={{ border: "none", padding: 0, margin: 0 }}>
+
       {/* ── 5. PHASE B ────────────────────────────────────────────────────── */}
       <div className="card">
         <SectionHeader title={t("secPhaseBRawMat")} />
@@ -1015,66 +977,33 @@ export default function SulphurScJobCardForm({ product, factoryId, userId, editC
         ))}
       </div>
 
+      </fieldset>
+      ) : (
+        <div style={{
+          padding: "16px 20px", marginBottom: 16,
+          background: "#f5f5f5", borderRadius: 10,
+          border: "1px dashed #bbb",
+          textAlign: "center", color: "var(--ink-soft)", fontSize: 13,
+        }}>
+          {lang === "hi"
+            ? "🔒 फेज़ B केमिस्ट अनुमोदन के पश्चात् उपलब्ध होगा"
+            : "🔒 Phase B will be available after the chemist approves Phase A"}
+        </div>
+      )}
+
       {/* ── Actions ───────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
-        {/* Legacy cards (saved before the chemist workflow): unchanged behaviour. */}
-        {isLegacy && (
-          <button className="btn btn-primary" type="button" disabled={submitting} onClick={() => handleSave(null)}>
-            {submitting ? t("saving") : t("saveChanges")}
-          </button>
-        )}
-
-        {/* New card, or a draft: send Phase A to the chemist. */}
-        {!isLegacy && (!isEdit || wfStatus === "draft") && (
-          <>
-            <button className="btn btn-primary" type="button" disabled={submitting} onClick={() => handleSave("phase_a_submitted")}>
-              {submitting ? t("saving") : (lang === "hi" ? "फेज़ A केमिस्ट को भेजें" : "Submit Phase A to Chemist")}
-            </button>
-            <button className="btn btn-secondary" type="button" disabled={submitting} onClick={() => handleSave("draft")}>
-              {t("saveAsDraft")}
-            </button>
-          </>
-        )}
-
-        {/* Waiting for the chemist / Phase B ready / in progress: save edits. */}
-        {isEdit && ["phase_a_submitted", "phase_b_ready", "phase_b_started", "submitted"].includes(wfStatus) && !isLegacy && (
-          <button className="btn btn-secondary" type="button" disabled={submitting} onClick={() => handleSave(null)}>
-            {submitting ? t("saving") : t("saveChanges")}
-          </button>
-        )}
-
-        {isEdit && wfStatus === "phase_b_ready" && (
-          <button className="btn btn-primary" type="button" disabled={submitting} onClick={() => handleSave("phase_b_started")}>
-            {lang === "hi" ? "फेज़ B शुरू करें (मात्रा लॉक)" : "Start Phase B (locks quantities)"}
-          </button>
-        )}
-
-        {/* Limit exceeded: nothing proceeds without the remark. */}
-        {isEdit && wfStatus === "rejected_limit_exceeded" && (
-          <>
-            {limitCase === 2 && (
-              <button className="btn btn-primary" type="button" disabled={submitting || !limitRemark.trim()}
-                title={!limitRemark.trim() ? "Enter and save the remark first" : undefined}
-                onClick={() => handleSave("phase_b_started")}>
-                Continue to Phase B (water = 0)
-              </button>
-            )}
-            <button className="btn btn-secondary" type="button" disabled={submitting || !limitRemark.trim()}
-              title={!limitRemark.trim() ? "Enter and save the remark first" : undefined}
-              onClick={() => handleSave("submitted")}>
-              Close rejected lot
-            </button>
-          </>
-        )}
-
-        {isEdit && wfStatus === "phase_b_started" && (
-          <button className="btn btn-primary" type="button" disabled={submitting} onClick={() => handleSave("submitted")}>
-            {t("submitJobCard")}
-          </button>
-        )}
-
-        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>{t("cancel")}</button>
-      </div>
+      <JobCardPhaseActions
+        status={cardStatus}
+        isEdit={isEdit}
+        submitting={submitting}
+        isSinglePhase={false}
+        lang={lang}
+        accent={ACCENT}
+        onSavePhaseA={() => handleSave("phase_a_pending")}
+        onSaveDraft={() => handleSave("draft")}
+        onSavePhaseB={() => handleSave("phase_b_pending")}
+        onCancel={onDone}
+      />
     </>
   );
 }
