@@ -16,16 +16,17 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/lib/auth-context";
 import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import {
   type JobCardStatus,
-  STATUS_LABEL_EN,
   statusBadgeStyle,
   awaitingChemist,
 } from "@/lib/job-card-workflow";
+import { statusLabel, CALC_FLOW_PRODUCT_CODES } from "@/lib/job-card/phase-workflow";
 import type { ProductionJobCard } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,8 @@ export default function ChemistReviewPage() {
 
   const [pending, setPending]   = useState<ExtCard[]>([]);
   const [history, setHistory]   = useState<ExtCard[]>([]);
+  // Sulphur SC / Zinc SC cards waiting for the Phase B calculation (separate review page)
+  const [calcPending, setCalcPending] = useState<ExtCard[]>([]);
   const [loading, setLoading]   = useState(true);
   const [activeCard, setActiveCard] = useState<ExtCard | null>(null);
 
@@ -216,8 +219,12 @@ export default function ChemistReviewPage() {
       .limit(200);
 
     const all = (data ?? []) as ExtCard[];
+    const isCalcWaiting = (c: ExtCard) =>
+      c.status === "phase_a_submitted" && CALC_FLOW_PRODUCT_CODES.includes(c.products?.code ?? "");
     setPending(all.filter(c => awaitingChemist(c.status as JobCardStatus)));
+    setCalcPending(all.filter(isCalcWaiting));
     setHistory(all.filter(c => !awaitingChemist(c.status as JobCardStatus)
+      && !isCalcWaiting(c)
       && c.status !== "draft"));
     setLoading(false);
   }, [supabase, activeFactory]);
@@ -320,7 +327,7 @@ export default function ChemistReviewPage() {
               background: badge.background, color: badge.color,
               border: `1px solid ${badge.color}30`,
             }}>
-              {STATUS_LABEL_EN[status]}
+              {statusLabel(status)}
             </span>
             <button type="button"
               onClick={() => setActiveCard(c)}
@@ -346,6 +353,46 @@ export default function ChemistReviewPage() {
           {activeFactory?.name ?? "A-20"} · Review and approve or reject submitted Phase A and Phase B.
         </p>
       </div>
+
+      {/* ── Phase B calculation (Sulphur SC / Zinc SC) ──────────────────── */}
+      {calcPending.length > 0 && (
+        <div className="card" style={{ marginBottom: 20, borderLeft: "4px solid #1565c0" }}>
+          <h3 style={{ margin: "0 0 6px", fontSize: 15 }}>
+            ⚗️ Phase A review &amp; Phase B calculation
+            <span style={{
+              marginLeft: 8, fontSize: 12, fontWeight: 700,
+              background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10,
+            }}>{calcPending.length}</span>
+          </h3>
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            Sulphur SC and Zinc SC: confirm the Phase A concentration and save. Phase B quantities are calculated and sent back to the operator.
+          </div>
+          {calcPending.map(c => (
+            <div key={c.id} style={{
+              display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+              padding: "10px 14px", marginBottom: 8, borderRadius: 10,
+              background: "#f8f9ff", border: "1.5px solid #e3e8ff",
+            }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  {PRODUCT_TITLES[c.products?.code ?? ""] ?? c.products?.name ?? "—"}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 2 }}>
+                  Lot {c.lot_no} · {fmtDate(c.job_date)} · {c.batch_size_kg} kg
+                  {c.operator_name ? ` · ${c.operator_name}` : ""}
+                </div>
+              </div>
+              <Link href={`/lab-qc/phase-a-review?card=${c.id}`}
+                style={{
+                  padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                  background: "#1565c0", color: "#fff", textDecoration: "none",
+                }}>
+                Review &amp; calculate
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Pending review ──────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 20 }}>
@@ -416,7 +463,7 @@ export default function ChemistReviewPage() {
                           border: `1px solid ${badge.color}30`,
                           whiteSpace: "nowrap",
                         }}>
-                          {STATUS_LABEL_EN[status]}
+                          {statusLabel(status)}
                         </span>
                       </td>
                       <td style={tdS}>{fmtTs(c.phase_a_reviewed_at)}</td>

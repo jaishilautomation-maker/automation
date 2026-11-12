@@ -29,11 +29,6 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { LanguageContext } from "@/lib/job-card-lang-context";
 import { statusColors, statusLabel } from "@/lib/job-card/phase-workflow";
-import {
-  type JobCardStatus,
-  STATUS_LABEL_EN,
-  statusBadgeStyle,
-} from "@/lib/job-card-workflow";
 import UplJobCardForm from "./UplJobCardForm";
 import SulphurScJobCardForm from "./SulphurScJobCardForm";
 import NutrizinJobCardForm from "./NutrizinJobCardForm";
@@ -485,7 +480,8 @@ function RecentCards({ product, factoryId, refreshKey, onEdit }: RecentCardsProp
               c.status === "draft" || c.status === "submitted" ||
               c.status === "phase_a_rejected" || c.status === "phase_b_rejected" ||
               c.status === "phase_a_approved" || c.status === "phase_b_ready" ||
-              c.status === "phase_a_submitted"
+              c.status === "phase_a_submitted" || c.status === "phase_b_started" ||
+              c.status === "rejected_limit_exceeded"
             ) && (
               <button
                 type="button"
