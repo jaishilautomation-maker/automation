@@ -35,6 +35,11 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
+import DynamicIngredientRows, { type ExtraRow } from "@/components/DynamicIngredientRows";
+import { parseExtraRows, serialiseExtraRows, extraInstructedTotal, extraAddedTotal } from "@/lib/extra-ingredient-rows";
+import JobCardWorkflowBanner from "@/components/JobCardWorkflowBanner";
+import JobCardPhaseActions from "@/components/JobCardPhaseActions";
+import { type JobCardStatus } from "@/lib/job-card-workflow";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,6 +73,7 @@ interface DraftShape {
   signOperator: string;
   signChemist: string;
   signManager: string;
+  extraRows: ExtraRow[];
 }
 
 type ExtCard = ProductionJobCard & {
@@ -164,10 +170,19 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
   const [signChemist, setSignChemist]   = useState(d0?.signChemist ?? "");
   const [signManager, setSignManager]   = useState(d0?.signManager ?? "");
 
+  // ── Dynamic extra ingredient rows ─────────────────────────────────────────
+  const [extraRows, setExtraRows] = useState<ExtraRow[]>(d0?.extraRows ?? []);
+
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Workflow status ────────────────────────────────────────────────────────
+  const [cardStatus, setCardStatus] = useState<JobCardStatus>("draft");
+  const [chemistRemarksA, setChemistRemarksA] = useState<string | null>(null);
+  const [chemistRemarksB, setChemistRemarksB] = useState<string | null>(null);
+
   // ── Derived ───────────────────────────────────────────────────────────────
-  const totalAdded = Math.round(rows.reduce((s, r) => s + num(r.addedQty), 0) * 1000) / 1000;
+  const totalAdded       = Math.round((rows.reduce((s, r) => s + num(r.addedQty), 0) + extraAddedTotal(extraRows, "main")) * 1000) / 1000;
+  const extraInstrTotal  = extraInstructedTotal(extraRows, "main");
 
   // ── Load formula ──────────────────────────────────────────────────────────
   const loadFormula = useCallback(async (
@@ -221,6 +236,11 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         setSignChemist(card.sign_chemist ?? "");
         setSignManager(card.sign_manager ?? "");
 
+        // Workflow status
+        setCardStatus((rawCard.status as JobCardStatus) ?? "draft");
+        setChemistRemarksA((rawCard as { chemist_remarks_phase_a?: string | null }).chemist_remarks_phase_a ?? null);
+        setChemistRemarksB((rawCard as { chemist_remarks_phase_b?: string | null }).chemist_remarks_phase_b ?? null);
+
         const itemMap: Record<string, ItemRow> = {};
         for (const it of (items ?? []) as ItemRow[]) itemMap[it.formula_item_id] = it;
 
@@ -244,6 +264,10 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         const waterRow = builtRows.find(r => r.componentName === "WATER");
         setWaterTds(waterRow?.remark ?? "");
 
+        // Extra dynamic ingredient rows
+        type KgumCardFull = typeof card & { extra_ingredient_rows: unknown };
+        setExtraRows(parseExtraRows((rawCard as unknown as KgumCardFull).extra_ingredient_rows));
+
         setLoadingFormula(false);
       })();
     } else {
@@ -258,9 +282,9 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
     if (isEdit) return;
     const rowInputs: DraftShape["rowInputs"] = {};
     rows.forEach(r => { rowInputs[r.formulaItemId] = { addedQty: r.addedQty, rmBatchNo: r.rmBatchNo, remark: r.remark }; });
-    draftSave({ operatorName, lotNo, jobDate, rowInputs, waterTds, ph, signOperator, signChemist, signManager });
+    draftSave({ operatorName, lotNo, jobDate, rowInputs, waterTds, ph, signOperator, signChemist, signManager, extraRows });
   }, [operatorName, lotNo, jobDate, rows, waterTds, ph,
-      signOperator, signChemist, signManager, draftSave, isEdit]);
+      signOperator, signChemist, signManager, draftSave, isEdit, extraRows]);
 
   // ── Row updater ───────────────────────────────────────────────────────────
   type RowField = "addedQty" | "rmBatchNo" | "remark";
@@ -283,7 +307,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = async (statusVal: "draft" | "submitted") => {
+  const handleSave = async (statusVal: JobCardStatus) => {
     const err = validate();
     if (err) { showToast(err, true); return; }
     setSubmitting(true);
@@ -300,6 +324,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         sign_operator: signOperator || null,
         sign_chemist:  signChemist  || null,
         sign_manager:  signManager  || null,
+        extra_ingredient_rows: serialiseExtraRows(extraRows),
         status:        statusVal,
       };
 
@@ -342,7 +367,13 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         draft.clear();
       }
 
-      showToast(isEdit ? t("toastUpdated") : statusVal === "submitted" ? t("toastSubmitted") : t("toastDraftSaved"));
+      const workflowToast = () => {
+        if (statusVal === "draft") return lang === "hi" ? "ड्राफ्ट सेव हुआ ✓" : "Draft saved ✓";
+        if (statusVal === "phase_a_pending") return lang === "hi" ? "फेज़ A केमिस्ट को भेजा ✓" : "Phase A submitted for chemist review ✓";
+        if (statusVal === "phase_b_pending") return lang === "hi" ? "फेज़ B केमिस्ट को भेजा ✓" : "Phase B submitted for chemist review ✓";
+        return t("toastUpdated");
+      };
+      showToast(workflowToast());
       onDone();
     } catch (e: unknown) {
       showToast(t("toastNetworkError") + (e instanceof Error ? e.message : String(e)), true);
@@ -371,6 +402,16 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
         </div>
         {isEdit && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{t("editingBanner")}</div>}
       </div>
+
+      {/* ── Workflow status banner ─────────────────────────────────────────── */}
+      {isEdit && (
+        <JobCardWorkflowBanner
+          status={cardStatus}
+          chemistRemarksA={chemistRemarksA}
+          chemistRemarksB={chemistRemarksB}
+          lang={lang}
+        />
+      )}
 
       {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}
       <div className="card">
@@ -407,6 +448,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
             No formula items found. Run migration 016 on the A-20 Supabase project.
           </div>
         ) : (
+          <>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -458,7 +500,7 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
                 <tr style={{ background: ACCENT + "08", fontWeight: 700, fontSize: 13 }}>
                   <td colSpan={2} style={{ padding: "6px 10px" }}>Total Instructions</td>
                   <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
-                    {INSTRUCT_TOTAL.toFixed(3)} kg
+                    {(INSTRUCT_TOTAL + extraInstrTotal).toFixed(3)} kg
                   </td>
                   <td style={{ padding: "6px 10px" }} />
                   <td style={{ padding: "6px 10px", textAlign: "right" }}>
@@ -473,6 +515,14 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
               </tfoot>
             </table>
           </div>
+          <DynamicIngredientRows
+            rows={extraRows}
+            onChange={setExtraRows}
+            phase="main"
+            accent={ACCENT}
+            lang={lang}
+          />
+          </>
         )}
 
         {/* Total instruction confirmation */}
@@ -524,21 +574,18 @@ export default function KgumJobCardForm({ product, factoryId, userId, editCardId
       </div>
 
       {/* ── Actions ───────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
-        <button className="btn btn-primary" type="button" disabled={submitting}
-          onClick={() => handleSave("submitted")}>
-          {submitting ? t("saving") : isEdit ? t("saveChanges") : t("submitJobCard")}
-        </button>
-        {!isEdit && (
-          <button className="btn btn-secondary" type="button" disabled={submitting}
-            onClick={() => handleSave("draft")}>
-            {t("saveAsDraft")}
-          </button>
-        )}
-        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>
-          {t("cancel")}
-        </button>
-      </div>
+      <JobCardPhaseActions
+        status={cardStatus}
+        isEdit={isEdit}
+        submitting={submitting}
+        isSinglePhase={true}
+        lang={lang}
+        accent={ACCENT}
+        onSavePhaseA={() => handleSave("phase_a_pending")}
+        onSaveDraft={() => handleSave("draft")}
+        onSavePhaseB={() => handleSave("phase_b_pending")}
+        onCancel={onDone}
+      />
     </>
   );
 }

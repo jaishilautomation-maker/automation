@@ -238,6 +238,14 @@ const T = {
   toastNetworkError:    { en: "Network error: ",                          hi: "नेटवर्क त्रुटि: " },
   toastUnknown:         { en: "unknown",                                  hi: "अज्ञात" },
 
+  // ── Dynamic ingredient rows ──────────────────────────────────────────────
+  addComponent:         { en: "+ Add Component",                          hi: "+ घटक जोड़ें" },
+  removeComponent:      { en: "Remove row",                               hi: "पंक्ति हटाएं" },
+  confirmRemoveMsg:     { en: "This component has entered data. Remove it?", hi: "इस घटक में डेटा दर्ज है। क्या आप इसे हटाना चाहते हैं?" },
+  confirmRemoveYes:     { en: "Yes, remove",                              hi: "हाँ, हटाएं" },
+  confirmRemoveNo:      { en: "Cancel",                                   hi: "रद्द करें" },
+  componentPlaceholder: { en: "Material code / name",                     hi: "मटेरियल कोड / नाम" },
+
   // ── Meter Reading (UPL / SulphurSC / Nutrizin) ──────────────────────────
   secMeterReading:      { en: "Machine Meter Reading",                    hi: "मशीन मीटर रीडिंग" },
   meterInitial:         { en: "Initial Reading",                          hi: "प्रारंभिक रीडिंग" },

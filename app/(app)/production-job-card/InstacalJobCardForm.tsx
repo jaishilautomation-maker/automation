@@ -33,6 +33,11 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
+import DynamicIngredientRows, { type ExtraRow } from "@/components/DynamicIngredientRows";
+import { parseExtraRows, serialiseExtraRows, extraAddedTotal, extraInstructedTotal } from "@/lib/extra-ingredient-rows";
+import JobCardWorkflowBanner from "@/components/JobCardWorkflowBanner";
+import JobCardPhaseActions from "@/components/JobCardPhaseActions";
+import { type JobCardStatus, phaseAApproved, isCompleted } from "@/lib/job-card-workflow";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -99,6 +104,7 @@ interface DraftShape {
   signOperator: string;
   signChemist: string;
   signManager: string;
+  extraRows: ExtraRow[];
 }
 
 type ExtCard = ProductionJobCard & {
@@ -241,7 +247,19 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
   const [signChemist, setSignChemist]       = useState(d0?.signChemist ?? "");
   const [signManager, setSignManager]       = useState(d0?.signManager ?? "");
 
+  // ── Dynamic extra ingredient rows ─────────────────────────────────────────
+  const [extraRows, setExtraRows] = useState<ExtraRow[]>(d0?.extraRows ?? []);
+
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Workflow status ────────────────────────────────────────────────────────
+  const [cardStatus, setCardStatus] = useState<JobCardStatus>("draft");
+  const [chemistRemarksA, setChemistRemarksA] = useState<string | null>(null);
+  const [chemistRemarksB, setChemistRemarksB] = useState<string | null>(null);
+
+  // Phase B is visible only after the chemist has approved Phase A.
+  // Derived from the saved DB status so it survives refresh / navigation.
+  const showPhaseB = phaseAApproved(cardStatus);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const vStr = String(batchVariant);
@@ -332,6 +350,11 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         setSignChemist(card.sign_chemist ?? "");
         setSignManager(card.sign_manager ?? "");
 
+        // Workflow status
+        setCardStatus((card.status as JobCardStatus) ?? "draft");
+        setChemistRemarksA(card.chemist_remarks_phase_a ?? null);
+        setChemistRemarksB(card.chemist_remarks_phase_b ?? null);
+
         // Extra fields from JSON
         try {
           const extra = card.water_tds_phase_a ? JSON.parse(card.water_tds_phase_a) : {};
@@ -341,6 +364,10 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
           if (extra.jsc45Bags) setJsc45Bags(prev => ({ ...prev, ...extra.jsc45Bags }));
           if (extra.jsc45Added) setJsc45Added(prev => ({ ...prev, ...extra.jsc45Added }));
         } catch { /* ignore */ }
+
+        // Extra dynamic ingredient rows
+        type InstacalCardFull = typeof card & { extra_ingredient_rows: unknown };
+        setExtraRows(parseExtraRows((card as unknown as InstacalCardFull).extra_ingredient_rows));
 
         // JSC45 bags for active variant also in sulphur_bag_weights
         const bags = card.sulphur_bag_weights;
@@ -392,14 +419,14 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
       phaseBStart, phaseBEnd, phaseBObs,
       totalLotKg, totalLotL,
       qcCalciumContent, qcClear, qcPh,
-      signOperator, signChemist, signManager,
+      signOperator, signChemist, signManager, extraRows,
     });
   }, [batchVariant, customBatchKg, operatorName, lotNo, jobDate, rows,
       jsc45Bags, jsc45Added,
       phaseAStart, phaseAEnd, phaseAObs,
       phaseBStart, phaseBEnd, phaseBObs,
       totalLotKg, totalLotL, qcCalciumContent, qcClear, qcPh,
-      signOperator, signChemist, signManager, draftSave, isEdit,
+      signOperator, signChemist, signManager, draftSave, isEdit, extraRows,
       pk_a]);
 
   // ── Row updater ───────────────────────────────────────────────────────────
@@ -438,7 +465,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = async (statusVal: "draft" | "submitted") => {
+  const handleSave = async (statusVal: JobCardStatus) => {
     const err = validate();
     if (err) { showToast(err, true); return; }
     setSubmitting(true);
@@ -486,6 +513,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         sign_manager:       signManager      || null,
         // Extra fields as JSON
         water_tds_phase_a:  extraJson,
+        extra_ingredient_rows: serialiseExtraRows(extraRows),
         status:             statusVal,
       };
 
@@ -531,7 +559,13 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         draft.clear();
       }
 
-      showToast(isEdit ? t("toastUpdated") : statusVal === "submitted" ? t("toastSubmitted") : t("toastDraftSaved"));
+      const workflowToast = () => {
+        if (statusVal === "draft") return lang === "hi" ? "ड्राफ्ट सेव हुआ ✓" : "Draft saved ✓";
+        if (statusVal === "phase_a_pending") return lang === "hi" ? "फेज़ A केमिस्ट को भेजा ✓" : "Phase A submitted for chemist review ✓";
+        if (statusVal === "phase_b_pending") return lang === "hi" ? "फेज़ B केमिस्ट को भेजा ✓" : "Phase B submitted for chemist review ✓";
+        return t("toastUpdated");
+      };
+      showToast(workflowToast());
       onDone();
     } catch (e: unknown) {
       showToast(t("toastNetworkError") + (e instanceof Error ? e.message : String(e)), true);
@@ -559,6 +593,7 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
     );
 
     return (
+      <>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -631,16 +666,29 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
               </td>
               <td style={{ padding: "6px 10px" }} />
               <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
-                {instrTotal.toFixed(3)} kg
+                {(instrTotal + extraInstructedTotal(extraRows, phaseKey)).toFixed(3)} kg
               </td>
               <td style={{ padding: "6px 10px", textAlign: "right" }}>
-                {addedTotalVal > 0 ? addedTotalVal.toFixed(3) : "—"} kg
+                {(addedTotalVal + extraAddedTotal(extraRows, phaseKey)) > 0
+                  ? (addedTotalVal + extraAddedTotal(extraRows, phaseKey)).toFixed(3)
+                  : "—"} kg
               </td>
               <td style={{ padding: "6px 10px" }} />
             </tr>
           </tfoot>
         </table>
       </div>
+      <DynamicIngredientRows
+        rows={extraRows.filter(r => r.phase === phaseKey)}
+        onChange={updated => setExtraRows([
+          ...extraRows.filter(r => r.phase !== phaseKey),
+          ...updated,
+        ])}
+        phase={phaseKey}
+        accent={ACCENT}
+        lang={lang}
+      />
+      </>
     );
   }
 
@@ -723,6 +771,16 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         </div>
         {isEdit && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{t("editingBanner")}</div>}
       </div>
+
+      {/* ── Workflow status banner ─────────────────────────────────────────── */}
+      {isEdit && (
+        <JobCardWorkflowBanner
+          status={cardStatus}
+          chemistRemarksA={chemistRemarksA}
+          chemistRemarksB={chemistRemarksB}
+          lang={lang}
+        />
+      )}
 
       {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}
       <div className="card">
@@ -866,6 +924,10 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         />
       </div>
 
+      {/* ── PHASE B (gated by chemist approval of Phase A) ──────────────── */}
+      {showPhaseB ? (
+      <fieldset disabled={cardStatus === "phase_b_pending" || isCompleted(cardStatus)} style={{ border: "none", padding: 0, margin: 0 }}>
+
       {/* ── 6. PHASE B ────────────────────────────────────────────────────── */}
       <div className="card">
         <SectionHeader title={`${lang === "hi" ? "फेज़ B" : "Phase B"} — ${batchVariant} kg`} />
@@ -934,22 +996,33 @@ export default function InstacalJobCardForm({ product, factoryId, userId, editCa
         </div>
       </div>
 
+      </fieldset>
+      ) : (
+        <div style={{
+          padding: "16px 20px", marginBottom: 16,
+          background: "#f5f5f5", borderRadius: 10,
+          border: "1px dashed #bbb",
+          textAlign: "center", color: "var(--ink-soft)", fontSize: 13,
+        }}>
+          {lang === "hi"
+            ? "🔒 फेज़ B केमिस्ट अनुमोदन के पश्चात् उपलब्ध होगा"
+            : "🔒 Phase B will be available after the chemist approves Phase A"}
+        </div>
+      )}
+
       {/* ── Actions ───────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
-        <button className="btn btn-primary" type="button" disabled={submitting}
-          onClick={() => handleSave("submitted")}>
-          {submitting ? t("saving") : isEdit ? t("saveChanges") : t("submitJobCard")}
-        </button>
-        {!isEdit && (
-          <button className="btn btn-secondary" type="button" disabled={submitting}
-            onClick={() => handleSave("draft")}>
-            {t("saveAsDraft")}
-          </button>
-        )}
-        <button className="btn btn-ghost" type="button" disabled={submitting} onClick={onDone}>
-          {t("cancel")}
-        </button>
-      </div>
+      <JobCardPhaseActions
+        status={cardStatus}
+        isEdit={isEdit}
+        submitting={submitting}
+        isSinglePhase={false}
+        lang={lang}
+        accent={ACCENT}
+        onSavePhaseA={() => handleSave("phase_a_pending")}
+        onSaveDraft={() => handleSave("draft")}
+        onSavePhaseB={() => handleSave("phase_b_pending")}
+        onCancel={onDone}
+      />
     </>
   );
 }

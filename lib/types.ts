@@ -815,7 +815,9 @@ export interface ProductFormulaItem {
 
 /**
  * production_job_cards — one per production run.
- * status: 'draft' → 'submitted'
+ * status: 'draft' → 'phase_a_pending' → 'phase_a_approved'|'phase_a_rejected'
+ *          → 'phase_b_pending' → 'completed'|'phase_b_rejected'
+ *         (legacy: 'submitted' kept for backward compat with old records)
  */
 export interface ProductionJobCard {
   id: string;
@@ -835,8 +837,29 @@ export interface ProductionJobCard {
   ph: number | null;
   /** 'draft' | 'submitted' for every product; the Phase A -> chemist -> Phase B
    *  products also use phase_a_submitted | phase_b_ready | phase_b_started |
-   *  rejected_limit_exceeded (migration 039). */
-  status: "draft" | "submitted" | "phase_a_submitted" | "phase_b_ready" | "phase_b_started" | "rejected_limit_exceeded";
+   *  rejected_limit_exceeded (migration 039), and the local workflow adds
+   *  phase_a_pending | phase_a_approved | phase_a_rejected | phase_b_pending |
+   *  phase_b_rejected | completed (migration 031). */
+  status:
+    | "draft"
+    | "submitted"
+    | "phase_a_submitted"
+    | "phase_b_ready"
+    | "phase_b_started"
+    | "rejected_limit_exceeded"
+    | "phase_a_pending"
+    | "phase_a_approved"
+    | "phase_a_rejected"
+    | "phase_b_pending"
+    | "phase_b_rejected"
+    | "completed";
+  // Approval workflow (migration 031)
+  chemist_remarks_phase_a: string | null;
+  chemist_remarks_phase_b: string | null;
+  approved_by_phase_a: string | null;
+  approved_by_phase_b: string | null;
+  phase_a_reviewed_at: string | null;
+  phase_b_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }

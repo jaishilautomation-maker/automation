@@ -36,6 +36,11 @@ import { useFormDraft, draftKey } from "@/lib/use-form-draft";
 import type { Product, ProductFormulaItem, ProductionJobCard } from "@/lib/types";
 import { useJobCardLang } from "@/lib/job-card-lang-context";
 import { makeJcT } from "@/lib/job-card-translations";
+import DynamicIngredientRows, { type ExtraRow } from "@/components/DynamicIngredientRows";
+import { parseExtraRows, serialiseExtraRows, extraInstructedTotal, extraAddedTotal } from "@/lib/extra-ingredient-rows";
+import JobCardWorkflowBanner from "@/components/JobCardWorkflowBanner";
+import JobCardPhaseActions from "@/components/JobCardPhaseActions";
+import { type JobCardStatus, canSubmitPhaseA, canSubmitPhaseB, isCompleted, phaseAApproved } from "@/lib/job-card-workflow";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -90,6 +95,7 @@ interface DraftShape {
   slurryA: string;
   meterInitial: string;
   meterFinal: string;
+  extraRows: ExtraRow[];
   // Phase B rows
   rowInputsB: Record<string, { addedQty: string; rmBatchNo: string; drumBagNo: string; tds: string }>;
   slurryB: string;
@@ -224,6 +230,9 @@ export default function UplJobCardForm({
   const [meterInitial, setMeterInitial] = useState(d0?.meterInitial ?? "");
   const [meterFinal, setMeterFinal]     = useState(d0?.meterFinal ?? "");
 
+  // ── Dynamic extra ingredient rows ─────────────────────────────────────────
+  const [extraRows, setExtraRows] = useState<ExtraRow[]>(d0?.extraRows ?? []);
+
   // ── Phase B formula rows ─────────────────────────────────────────────────
   const [rowsB, setRowsB] = useState<FormulaRow[]>([]);
 
@@ -249,6 +258,15 @@ export default function UplJobCardForm({
   const [signChemist, setSignChemist]   = useState(d0?.signChemist ?? "");
   const [signManager, setSignManager]   = useState(d0?.signManager ?? "");
 
+  // ── Workflow status ────────────────────────────────────────────────────────
+  const [cardStatus, setCardStatus] = useState<JobCardStatus>("draft");
+  const [chemistRemarksA, setChemistRemarksA] = useState<string | null>(null);
+  const [chemistRemarksB, setChemistRemarksB] = useState<string | null>(null);
+
+  // Phase B is visible only after the chemist has approved Phase A.
+  // Derived from the saved DB status so it survives refresh / navigation.
+  const showPhaseB = phaseAApproved(cardStatus);
+
   const [submitting, setSubmitting] = useState(false);
 
   // ── Derived calculations ──────────────────────────────────────────────────
@@ -262,6 +280,12 @@ export default function UplJobCardForm({
   // Scaled instruction totals (for display)
   const phaseAInstructed = scaleQty(PHASE_A_TOTAL, REF_BATCH_KG, bsKg);
   const phaseBInstructed = scaleQty(PHASE_B_TOTAL, REF_BATCH_KG, bsKg);
+
+  // Extra row contributions
+  const extraAInstr  = extraInstructedTotal(extraRows, "A");
+  const extraBInstr  = extraInstructedTotal(extraRows, "B");
+  const extraAAdded  = extraAddedTotal(extraRows, "A");
+  const extraBAdded  = extraAddedTotal(extraRows, "B");
 
   // ── Meter reading calculation ─────────────────────────────────────────────
   // Reading difference = Final - Initial.
@@ -379,6 +403,10 @@ export default function UplJobCardForm({
         setMeterInitial(cardEx.meter_reading_initial != null ? String(cardEx.meter_reading_initial) : "");
         setMeterFinal(cardEx.meter_reading_final   != null ? String(cardEx.meter_reading_final)   : "");
 
+        // Extra dynamic rows
+        type UplCardFull = typeof cardEx & { extra_ingredient_rows: unknown };
+        setExtraRows(parseExtraRows((card as unknown as UplCardFull).extra_ingredient_rows));
+
         // Sulphur bags — load saved weights and recompute total as source of truth
         const bags = card.sulphur_bag_weights;
         if (Array.isArray(bags) && bags.length === BAG_COUNT) {
@@ -410,6 +438,11 @@ export default function UplJobCardForm({
         setSignOperator(card.sign_operator ?? "");
         setSignChemist(card.sign_chemist ?? "");
         setSignManager(card.sign_manager ?? "");
+
+        // Workflow status
+        setCardStatus((card.status as JobCardStatus) ?? "draft");
+        setChemistRemarksA(card.chemist_remarks_phase_a ?? null);
+        setChemistRemarksB(card.chemist_remarks_phase_b ?? null);
 
         // Build item lookup keyed by formula_item_id
         type ItemRow = { formula_item_id: string; added_qty_kg: number | null; rm_batch_no: string | null; drum_bag_no: string | null; remark: string | null };
@@ -471,7 +504,7 @@ export default function UplJobCardForm({
       operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowInputsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
-      meterInitial, meterFinal,
+      meterInitial, meterFinal, extraRows,
       rowInputsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -480,7 +513,7 @@ export default function UplJobCardForm({
   }, [operatorName, batchSize, lotNo, jobDate, jsc3Selection,
       rowsA, sulphurBags, sulphurAddedKg,
       premixStart, premixEnd, beadMillStart, flowRate, beadMillEnd, slurryA,
-      meterInitial, meterFinal,
+      meterInitial, meterFinal, extraRows,
       rowsB, slurryB, totalScKg, totalScL,
       cpCoolingTower, cpMechSeal, cpPipes,
       qcSulphurContent, qcSuspensibility, qcDensity, qcPh, qcViscosity,
@@ -518,7 +551,7 @@ export default function UplJobCardForm({
   }
 
   // ── Save / submit ─────────────────────────────────────────────────────────
-  const handleSave = async (statusVal: "draft" | "submitted") => {
+  const handleSave = async (statusVal: JobCardStatus) => {
     const err = validate();
     if (err) { showToast(err, true); return; }
     setSubmitting(true);
@@ -565,6 +598,7 @@ export default function UplJobCardForm({
         sign_manager:                signManager  || null,
         meter_reading_initial:       meterInitial ? parseFloat(meterInitial) : null,
         meter_reading_final:         meterFinal   ? parseFloat(meterFinal)   : null,
+        extra_ingredient_rows:       serialiseExtraRows(extraRows),
         status:                      statusVal,
       };
 
@@ -635,10 +669,13 @@ export default function UplJobCardForm({
         draft.clear();
       }
 
-      showToast(isEdit
-        ? t("toastUpdated")
-        : statusVal === "submitted" ? t("toastJobSubmitted") : t("toastDraftSaved")
-      );
+      const workflowToast = () => {
+        if (statusVal === "draft") return lang === "hi" ? "ड्राफ्ट सेव हुआ ✓" : "Draft saved ✓";
+        if (statusVal === "phase_a_pending") return lang === "hi" ? "फेज़ A केमिस्ट को भेजा ✓" : "Phase A submitted for chemist review ✓";
+        if (statusVal === "phase_b_pending") return lang === "hi" ? "फेज़ B केमिस्ट को भेजा ✓" : "Phase B submitted for chemist review ✓";
+        return t("toastUpdated");
+      };
+      showToast(workflowToast());
       onDone();
     } catch (e: unknown) {
       showToast(t("toastNetworkError") + (e instanceof Error ? e.message : String(e)), true);
@@ -655,7 +692,10 @@ export default function UplJobCardForm({
   ) {
     const instructedTotal = rows.reduce((s, r) => s + r.instructedQty, 0);
     const addedTotal = rows.reduce((s, r) => s + num(r.addedQty), 0);
+    const extraInstr = phase === "A" ? extraAInstr : extraBInstr;
+    const extraAdded = phase === "A" ? extraAAdded : extraBAdded;
     return (
+      <>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -775,16 +815,27 @@ export default function UplJobCardForm({
                 {phase === "A" ? t("totalPhaseA") : t("totalPhaseB")}
               </td>
               <td style={{ padding: "6px 10px", textAlign: "right", color: ACCENT }}>
-                {instructedTotal.toFixed(3)} kg
+                {(instructedTotal + extraInstr).toFixed(3)} kg
               </td>
               <td style={{ padding: "6px 10px", textAlign: "right" }}>
-                {addedTotal > 0 ? addedTotal.toFixed(3) : "—"} kg
+                {(addedTotal + extraAdded) > 0 ? (addedTotal + extraAdded).toFixed(3) : "—"} kg
               </td>
               <td colSpan={phase === "A" ? 3 : 2} />
             </tr>
           </tfoot>
         </table>
       </div>
+      <DynamicIngredientRows
+        rows={extraRows.filter(r => r.phase === phase)}
+        onChange={updated => setExtraRows([
+          ...extraRows.filter(r => r.phase !== phase),
+          ...updated,
+        ])}
+        phase={phase}
+        accent={ACCENT}
+        lang={lang}
+      />
+      </>
     );
   }
 
@@ -817,6 +868,16 @@ export default function UplJobCardForm({
           </div>
         )}
       </div>
+
+      {/* ── Workflow status banner ─────────────────────────────────────────── */}
+      {isEdit && (
+        <JobCardWorkflowBanner
+          status={cardStatus}
+          chemistRemarksA={chemistRemarksA}
+          chemistRemarksB={chemistRemarksB}
+          lang={lang}
+        />
+      )}
 
       {/* ── 1. HEADER ─────────────────────────────────────────────────────── */}
       <div className="card">
@@ -1009,6 +1070,10 @@ export default function UplJobCardForm({
         )}
       </div>
 
+      {/* ── PHASE B (gated by chemist approval of Phase A) ──────────────── */}
+      {showPhaseB ? (
+      <fieldset disabled={cardStatus === "phase_b_pending" || isCompleted(cardStatus)} style={{ border: "none", padding: 0, margin: 0 }}>
+
       {/* ── 5. PHASE B — INGREDIENTS ─────────────────────────────────────── */}
       <div className="card">
         <SectionHeader title={t("secPhaseBRawMat")} />
@@ -1069,23 +1134,33 @@ export default function UplJobCardForm({
         ))}
       </div>
 
-      {/* ── Action buttons ────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
-        <button className="btn btn-primary" type="button"
-          disabled={submitting} onClick={() => handleSave("submitted")}>
-          {submitting ? t("saving") : isEdit ? t("saveChanges") : t("submitJobCard")}
-        </button>
-        {!isEdit && (
-          <button className="btn btn-secondary" type="button"
-            disabled={submitting} onClick={() => handleSave("draft")}>
-            {t("saveAsDraft")}
-          </button>
-        )}
-        <button className="btn btn-ghost" type="button"
-          disabled={submitting} onClick={onDone}>
-          {t("cancel")}
-        </button>
-      </div>
+      </fieldset>
+      ) : (
+        <div style={{
+          padding: "16px 20px", marginBottom: 16,
+          background: "#f5f5f5", borderRadius: 10,
+          border: "1px dashed #bbb",
+          textAlign: "center", color: "var(--ink-soft)", fontSize: 13,
+        }}>
+          {lang === "hi"
+            ? "🔒 फेज़ B केमिस्ट अनुमोदन के पश्चात् उपलब्ध होगा"
+            : "🔒 Phase B will be available after the chemist approves Phase A"}
+        </div>
+      )}
+
+      {/* ── Workflow action buttons ─────────────────────────────────────── */}
+      <JobCardPhaseActions
+        status={cardStatus}
+        isEdit={isEdit}
+        submitting={submitting}
+        isSinglePhase={false}
+        lang={lang}
+        accent={ACCENT}
+        onSavePhaseA={() => handleSave("phase_a_pending")}
+        onSaveDraft={() => handleSave("draft")}
+        onSavePhaseB={() => handleSave("phase_b_pending")}
+        onCancel={onDone}
+      />
     </>
   );
 }
