@@ -156,13 +156,19 @@ export default function SelectModulePage() {
   // Must be state so it re-evaluates after the component mounts in the browser
   // — the module-level constant IS_FACTORY_SCOPED_ENV is always false in local dev.
   const [IS_FACTORY_SCOPED, setIsFactoryScoped] = useState(IS_FACTORY_SCOPED_ENV);
+  const [effectiveCode, setEffectiveCode] = useState(process.env.NEXT_PUBLIC_FACTORY_CODE ?? "");
   useEffect(() => {
     setIsFactoryScoped(getIsFactoryScoped());
+    setEffectiveCode(getEffectiveFactoryCode());
   }, []);
 
   const loading = authLoading || moduleLoading;
   const role    = profile?.role ?? null;
   const isAdmin = role === "factory_admin" || role === "company_admin";
+  // A-20: lab roles only use Lab QC (the Job Card module has nothing for them),
+  // so they skip the module picker and land on /lab-qc.
+  const isLabRole = role === "chemist" || role === "lab_manager";
+  const labGoesToLabQc = isLabRole && effectiveCode === "A20";
   const modules = modulesForUser(accessList, role);
 
   // ── factory_admin: handle demo role selection ─────────────────────────────
@@ -180,7 +186,13 @@ export default function SelectModulePage() {
   const handleDemoRolePick = useCallback((demoRole: AppRole) => {
     setDemoRole(demoRole);
     if (demoRole === "chemist" || demoRole === "lab_manager") {
-      // Show module picker (Job Card vs Lab QC) for lab roles
+      if (getEffectiveFactoryCode() === "A20") {
+        // A-20 lab roles go straight to Lab QC (no Job Card module for them)
+        setActiveModule("lab_qc");
+        router.replace("/lab-qc");
+        return;
+      }
+      // A-20/1: show module picker (Job Card vs Lab QC) for lab roles
       setDemoRoleActive(demoRole);
       return;
     }
@@ -211,12 +223,19 @@ export default function SelectModulePage() {
       return;
     }
 
+    // A-20 chemist / lab_manager: straight to Lab QC
+    if (labGoesToLabQc) {
+      setActiveModule("lab_qc");
+      router.replace("/lab-qc");
+      return;
+    }
+
     if (modules.length === 1) {
       setActiveModule(modules[0]);
       router.replace(landingPath(modules[0], role));
       return;
     }
-  }, [loading, IS_FACTORY_SCOPED, activeFactory, role, isAdmin, modules, router, setActiveModule]);
+  }, [loading, IS_FACTORY_SCOPED, activeFactory, role, isAdmin, modules, labGoesToLabQc, router, setActiveModule]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // STANDARD PATH: multi-factory deployment auto-advance
@@ -246,7 +265,9 @@ export default function SelectModulePage() {
   // Render states
   // ──────────────────────────────────────────────────────────────────────────
 
-  if (loading || (IS_FACTORY_SCOPED_ENV && IS_FACTORY_SCOPED && !activeFactory)) {
+  // Lab roles on A-20 are being redirected to /lab-qc: don't flash the tiles.
+  if (loading || (IS_FACTORY_SCOPED_ENV && IS_FACTORY_SCOPED && !activeFactory)
+      || (IS_FACTORY_SCOPED && !isAdmin && labGoesToLabQc)) {
     return (
       <div className="module-wrap">
         <div className="empty">Loading…</div>

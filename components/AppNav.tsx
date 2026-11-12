@@ -179,7 +179,7 @@ export default function AppNav() {
         >
           ⇄ Switch Role
         </Link>
-      ) : role === "chemist" || role === "lab_manager" ? (
+      ) : (role === "chemist" || role === "lab_manager") && process.env.NEXT_PUBLIC_FACTORY_CODE !== "A20" ? (
         <Link
           href="/select-module"
           aria-current={pathname === "/select-module" ? "page" : undefined}
