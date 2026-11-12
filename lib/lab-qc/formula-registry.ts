@@ -125,7 +125,7 @@ export const FORMULA_REGISTRY: FormulaEntry[] = [
     key: "suspensibility",
     product: "SULPHUR_SC",
     phase: "B",
-    formula: "((sulphur_content * suspension_sample_m / 100) - (sediment_aliquot_v2 * 0.03206 * phase_b_iodine_normality)) / ((sulphur_content * suspension_sample_m / 100) * 9) * 1000",
+    formula: "((sulphur_content * suspension_sample_m / 100) - (sediment_aliquot_v2 * 0.03206 * susp_iodine_normality)) / ((sulphur_content * suspension_sample_m / 100) * 9) * 1000",
     status: "confirmed",
     sopRef: "Sulphur SC Suspensibility worked example (titre method) — Part A/B",
   },
