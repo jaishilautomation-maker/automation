@@ -19,6 +19,7 @@ import { useModule } from "@/lib/module-context";
 import { useToast } from "@/lib/toast-context";
 import { fmtKg, fmtPct } from "@/lib/job-card/phase-b-calc";
 import { statusColors, statusLabel } from "@/lib/job-card/phase-workflow";
+import JobCardApprovalReview from "@/components/JobCardApprovalReview";
 import type { PhaseBSnapshot, CompMode } from "@/lib/job-card/phase-b-review";
 
 interface CardListRow {
@@ -201,7 +202,7 @@ export default function PhaseAReviewPage() {
 
       {/* ---- pending list ------------------------------------------------- */}
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Job cards to review</h3>
+        <h3 style={{ marginTop: 0 }}>Sulphur SC / Zinc SC: review Phase A and calculate Phase B</h3>
         {loadingList ? (
           <div className="empty">Loading...</div>
         ) : cards.length === 0 ? (
@@ -421,6 +422,9 @@ export default function PhaseAReviewPage() {
           </div>
         </>
       )}
+
+      {/* Approve / reject flow for the other job cards (UPL, InstaCal, K-Gum, InstaBor) */}
+      <JobCardApprovalReview />
     </div>
   );
 }
