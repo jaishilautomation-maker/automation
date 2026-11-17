@@ -94,7 +94,10 @@ export const COA_CATALOG: CoaCatalogRow[] = [
     // purity (Apollo, Birla/Dalmia ...). The party's spec decides which field prints.
     method: METHOD_IS_6655,
     altSourceFields: [{ field: "insolubility_toluene", decimals: 3, method: METHOD_IS_6655 }] },
-  { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4, method: METHOD_IS_6655 },
+  { sr: 2,  defaultLabel: "% Acidity as H2SO4",                qcSourceField: "acidity_percent", decimals: 4, method: METHOD_IS_6655,
+    // Bridgestone (WE-10 / WE-15) specs "Free acid (as H2SO4)" measured by its
+    // own method (mL x F x 0.00049 / W x 100); printed at stored precision.
+    altSourceFields: [{ field: "free_acid_percent", method: "ZEN-Z-ZAI-551-111.1, IS-6655" }] },
   { sr: 3,  defaultLabel: "% Ash content",                     qcSourceField: "ash_percent", decimals: 3, method: METHOD_IS_6655 },
   // Sr 4 — Mesh size (three sub-rows). Defaults = MRF variant.
   { sr: 4, sub: "a", defaultLabel: "% passing on wet sieve (150µ) 100 mesh", qcSourceField: "mesh100_pct", method: METHOD_IS_7086 },
@@ -122,6 +125,7 @@ export const COA_CATALOG: CoaCatalogRow[] = [
 export const BATCH_ANALYSIS_KEYS: ReadonlySet<string> = new Set([
   "purity_percent",
   "acidity_percent",
+  "free_acid_percent",
   "ash_percent",
   "moisture_percent",
   "mesh100_pct",

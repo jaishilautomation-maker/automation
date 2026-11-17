@@ -30,6 +30,8 @@ export function evalFormula(
   formula: string,
   values: Record<string, string>,
   unit?: string | null,
+  /** Explicit decimal places; overrides the unit-based default (2 for "%", 4 otherwise). */
+  decimals?: number,
 ): number | null {
   if (!formula) return null;
 
@@ -60,7 +62,7 @@ export function evalFormula(
 
     // % results → 2 d.p. (match A-20/1 convention); everything else → 4 d.p.
     const isPercent = unit?.trim() === "%";
-    const factor = isPercent ? 100 : 10000;
+    const factor = decimals != null ? Math.pow(10, decimals) : (isPercent ? 100 : 10000);
     return Math.round(result * factor) / factor;
   } catch {
     return null;

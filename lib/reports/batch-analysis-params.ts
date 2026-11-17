@@ -29,6 +29,8 @@ export const BATCH_ANALYSIS_PARAMS: BatchAnalysisParam[] = [
   { resultKey: "purity_percent",        label: "Purity / Solubility in CS2", unit: "%",  rawInputs: ["purity_e", "purity_w1", "purity_w2"] },
   { resultKey: "insolubility_toluene",  label: "Insolubility in Toluene",    unit: "%",  rawInputs: [] },
   { resultKey: "acidity_percent",       label: "Acidity (as H2SO4)",         unit: "%",  rawInputs: ["acidity_v1", "acidity_v2", "acidity_n", "acidity_m"] },
+  // Bridgestone only: replaces Acidity (own method - mL x F x 0.00049 / W x 100)
+  { resultKey: "free_acid_percent",     label: "Free Acid (as H2SO4)",       unit: "%",  rawInputs: ["free_acid_ml", "free_acid_f", "free_acid_m"] },
   { resultKey: "ash_percent",           label: "Ash Content",                unit: "%",  rawInputs: ["ash_m1", "ash_m"] },
   { resultKey: "mesh100_pct",           label: "Mesh 150µ / 100 Mesh",       unit: "%",  rawInputs: ["mesh100_m", "mesh100_m_ret"] },
   { resultKey: "mesh200_pct",           label: "Mesh 75µ / 200 Mesh",        unit: "%",  rawInputs: ["mesh200_m", "mesh200_m_ret"] },
@@ -72,6 +74,9 @@ const RAW_INPUT_LABELS: Record<string, string> = {
   mesh325_m_ret: "325 Mesh retained m (g)",
   oil_mass_loss: "Oil mass loss (g)",
   oil_original_mass: "Oil original mass (g)",
+  free_acid_ml: "0.01 mol/L NaOH consumed (mL)",
+  free_acid_f: "Factor F of 0.01 mol/L NaOH",
+  free_acid_m: "Original sample mass (g)",
   heat_loss_temp: "Heat loss temp (°C)",
   heat_loss_crucible: "Empty crucible E (g)",
   heat_loss_m_before: "Sample taken W (g)",

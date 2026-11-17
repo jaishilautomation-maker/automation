@@ -305,13 +305,16 @@ export default function BatchAnalysisPage() {
     specs.filter(s => s.display_as_passing).map(s => s.parameter)
   );
 
-  // Which test-definition fields to render. Always show ALL fields regardless
-  // of whether a party is selected — the party selection only drives the live
-  // pass/fail spec badges, not field visibility.
-  // (Previously hid fields without a spec when a party was selected; changed
-  // so chemists can fill every parameter for Shakti/Rubber/any party even when
-  // only a subset has formal specs.)
-  const visibleDefs = testDefs;
+  // Which test-definition fields to render. Every field is shown for every
+  // party (the party only drives the pass/fail badges), with ONE explicit
+  // exception: a definition may carry only_parties / hide_parties. Used for
+  // Bridgestone (WE-10 / WE-15), whose Free Acid uses its own method and
+  // REPLACES the normal acidity fields (migration 078).
+  const visibleDefs = testDefs.filter(d => {
+    if (d.only_parties && d.only_parties.length > 0 && !d.only_parties.includes(partyCode)) return false;
+    if (d.hide_parties && d.hide_parties.length > 0 && d.hide_parties.includes(partyCode)) return false;
+    return true;
+  });
 
   // -------------------------------------------------------------------------
   // Resolve batch number on blur → find existing batch + analysis
@@ -408,7 +411,8 @@ export default function BatchAnalysisPage() {
         testDefs
           .filter(d => d.is_calculated && d.formula)
           .forEach(d => {
-            const result = evalFormula(d.formula!, next);
+            // Bridgestone free acid is a tiny % (0.00035) - keep 5 decimals
+            const result = evalFormula(d.formula!, next, undefined, d.test_key === "free_acid_percent" ? 5 : undefined);
             next[d.test_key] = result !== null ? String(result) : "";
           });
         return next;
@@ -481,9 +485,10 @@ export default function BatchAnalysisPage() {
         setResolvedBatchId(batchId);
       }
 
-      // Build test_results JSONB
+      // Build test_results JSONB (only the fields shown for the selected party,
+      // so switching party never saves values from hidden fields)
       const testResults: Record<string, number | string | boolean> = {};
-      testDefs.forEach(d => {
+      visibleDefs.forEach(d => {
         const raw = values[d.test_key];
         if (raw === "" || raw === undefined) return;
         if (d.input_type === "number") {

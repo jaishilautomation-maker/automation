@@ -232,6 +232,10 @@ export interface QcTestDefinition {
   is_active: boolean;
   /** Section header rendered above this field when it differs from the previous field's section_label */
   section_label: string | null;
+  /** Show this field ONLY when one of these party codes is selected (null = all parties). */
+  only_parties?: string[] | null;
+  /** Hide this field when one of these party codes is selected (e.g. normal acidity for Bridgestone). */
+  hide_parties?: string[] | null;
   /** Formula is interim / under review — show indicator to chemist */
   needs_review: boolean;
 }
